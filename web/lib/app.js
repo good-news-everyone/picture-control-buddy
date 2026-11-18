@@ -280,6 +280,7 @@ transfer = setupTransfer({ state, panel, renderCurrent, setStatus,
 
 setStatus(t("Drop a NEF or DNG"));
 pushHist();              // base snapshot of the new profile for Ctrl+Z
+transfer.importFromUrl(); // the ?np3= share parameter, if any
 
 // For the end-to-end tests (EF) and the following parts: the state and entry points.
 window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, blendingView, gradingView, transfer, beforeAfter };

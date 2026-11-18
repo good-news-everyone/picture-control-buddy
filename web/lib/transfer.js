@@ -6,13 +6,33 @@
 // of an unmodified profile (official samples store the real editor points), so the base control
 // is the result at 100%. The naming rule is as in the panel: the "-<percent>" suffix is added
 // only at strength != 100%.
+// Share link: the serialized NP3 bytes (a few hundred) are base64url-encoded into the ?np3=
+// query parameter, so a profile is shared by copying the URL. GitHub Pages serves the page
+// regardless of the parameter; the decode happens here, on the client.
 import { t } from "./i18n.js";
 import { deserialize, serialize } from "./np3.js";
 import { scaled } from "./strength.js";
 
+// base64url without padding: URL-safe, and %3D escapes are avoided
+export function bytesToB64url(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+export function b64urlToBytes(s) {
+  const b64 = s.replaceAll("-", "+").replaceAll("_", "/");
+  const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset = null }) {
   const importBtn = document.getElementById("import");
   const exportBtn = document.getElementById("export");
+  const shareBtn = document.getElementById("share");
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".np3,.NP3";
@@ -22,6 +42,7 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
   importBtn.disabled = false;
   importBtn.removeAttribute("title");
   exportBtn.removeAttribute("title");
+  shareBtn.removeAttribute("title");
   importBtn.addEventListener("click", () => input.click());
   input.addEventListener("change", () => {
     const f = input.files[0];
@@ -29,19 +50,40 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
     if (f) importFile(f);
   });
 
+  function applyControl(control) {
+    state.control = control;       // only after a successful parse
+    state.strength = 100;
+    state.nameValid = true;
+    panel.refresh();
+    renderCurrent();
+    onReset?.();                   // an NP3 import resets the edit history (Ctrl+Z)
+  }
+
   async function importFile(file) {
     try {
       const control = deserialize(await file.arrayBuffer());
-      state.control = control;       // only after a successful parse
-      state.strength = 100;
-      state.nameValid = true;
-      panel.refresh();
-      renderCurrent();
-      onReset?.();                   // an NP3 import resets the edit history (Ctrl+Z)
+      applyControl(control);
       setStatus(t("Imported: {name}", { name: control.name }));
     } catch (e) {
       setStatus(t("Import failed: {error}", { error: e.message }));
     }
+  }
+
+  /** Applies the ?np3= share parameter, if present. Called once at startup (app.js). */
+  function importFromUrl() {
+    const param = new URLSearchParams(location.search).get("np3");
+    if (!param) return;
+    try {
+      const control = deserialize(b64urlToBytes(param));
+      applyControl(control);
+      setStatus(t("Imported from link: {name}", { name: control.name }));
+    } catch (e) {
+      setStatus(t("Link import failed: {error}", { error: e.message }));
+    }
+    // the parameter has been consumed — keep the address bar tidy
+    const url = new URL(location.href);
+    url.searchParams.delete("np3");
+    history.replaceState(null, "", url);
   }
 
   function finalControl() {
@@ -58,7 +100,9 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
   function updateExport() {
     const ok = state.nameValid !== false;
     exportBtn.disabled = !ok;
+    shareBtn.disabled = !ok;
     exportBtn.title = ok ? "" : t("Set a valid NP3 name (1–19 ASCII) to export");
+    shareBtn.title = exportBtn.title;
   }
 
   function exportNow() {
@@ -80,7 +124,21 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
     }
   }
   exportBtn.addEventListener("click", exportNow);
+
+  async function shareNow() {
+    try {
+      const link = new URL(location.href);
+      link.search = "";
+      link.hash = "";
+      link.searchParams.set("np3", bytesToB64url(serialize(finalControl())));
+      await navigator.clipboard.writeText(link.toString());
+      setStatus(t("Link copied: {name}", { name: finalName() }));
+    } catch (e) {
+      setStatus(t("Share failed: {error}", { error: e.message }));
+    }
+  }
+  shareBtn.addEventListener("click", shareNow);
   updateExport();
 
-  return { importFile, exportNow, updateExport };
+  return { importFile, exportNow, shareNow, importFromUrl, updateExport };
 }

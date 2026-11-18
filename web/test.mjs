@@ -936,6 +936,50 @@ try {
         `8 errors: a corrupt RAW keeps the frame and the profile ("${err.rawStatus}")`);
     }
 
+    // --- share link: a profile travels in the ?np3= URL parameter ---
+    {
+      // the Copy link button: the clipboard is stubbed, only the URL is captured
+      const shared = await page.evaluate(async () => {
+        window.__link = null;
+        navigator.clipboard.writeText = (s) => { window.__link = s; return Promise.resolve(); };
+        document.getElementById("share").click();
+        await new Promise((r) => setTimeout(r, 300));
+        return { link: window.__link, status: document.getElementById("status").textContent };
+      });
+      const sharedBytes = new Uint8Array(await readFile(
+        path.join(HERE, "golden/np3", "out__fit4__NIKON__CUSTOMPC__PICCON01.NP3")));
+      const expNow = await exportBytes();
+      const b64 = Buffer.from(expNow).toString("base64url");
+      report(shared.link && shared.link.includes(`np3=${b64}`)
+          && shared.status.startsWith("Link copied"),
+        `8 share: Copy link puts the NP3 into ?np3= ("${shared.status}")`);
+      // the link opens the profile on a fresh page
+      await page.goto(`http://127.0.0.1:${port}/web/index.html?np3=${b64}`);
+      await page.waitForFunction("window.__np3app", { timeout: 120000, polling: 200 });
+      await page.waitForFunction(
+        `window.__np3app.state.status.startsWith("Imported from link")`,
+        { timeout: 15000, polling: 100 });
+      const fromLink = await page.evaluate(() => ({
+        control: window.__np3app.state.control,
+        search: location.search,
+      }));
+      report(JSON.stringify(fromLink.control) === JSON.stringify(deserialize(expNow))
+          && !fromLink.search.includes("np3"),
+        `8 share: ?np3= opens the profile, the parameter is consumed (${fromLink.control.name})`);
+      // a corrupt parameter does not break the page
+      await page.goto(`http://127.0.0.1:${port}/web/index.html?np3=not-base64!!`);
+      await page.waitForFunction("window.__np3app", { timeout: 120000, polling: 200 });
+      const badLink = await page.evaluate(() =>
+        document.getElementById("status").textContent);
+      report(badLink.startsWith("Link import failed"),
+        `8 share: a corrupt ?np3= is rejected ("${badLink}")`);
+      // back to the working page for the remaining checks
+      await page.goto(`http://127.0.0.1:${port}/web/index.html`);
+      await page.waitForFunction(
+        `window.__np3app && window.__np3app.state.status === "Drop a NEF or DNG"`,
+        { timeout: 120000, polling: 200 });
+    }
+
     // --- criterion 11: statics by GET only, no request bodies ---
     report(netBad.length === 0,
       `8 locality: static resources by GET only${netBad.length ? " — " + netBad.join("; ") : ""}`);

@@ -6,7 +6,7 @@ Draft from 2026-11-16. A separate specification of the first interface iteration
 
 The second package of look edits (UI-2). Item statuses are in the log of [ui-manual-mvp-plan.md](ui-manual-mvp-plan.md) (section 5, entry "UI-2 interface edits"); marked as they are completed.
 
-1. The Import/Export buttons move under the frame info (`#info`), not under the drop zone.
+1. The file-transfer buttons — **Import NP3**, **Export NP3** and **Copy link** — are under the frame info (`#info`), not under the drop zone, stacked vertically in one column of equal width, each with an icon (Lucide, ISC) before the label.
 2. The "Before/after" button is removed; instead, a caption in the viewer area that switching works by holding space. The space behavior (and the "Before — neutral"/"After — NP3" captions) is kept.
 3. The Saturation (Basic), Color Blender and Color Grading sliders get gradient tracks: the global Saturation is grey -> rainbow, saturation grows along the whole track (the grey section is noticeable); the blender Hue is only the spectrum of the current color (±55 degrees around it, not the whole circle); the blender Saturation is from grey to the row color; Luminance is black -> color -> white; the saturation of all gradients is muted (-30 from full). The implementation is a CSS track gradient (`--track` on `input[type=range].grad`).
 4. Color Grading switches to the HSL / Color layout: the **HSL / Color** toggle group first, then the **Shadows / Midtones / Highlights** zone selector and a color preview window; HSL is rows of Hue/Saturation/Luminance of the selected zone (the Saturation/Luminance gradients are tinted with the selected Hue); Color is a single wheel (dragging sets Hue+Saturation) with a "Hue … Sat …" readout and Luminance below it; **Blending and Balance** (shared NP3 fields) — in both modes, one row each, without duplicate labels and zone names. The Point Color tab is not implemented.
@@ -21,7 +21,7 @@ The second package of look edits (UI-2). Item statuses are in the log of [ui-man
 
 ## Goal
 
-The user opens the application in a browser, loads their RAW, opens a finished NP3 or starts from a new profile, changes sliders and the curve, adjusts strength and immediately sees the approximate result. The current profile can be downloaded as an NP3 and imported back.
+The user opens the application in a browser, loads their RAW, opens a finished NP3 or starts from a new profile, changes sliders and the curve, adjusts strength and immediately sees the approximate result. The current profile can be downloaded as an NP3 and imported back, or shared with a link: the serialized profile travels in the page URL.
 
 **All computation runs locally in the browser.** The server only serves the application statics, models and WebAssembly. The application has no upload, render, import or export API: files are not sent to the server, Python and NX Studio are not used while working.
 
@@ -69,7 +69,7 @@ Loading another RAW replaces only the image and keeps the profile and strength. 
 
 The workspace consists of three parts:
 
-- **Files:** RAW loading, the selected file name, frame info, NP3 import, NP3 export (buttons under the frame info) and the processing status.
+- **Files:** RAW loading, the selected file name, frame info, NP3 import, NP3 export and the share link (buttons under the frame info, stacked in one column) and the processing status.
 - **Viewer:** a single image of the current RAW with the resulting NP3, fitted into the available area; a caption that comparing with the neutral works by holding space. The last successful frame stays visible during recomputation and on an error of the next RAW.
 - **Profile:** collapsible groups: Profile (NP3 name and strength), Basic, Curve, Details, Color Blender, Color Grading and the curve editor; by default only Profile and Basic are open. Every slider shows its numeric value and a label; it is keyboard-accessible.
 
@@ -189,6 +189,8 @@ Shown as:
 
 Import without edits at 100% strength followed by an export must give the original file byte for byte for all samples that pass the byte-exact `test_np3.py`. No extra automatic corrections are applied.
 
+**Copy link** serializes the final profile (with strength applied, as in the export) into the `?np3=` query parameter of the page URL as base64url without padding, and copies the URL to the clipboard. An NP3 is a few hundred bytes (392 without a comment), a typical link is ~600 characters. Opening a link with `?np3=` applies the profile as an import (strength 100%, the edit history resets); the parameter is then removed from the address bar. A corrupt parameter is rejected with a message, the current profile does not change. The page is served by a static server, the parameter is not processed server-side: the whole decode happens in the page's JavaScript.
+
 ## Errors and limitations
 
 - The supported formats are those the existing `web/raw.wasm` reads; known NEF High Efficiency and non-Bayer DNGs are rejected with a clear error.
@@ -213,3 +215,4 @@ Import without edits at 100% strength followed by an export must give the origin
 11. **Locality:** during RAW/NP3 loading, edits, rendering and export there are no requests with user data; the application works from a static server without any `/api`.
 12. **Reference match:** `python3 test_np3.py` and `node web/test.mjs` pass, including the NP3, profile LUT, detail and full-render levels from [web-tests.md](web-tests.md).
 13. **Edit history:** Ctrl+Z successively reverts finished edits to the start of the session, keeps up to 20 states in sessionStorage; changing the RAW and importing an NP3 reset the history.
+14. **Share link:** Copy link puts the final profile byte-exact into `?np3=` of the URL and copies it to the clipboard; opening the link applies the profile like an import (strength 100%) and drops the parameter from the address bar; a corrupt parameter gives a clear message without changing the profile.
