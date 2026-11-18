@@ -5,8 +5,11 @@ Run: python3 test_np3.py
 import glob
 import os
 import sys
+import tempfile
 
+import make_pack
 import np3
+import strength
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SAMPLES = sorted(glob.glob(os.path.join(HERE, "third_party/samples/*.NP3")))
@@ -45,7 +48,43 @@ def main() -> int:
         print(f"{'ok  ' if ok else 'FAIL'} spline {os.path.basename(path):32}")
     print(f"spline: {spline_fails} failures")
     fails += spline_fails
+    fails += probe_checks()
+    fails += strength_checks()
     return 1 if fails else 0
+
+
+def probe_checks() -> int:
+    """make_pack: every generated probe round-trips byte-exact and has a valid name."""
+    fails = 0
+    for tag, meta, ctrl in make_pack.probes():
+        data = np3.serialize(ctrl)
+        back = np3.serialize(np3.deserialize(data))
+        ok = back == data and back and 1 <= len(ctrl.name) <= 19 and ctrl.name.isascii()
+        fails += not ok
+        if not ok:
+            print(f"FAIL probe {tag}")
+    print(f"probes: {len(make_pack.probes()) - fails}/{len(make_pack.probes())} ok")
+    return fails
+
+
+def strength_checks() -> int:
+    """strength.save: output names fit 19 chars with the -{percent} suffix."""
+    fails = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        strength.HERE = tmp
+        base = np3.Control(name="A" * 19)
+        for percent, slot in ((30, 1), (100, 2)):
+            ctrl, path = strength.save(base, "TEST", percent, slot)
+            label = f"-{percent}"
+            want = base.name[:19 - len(label)] + label
+            data = open(path, "rb").read()
+            ok = (ctrl.name == want and len(ctrl.name) <= 19
+                  and np3.serialize(np3.deserialize(data)) == data)
+            fails += not ok
+            if not ok:
+                print(f"FAIL strength.save {percent}: {ctrl.name!r} != {want!r}")
+    print(f"strength.save: {'ok' if not fails else f'{fails} failures'}")
+    return fails
 
 
 if __name__ == "__main__":
