@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local data: raw photos, sweep exports, aligned pairs, fitting outputs.
+# Not part of the repository; the fitting pipeline needs them locally.
+_local/
+
+# Working outputs of the fitting pipeline (profiles, packs, reports)
+out/
+
+# NX Studio / Lightroom renders used as fitting targets
+renders/
+
+# Web
+web/node_modules/
+web/raw/target/
+data/vignette/

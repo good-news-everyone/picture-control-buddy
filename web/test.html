@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reference tests of the browser copy</title>
+<style>
+  body { background: #1e1e1e; color: #d6d6d6; font: 13px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; }
+  .ok { color: #9cc79a; } .bad { color: #e07a6a; } .dim { color: #8c8c8c; }
+</style>
+</head>
+<body>
+<pre id="log">loading…</pre>
+<script type="module">
+// Runs the web/golden/manifest.json manifest against the Python fixtures made by make_golden.py.
+// Metrics (not verdicts) are written to window.__result, at the end window.__done = true.
+// Level pairs: spec/web-tests.md. Launched by web/test.mjs, there is no interface.
+import { initRaw } from "./lib/raw.js";
+import { loadModel, neutralGLSL, program, texture, bindModel, uploadLinear } from "./lib/neutral.js";
+import { fetchDetail, applyDetailGL } from "./lib/detail.js";
+import { deserialize } from "./lib/np3.js";
+import { loadModel as loadProfile } from "./lib/profile.js";
+import { srgbToLab, de2000 } from "./lib/color.js";
+import { Renderer } from "./lib/renderer.js";
+
+const log = (cls, text) => {
+  const el = document.getElementById("log");
+  el.insertAdjacentHTML("beforeend", `<span class="${cls}">${text}</span>\n`);
+};
+const fail = (text) => log("bad", "ERROR " + text);
+
+async function f32(url) {
+  return new Float32Array(await (await fetch(url)).arrayBuffer());
+}
+
+async function pngBytes(url) {
+  const im = new Image();
+  im.src = url;
+  await im.decode();
+  const c = new OffscreenCanvas(im.width, im.height).getContext("2d", { colorSpace: "srgb" });
+  c.drawImage(im, 0, 0);
+  return c.getImageData(0, 0, im.width, im.height).data;
+}
+
+const FRAG = `#version 300 es
+precision highp float; precision highp sampler2D;
+uniform sampler2D img; uniform ivec2 size;
+out vec4 o;
+// neutralGLSL goes here: vignetting and the devmodel neutral with the uniform model from bindModel
+__NEUTRAL_GLSL__
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.x, float(size.y) - gl_FragCoord.y);
+  o = vec4(neutral(vignette(texelFetch(img, p, 0).rgb, p, size)), 1.0);
+}`;
+
+async function main() {
+  const man = await (await fetch("golden/manifest.json")).json();
+  const result = { synthetic: [], frames: [], errors: [], detail: [], render7: [] };
+
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl2", { antialias: false });
+  if (!gl) throw new Error("WebGL2 required");
+  if (!gl.getExtension("EXT_color_buffer_float"))
+    throw new Error("EXT_color_buffer_float is required for the synthetic float readback");
+  const model = await loadModel();
+  const prog = program(gl, FRAG.replace("__NEUTRAL_GLSL__", neutralGLSL(model)));
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const texImg = texture(gl, 0, gl.TEXTURE_2D);
+  bindModel(gl, prog, model, 1);
+  gl.uniform1i(U("img"), 0);
+
+  // An FBO with an RGBA32F texture to read the result without 8-bit quantization
+  const fboTex = texture(gl, 2, gl.TEXTURE_2D);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  /** Renders the current texImg (w x h) with vigAB into target: fbo (float) or the canvas backbuffer. */
+  function draw(w, h, ab, toFbo) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, toFbo ? fbo : null);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, fboTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+    gl.uniform2f(U("vigAB"), ab[0], ab[1]);
+    gl.uniform2i(U("size"), w, h);
+    gl.viewport(0, 0, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // ---- level 2: neutral on the synthetic grid of linear colors ----
+  for (const s of man.synthetic) {
+    const x = await f32("golden/" + s.in);
+    const want = await f32("golden/" + s.out);
+    uploadLinear(gl, 0, texImg, s.w, s.h, x);
+    draw(s.w, s.h, s.vignette, true);
+    const got = new Float32Array(s.w * s.h * 4);
+    gl.readPixels(0, 0, s.w, s.h, gl.RGBA, gl.FLOAT, got);
+    let sum = 0, max = 0;
+    const n = s.w * s.h * 3;
+    for (let y = 0; y < s.h; y++) {
+      const ro = (s.h - 1 - y) * s.w * 4, fo = y * s.w * 3;   // readPixels is bottom-up; want is dense RGB
+      for (let px = 0; px < s.w; px++)
+        for (let c = 0; c < 3; c++) {
+          const d = Math.abs(got[ro + px * 4 + c] - want[fo + px * 3 + c]);
+          sum += d; if (d > max) max = d;
+        }
+    }
+    const mean = sum / n;
+    result.synthetic.push({ name: s.name, mean, max });
+    log(max <= 0.5 / 255 ? "ok" : "bad", `synthetic ${s.name}: mean ${(mean * 255).toFixed(4)} max ${(max * 255).toFixed(4)} (tolerance 0.02/0.5 of 255)`);
+  }
+
+  // ---- level 2a: neutral on frames, RAW -> screen ----
+  const raw = await initRaw(await fetch("raw.wasm"));
+  for (const f of man.frames) {
+    const bytes = new Uint8Array(await (await fetch("../" + f.path)).arrayBuffer());
+    let img;
+    try { img = raw.develop(bytes, man.long); }
+    catch (e) { result.frames.push({ key: f.key, error: e.code || String(e) }); fail(`${f.key}: ${e.code || e}`); continue; }
+    if (img.w !== f.w || img.h !== f.h) {
+      result.frames.push({ key: f.key, error: `size ${img.w}x${img.h} vs ${f.w}x${f.h}` });
+      fail(`${f.key}: size ${img.w}x${img.h} vs fixture ${f.w}x${f.h}`);
+      continue;
+    }
+    canvas.width = f.w; canvas.height = f.h;
+    uploadLinear(gl, 0, texImg, f.w, f.h, img.rgb);
+    draw(f.w, f.h, f.vignette, false);
+    const got = new Uint8Array(f.w * f.h * 4);
+    gl.readPixels(0, 0, f.w, f.h, gl.RGBA, gl.UNSIGNED_BYTE, got);
+    const ref = await pngBytes("golden/" + f.png);
+    let sum = 0, max = 0; const hist = new Uint32Array(256);
+    for (let y = 0; y < f.h; y++) {
+      const ro = (f.h - 1 - y) * f.w * 4, fo = y * f.w * 4;   // readPixels is bottom-up
+      for (let i = 0; i < f.w * 4; i += 4)
+        for (let c = 0; c < 3; c++) {
+          const d = Math.abs(got[ro + i + c] - ref[fo + i + c]);
+          sum += d; if (d > max) max = d; hist[d]++;
+        }
+    }
+    const N = f.w * f.h;
+    let acc = 0, p99 = 0;
+    for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= 0.99 * N) { p99 = i; break; } }
+    const mean = sum / N / 3;
+    result.frames.push({ key: f.key, mean, p99, max });
+    log(mean <= 0.3 && p99 <= 1 && max <= 12 ? "ok" : "bad",
+      `frame ${f.key}: mean ${mean.toFixed(3)} p99 ${p99} max ${max} (tolerance 0.3/1/12 of 255)`);
+  }
+
+  // ---- level 6: Clarity and sharpening on neutral cutouts ----
+  const det = await fetchDetail();
+  for (const e of man.detail || []) {
+    const bytes = await pngBytes("golden/" + e.in);
+    const c = deserialize(new Uint8Array(await (await fetch("golden/" + e.np3)).arrayBuffer()));
+    const got = applyDetailGL(gl, det, bytes, e.w, e.h, c, { scale: e.scale });
+    const ref = await pngBytes("golden/" + e.out);
+    let sum = 0, max = 0;
+    const n = e.w * e.h * 3;
+    for (let y = 0; y < e.h; y++) {
+      const ro = y * e.w * 4, fo = y * e.w * 4;   // the detail passes do not flip: readback row 0 = PNG row 0
+      for (let px = 0; px < e.w; px++)
+        for (let ch = 0; ch < 3; ch++) {
+          const d = Math.abs(got[ro + px * 4 + ch] * 255 - ref[fo + px * 4 + ch]);
+          sum += d; if (d > max) max = d;
+        }
+    }
+    const mean = sum / n;
+    result.detail.push({ key: e.key, mean, max });
+    log(mean <= man.tolerances.detail.mean && max <= man.tolerances.detail.max ? "ok" : "bad",
+      `detail ${e.key}: mean ${mean.toFixed(3)} max ${max} of 255 (tolerance ${man.tolerances.detail.mean}/${man.tolerances.detail.max})`);
+  }
+
+  // ---- level 7: the whole render (RAW -> neutral -> profile -> detail), dE2000 by regions ----
+  const profMeta = await (await fetch("model/profile.json")).json();
+  const profBin = await (await fetch("model/profile.bin")).arrayBuffer();
+  const renderer = new Renderer(gl, { dev: model, profile: loadProfile(profMeta, profBin), detail: det }, raw);
+  const REGIONS = man.render7_regions || { skin: 1, green: 5, sky: 7 };
+  for (const e of man.render7 || []) {
+    const bytes = new Uint8Array(await (await fetch("../" + e.path)).arrayBuffer());
+    await renderer.setFrame(bytes, { long: man.long });
+    const c = deserialize(new Uint8Array(await (await fetch("golden/" + e.np3)).arrayBuffer()));
+    renderer.setProfile(c);
+    const got = renderer.render({ vignette: e.vignette });
+    // invariant: a repeated render with only the profile changed does not touch develop/neutral
+    const c2 = { ...c, saturation: Math.max(-100, Math.min(100, c.saturation + 5)) };
+    renderer.setProfile(c2);
+    renderer.render({ vignette: e.vignette });
+    renderer.setProfile(c);
+    const ref = await pngBytes("golden/" + e.out);
+    const mask = await pngBytes("golden/" + e.mask);      // grayscale: label x 20 in every channel
+    const n = e.w * e.h;
+    const aRgb = new Float64Array(n * 3), bRgb = new Float64Array(n * 3);
+    for (let i = 0, p = 0; i < n; i++, p += 3) {
+      aRgb[p] = got[i * 4]; aRgb[p + 1] = got[i * 4 + 1]; aRgb[p + 2] = got[i * 4 + 2];
+      bRgb[p] = ref[i * 4] / 255; bRgb[p + 1] = ref[i * 4 + 1] / 255; bRgb[p + 2] = ref[i * 4 + 2] / 255;
+    }
+    const d = de2000(srgbToLab(aRgb), srgbToLab(bRgb));
+    const regions = {}, sums = {}, cnts = {};
+    for (const [name, id] of Object.entries(REGIONS)) { sums[name] = 0; cnts[name] = 0; }
+    for (let i = 0; i < n; i++) {
+      const m = mask[i * 4];
+      for (const [name, id] of Object.entries(REGIONS))
+        if (m === id * 20) { sums[name] += d[i]; cnts[name]++; }
+    }
+    let worst = 0;
+    for (const name of Object.keys(REGIONS)) {
+      regions[name] = cnts[name] >= 400 ? sums[name] / cnts[name] : null;   // regions without pixels are not checked
+      if (regions[name] !== null) worst = Math.max(worst, regions[name]);
+    }
+    result.render7.push({ key: e.key, regions, worst });
+    const parts = Object.entries(regions).filter(([, v]) => v !== null)
+      .map(([k, v]) => `${k} ${v.toFixed(3)}`).join(" ");
+    log(worst <= man.tolerances.render7.mean ? "ok" : "bad", `render7 ${e.key}: ${parts} (tolerance ${man.tolerances.render7.mean})`);
+  }
+  result.render7_invariant = { develops: renderer.stats.develops, neutrals: renderer.stats.neutrals,
+                               cases: (man.render7 || []).length };
+
+  // ---- level 1a: decoding rejections in the browser ----
+  for (const e of man.errors) {
+    const r = await fetch("../" + e.path);
+    if (!r.ok) { result.errors.push({ path: e.path, want: e.code, got: null, ok: true, skip: true }); continue; }
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    let code = null;
+    try { raw.develop(bytes, man.long); } catch (err) { code = err.code || String(err); }
+    result.errors.push({ path: e.path, want: e.code, got: code, ok: code === e.code });
+    log(code === e.code ? "ok" : "bad", `error ${e.path}: code ${code}, expected ${e.code}`);
+  }
+
+  window.__result = result;
+}
+
+main().catch((e) => { fail(e.stack || e); window.__result = { fatal: String(e) }; })
+  .finally(() => { window.__done = true; log("dim", "done"); });
+</script>
+</body>
+</html>

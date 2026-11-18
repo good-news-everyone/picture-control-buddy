@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-i18n="Neutral render stand">Neutral render stand</title>
+<style>
+  /* A neutral grey around the frame: a colorful interface skews the color judgment. */
+  :root {
+    color-scheme: dark;
+    --bg: #262626; --panel: #1e1e1e; --line: #3a3a3a; --text: #d6d6d6; --dim: #8c8c8c;
+    --accent: #e6e6e6; --bad: #e07a6a; --ok: #9cc79a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: grid; grid-template-columns: 280px 1fr; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); padding: 14px; overflow: auto; }
+  h1 { font-size: 14px; margin: 0 0 10px; color: var(--accent); font-weight: 600; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+    margin: 18px 0 6px; font-weight: 600; }
+  button, select { font: inherit; color: var(--text); background: #2c2c2c; border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+  button:hover { border-color: #5a5a5a; }
+  button[aria-pressed="true"] { background: #e6e6e6; color: #111; border-color: #e6e6e6; }
+  .frames button { display: block; width: 100%; text-align: left; margin: 0 0 4px; }
+  .frames button small { color: var(--dim); float: right; }
+  .row { display: flex; gap: 4px; flex-wrap: wrap; }
+  label { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+  label select { min-width: 0; flex: 1; }
+  #drop { border: 1px dashed #555; border-radius: 6px; padding: 12px; text-align: center; color: var(--dim); cursor: pointer; }
+  #drop.over { border-color: var(--accent); color: var(--accent); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; font-variant-numeric: tabular-nums; }
+  dt { color: var(--dim); } dd { margin: 0; }
+  .bad { color: var(--bad); } .ok { color: var(--ok); }
+  main { position: relative; overflow: auto; display: grid; place-items: center; }
+  canvas { display: block; max-width: calc(100% - 32px); max-height: calc(100vh - 32px); cursor: zoom-in; }
+  canvas.full { max-width: none; max-height: none; cursor: zoom-out; image-rendering: pixelated; }
+  #status { position: absolute; top: 10px; left: 12px; color: var(--dim); }
+  #mode { position: absolute; top: 10px; right: 12px; color: var(--accent); background: rgba(0,0,0,.45);
+    padding: 2px 8px; border-radius: 4px; }
+  .hint { color: var(--dim); font-size: 12px; }
+  @media (max-width: 720px) { body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<aside>
+  <h1 data-i18n="Neutral render stand">Neutral render stand</h1>
+  <div class="hint" data-i18n="RAW is unpacked and rendered on this machine: WebAssembly (rawler) and a devmodel shader. The server only serves files.">
+    RAW is unpacked and rendered on this machine: WebAssembly (rawler) and a devmodel shader. The server only serves files.</div>
+
+  <h2 data-i18n="Frames with render.py reference">Frames with render.py reference</h2>
+  <div class="frames" id="frames"><span class="hint">no web/ref/index.json</span></div>
+
+  <h2 data-i18n="Your file">Your file</h2>
+  <div id="drop"><span data-i18n="Drop a NEF or DNG">Drop a NEF or DNG</span><br><span data-i18n="or click to choose">or click to choose</span></div>
+  <input type="file" id="file" accept=".nef,.NEF,.dng,.DNG" hidden>
+
+  <h2 data-i18n="View">View</h2>
+  <div class="row" id="modes">
+    <button data-mode="0" aria-pressed="true"><span data-i18n="Browser">Browser</span> <kbd>1</kbd></button>
+    <button data-mode="1"><span data-i18n="Reference">Reference</span> <kbd>2</kbd></button>
+    <button data-mode="2"><span data-i18n="Difference">Difference</span> <kbd>3</kbd></button>
+  </div>
+  <label><span data-i18n="difference gain">difference gain</span>
+    <select id="amp"><option>4</option><option selected>8</option><option>16</option><option>32</option></select></label>
+  <div class="hint" data-i18n="Space — hold reference. Click image — 100%.">Space — hold reference. Click image — 100%.</div>
+
+  <h2 data-i18n="Processing">Processing</h2>
+  <label><input type="checkbox" id="vig" checked> <span data-i18n="vignette (a, b from reference)">vignette (a, b from reference)</span></label>
+  <label><input type="checkbox" id="lutOn" checked> <span data-i18n="residual development LUT">residual development LUT</span></label>
+  <label><span data-i18n="size">size</span> <select id="long"><option value="1600" selected>1600 px (render.py)</option><option value="0" data-i18n="full">full</option></select></label>
+
+  <h2 data-i18n="Frame">Frame</h2>
+  <dl id="info"><dt>—</dt><dd></dd></dl>
+
+  <h2 data-i18n="Against reference">Against reference</h2>
+  <dl id="cmp"><dt>—</dt><dd></dd></dl>
+</aside>
+<main>
+<canvas id="c" width="16" height="16"></canvas>
+<div id="status" data-i18n="loading model…">loading model…</div>
+<div id="mode"></div>
+</main>
+
+<script type="module">
+// Stand: the browser neutral against the render.py reference. An internal tool, not the UI (spec/ui.md).
+import { loadModel, neutralGLSL, program, texture, bindModel, uploadLinear } from "./lib/neutral.js";
+import { createRawLoader } from "./lib/loader.js";
+import { t, applyI18n } from "./lib/i18n.js";
+
+const $ = (id) => document.getElementById(id);
+applyI18n();
+const canvas = $("c");
+const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true, antialias: false });
+if (!gl) throw new Error("WebGL2 required");
+gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+
+const state = { mode: 0, hold: false, img: null, refImage: null, entry: null, name: "", file: null, url: null };
+const model = await loadModel();
+const prog = program(gl, `#version 300 es
+precision highp float; precision highp sampler2D;
+uniform sampler2D img; uniform sampler2D ref;
+uniform int mode, hasRef; uniform float amp; uniform ivec2 size;
+out vec4 o;
+${neutralGLSL(model)}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.x, float(size.y) - gl_FragCoord.y);
+  vec3 ours = neutral(vignette(texelFetch(img, p, 0).rgb, p, size));
+  vec3 r = hasRef == 1 ? texelFetch(ref, p, 0).rgb : vec3(0.5);
+  o = vec4(mode == 0 ? ours : mode == 1 ? r : clamp(0.5 + (ours - r) * amp, 0.0, 1.0), 1);
+}`);
+const U = (name) => gl.getUniformLocation(prog, name);
+const texImg = texture(gl, 0, gl.TEXTURE_2D);
+const texRef = texture(gl, 2, gl.TEXTURE_2D);
+bindModel(gl, prog, model, 1);
+gl.uniform1i(U("img"), 0); gl.uniform1i(U("ref"), 2);
+
+function draw() {
+  if (!state.img) return;
+  const mode = state.hold ? 1 : state.mode;
+  const useRef = !!state.refImage;
+  gl.uniform1i(U("mode"), useRef ? mode : 0);
+  gl.uniform1i(U("hasRef"), useRef ? 1 : 0);
+  gl.uniform1i(U("devUseLut"), $("lutOn").checked ? 1 : 0);
+  const ab = $("vig").checked && state.entry ? state.entry.vignette : [0, 0];
+  gl.uniform2f(U("vigAB"), ab[0], ab[1]);
+  gl.uniform1f(U("amp"), +$("amp").value);
+  gl.uniform2i(U("size"), state.img.w, state.img.h);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  $("mode").textContent = !useRef ? t("browser (no reference)") :
+    [t("browser"), t("render.py reference"), t("difference x{amp} (gray = match)", { amp: $("amp").value })][mode];
+}
+
+// ---------- comparison with the reference ----------
+function compare() {
+  const dl = $("cmp");
+  if (!state.refImage) { dl.innerHTML = `<dt>${t("no reference")}</dt><dd></dd>`; return; }
+  const { w, h } = state.img;
+  if (state.refImage.width !== w || state.refImage.height !== h) {
+    dl.innerHTML = `<dt class="bad">${t("size")}</dt><dd class="bad">${w}×${h} vs ${state.refImage.width}×${state.refImage.height}</dd>`; return; }
+  const keep = state.mode, hold = state.hold;
+  state.mode = 0; state.hold = false; draw();
+  const ours = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, ours);
+  state.mode = keep; state.hold = hold; draw();
+  const c2 = new OffscreenCanvas(w, h).getContext("2d", { colorSpace: "srgb" });
+  c2.drawImage(state.refImage, 0, 0);
+  const ref = c2.getImageData(0, 0, w, h).data;
+  let sum = 0, max = 0, over2 = 0; const hist = new Uint32Array(256);
+  for (let y = 0; y < h; y++) {
+    const ro = (h - 1 - y) * w * 4, fo = y * w * 4;      // readPixels is bottom-up
+    for (let x = 0; x < w; x++) {
+      let m = 0;
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(ours[ro + x * 4 + c] - ref[fo + x * 4 + c]);
+        sum += d; if (d > m) m = d;
+      }
+      hist[m]++; if (m > 2) over2++; if (m > max) max = m;
+    }
+  }
+  const N = w * h; let acc = 0, p99 = 0;
+  for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= 0.99 * N) { p99 = i; break; } }
+  const mean = sum / N / 3;
+  const cls = mean < 0.5 ? "ok" : mean < 2 ? "" : "bad";
+  dl.innerHTML = `<dt>${t("mean |Δ|")}</dt><dd class="${cls}">${mean.toFixed(2)} ${t("of 255")}</dd>
+    <dt>${t("99% pixels")}</dt><dd>≤ ${p99}</dd><dt>${t("maximum")}</dt><dd>${max}</dd>
+    <dt>${t("|Δ| > 2")}</dt><dd>${(100 * over2 / N).toFixed(2)}%</dd>`;
+}
+
+// ---------- frame loading: develop in a Worker (lib/loader.js), plan section 4 ----------
+const status = (s) => { $("status").textContent = s; };
+
+// Post-processing of a ready frame: the GPU texture is overwritten (the old storage is
+// released by texImage2D), the previous state.img and its ArrayBuffer go to the GC.
+async function applyImage(st) {
+  const img = st.image;
+  state.img = img; state.name = st.name;
+  canvas.width = img.w; canvas.height = img.h;
+  uploadLinear(gl, 0, texImg, img.w, img.h, img.rgb);
+  state.refImage = null;
+  if (state.entry && +$("long").value === 1600) {
+    const im = new Image(); im.src = `ref/${encodeURIComponent(state.name)}.png`;
+    try {
+      await im.decode();
+      state.refImage = im;
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texRef);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    } catch { /* no reference */ }
+  }
+  const t2 = performance.now();
+  draw(); gl.finish();
+  const t3 = performance.now();
+  const i = st.info;
+  const warn = st.warn ? `<dt class="bad">${t("warning")}</dt><dd class="bad">${t("camera is not Nikon Z f: neutral may deviate")}</dd>` : "";
+  $("info").innerHTML = `<dt>${t("file")}</dt><dd>${st.name}</dd><dt>${t("camera")}</dt><dd>${i.make} ${i.model}${i.dng ? ", DNG" : ""}</dd>
+    <dt>${t("sensor")}</dt><dd>${i.sensor.join("×")}</dd><dt>${t("frame")}</dt><dd>${img.w}×${img.h} (÷${i.k})</dd>
+    <dt>WB</dt><dd>${i.wb.map((x) => x.toFixed(3)).join(" ")}</dd><dt>${t("black/white")}</dt><dd>${i.black} / ${i.white}</dd>
+    <dt>${t("vignette a, b")}</dt><dd>${state.entry ? state.entry.vignette.map((x) => x.toFixed(3)).join(", ") : t("not estimated")}</dd>
+    ${warn}
+    <dt>${t("shader")}</dt><dd>${(t3 - t2).toFixed(0)} ms</dd>`;
+  status("");
+  compare();
+}
+
+const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => {
+  if (st.type === "busy") status(t("unpacking {name}…", { name: st.name }));
+  else if (st.type === "error") status(`${st.name}: ${t(st.code)}${st.detail ? " — " + st.detail : ""}`);
+  else if (st.type === "ready") applyImage(st);
+}});
+
+async function openUrl(name, entry) {
+  state.url = entry.raw; state.file = null; state.entry = entry;
+  status(t("loading {name}…", { name }));
+  const r = await fetch("../" + entry.raw);
+  if (!r.ok) { status(`${entry.raw}: ${r.status}`); return; }
+  const img = await loader.open(new Uint8Array(await r.arrayBuffer()), { name, long: +$("long").value });
+  for (const b of $("frames").children) b.setAttribute("aria-pressed", b.dataset.name === name);
+  return img;
+}
+
+// ---------- interface ----------
+const index = await fetch("ref/index.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+if (Object.keys(index).length) {
+  $("frames").innerHTML = "";
+  for (const [name, e] of Object.entries(index)) {
+    const b = document.createElement("button");
+    b.dataset.name = name;
+    b.innerHTML = `${name} <small>${e.raw.split("/")[0]}</small>`;
+    b.onclick = () => openUrl(name, e);
+    $("frames").append(b);
+  }
+}
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+$("file").onchange = async (ev) => { const f = ev.target.files[0]; if (f) openFile(f); };
+async function openFile(f) {
+  state.file = f; state.url = null;
+  state.entry = index[f.name] || null;                 // a known frame: take its reference and vignetting
+  const img = await loader.open(f, { long: +$("long").value });
+  for (const b of $("frames").children) b.setAttribute("aria-pressed", b.dataset.name === f.name);
+  return img;
+}
+for (const t2 of ["dragenter", "dragover"]) document.addEventListener(t2, (e) => { e.preventDefault(); drop.classList.add("over"); });
+for (const t2 of ["dragleave", "drop"]) document.addEventListener(t2, (e) => { e.preventDefault(); drop.classList.remove("over"); });
+document.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+
+function setMode(m) {
+  state.mode = m;
+  for (const b of $("modes").children) b.setAttribute("aria-pressed", +b.dataset.mode === m);
+  draw();
+}
+for (const b of $("modes").children) b.onclick = () => setMode(+b.dataset.mode);
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key >= "1" && e.key <= "3") setMode(+e.key - 1);
+  if (e.code === "Space" && !state.hold) { e.preventDefault(); state.hold = true; draw(); }
+});
+document.addEventListener("keyup", (e) => { if (e.code === "Space") { state.hold = false; draw(); } });
+$("amp").onchange = draw;
+$("vig").onchange = () => { draw(); compare(); };
+$("lutOn").onchange = () => { draw(); compare(); };
+$("long").onchange = () => {
+  if (state.file) openFile(state.file);
+  else if (state.url) { const e = Object.entries(index).find(([, v]) => v.raw === state.url); if (e) openUrl(e[0], e[1]); }
+};
+canvas.onclick = () => canvas.classList.toggle("full");
+
+status(t("pick a frame on the left or drop a RAW"));
+</script>
+</body>
+</html>

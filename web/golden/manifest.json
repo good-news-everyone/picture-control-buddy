@@ -1,0 +1,2047 @@
+{
+ "tolerances": {
+  "raw_dng": {
+   "max": 1.0,
+   "mean": 0.05
+  },
+  "raw_nef": {
+   "max": 16.0,
+   "mean": 6.0
+  },
+  "synthetic": {
+   "max": 0.00196078431372549,
+   "mean": 7.843137254901961e-05
+  },
+  "frames": {
+   "mean": 0.3,
+   "p99": 1,
+   "max": 12
+  },
+  "profile": {
+   "mean": 0.05,
+   "max": 0.5
+  },
+  "detail": {
+   "mean": 0.5,
+   "max": 8
+  },
+  "render7": {
+   "mean": 0.3
+  }
+ },
+ "long": 1600,
+ "raw": [
+  {
+   "key": "renders__lr_test__DSC_6550.NEF",
+   "path": "renders/lr_test/DSC_6550.NEF",
+   "w": 1512,
+   "h": 1008,
+   "dng": false,
+   "file": "raw/renders__lr_test__DSC_6550.NEF.f32.br"
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF",
+   "path": "renders/dev_sa/DSC_6474.NEF",
+   "w": 1008,
+   "h": 1512,
+   "dng": false,
+   "file": "raw/renders__dev_sa__DSC_6474.NEF.f32.br"
+  },
+  {
+   "key": "test1__DSC_5584.NEF",
+   "path": "test1/DSC_5584.NEF",
+   "w": 1008,
+   "h": 1512,
+   "dng": false,
+   "file": "raw/test1__DSC_5584.NEF.f32.br"
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF",
+   "path": "renders/check/DSC_6132.NEF",
+   "w": 1512,
+   "h": 1008,
+   "dng": false,
+   "file": "raw/renders__check__DSC_6132.NEF.f32.br"
+  },
+  {
+   "key": "test2__SKL_3024.dng",
+   "path": "test2/SKL_3024.dng",
+   "w": 918,
+   "h": 1377,
+   "dng": true,
+   "file": "raw/test2__SKL_3024.dng.f32.br"
+  }
+ ],
+ "errors": [
+  {
+   "path": "test2/SKL_3024.NEF",
+   "code": "nef_high_efficiency"
+  },
+  {
+   "path": "nekit_examples/DSC_9253.dng",
+   "code": "not_bayer"
+  }
+ ],
+ "synthetic": [
+  {
+   "name": "plain",
+   "in": "synthetic/in.f32",
+   "out": "synthetic/plain.f32",
+   "w": 256,
+   "h": 256,
+   "vignette": [
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "vignette",
+   "in": "synthetic/in.f32",
+   "out": "synthetic/vignette.f32",
+   "w": 256,
+   "h": 256,
+   "vignette": [
+    -0.45,
+    1.2
+   ]
+  }
+ ],
+ "frames": [
+  {
+   "key": "renders__lr_test__DSC_6550.NEF",
+   "path": "renders/lr_test/DSC_6550.NEF",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.3428601157379002,
+    1.0525374796929214
+   ],
+   "png": "frames/renders__lr_test__DSC_6550.NEF.png"
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF",
+   "path": "renders/dev_sa/DSC_6474.NEF",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.3182073921349469,
+    0.8569120843937239
+   ],
+   "png": "frames/renders__dev_sa__DSC_6474.NEF.png"
+  },
+  {
+   "key": "test1__DSC_5584.NEF",
+   "path": "test1/DSC_5584.NEF",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.4871846957025315,
+    1.2773893957220743
+   ],
+   "png": "frames/test1__DSC_5584.NEF.png"
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF",
+   "path": "renders/check/DSC_6132.NEF",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.5074516084092041,
+    1.2245994944570815
+   ],
+   "png": "frames/renders__check__DSC_6132.NEF.png"
+  },
+  {
+   "key": "test2__SKL_3024.dng",
+   "path": "test2/SKL_3024.dng",
+   "w": 918,
+   "h": 1377,
+   "vignette": [
+    -0.15183407297644932,
+    0.49373745827250104
+   ],
+   "png": "frames/test2__SKL_3024.dng.png"
+  }
+ ],
+ "np3": [
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fit1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fit1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fit2/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fit2__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fit3/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fit3__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fit4/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fit4__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji160/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji160__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji160_r1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji160_r1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji160_r2/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji160_r2__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji_pro_400/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji_pro_400__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji_pro_400_v2/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji_pro_400_v2__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/fuji_pro_400_v3/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__fuji_pro_400_v3__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_all/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_all__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_all11/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_all11__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_base3/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_base3__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_de2k1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_de2k1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_de2k2/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_de2k2__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_kc0.5/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_kc0.5__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_kc0.5_flat/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_kc0.5_flat__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_kc0.7/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_kc0.7__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_kc1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_kc1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_kc999/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_kc999__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_nxdev/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_nxdev__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_nxdev0/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_nxdev0__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_p0.5_all/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_p0.5_all__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_p0.5_off/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_p0.5_off__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_p0.5_old/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_p0.5_old__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_r1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_r1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_s0.5/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_s0.5__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_s0/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_s0__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_s1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_s1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_sky4/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_sky4__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/lr_test_sky4_de2k/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__lr_test_sky4_de2k__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/m1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__m1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/m1b/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__m1b__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/m3/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__m3__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/m3b/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__m3b__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/nekit/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__nekit__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON02.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON02.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON03.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON03.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON04.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON04.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON05.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON05.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON06.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON06.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON07.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON07.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON08.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON08.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON09.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON09.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON10.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON10.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON11.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON11.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON12.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON12.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON13.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON13.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON14.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON14.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON15.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON15.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON16.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON16.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON17.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON17.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON18.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON18.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON19.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON19.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON20.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON20.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON21.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON21.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON22.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON22.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON23.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON23.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON24.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON24.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON25.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON25.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON26.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON26.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON27.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON27.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON28.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON28.NP3"
+  },
+  {
+   "path": "out/pack1/NIKON/CUSTOMPC/PICCON29.NP3",
+   "file": "out__pack1__NIKON__CUSTOMPC__PICCON29.NP3"
+  },
+  {
+   "path": "out/portra400/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__portra400__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/portra400_r2/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__portra400_r2__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/portra400_strength/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__portra400_strength__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/portra400_strength/NIKON/CUSTOMPC/PICCON02.NP3",
+   "file": "out__portra400_strength__NIKON__CUSTOMPC__PICCON02.NP3"
+  },
+  {
+   "path": "out/skl/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__skl__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test1/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test1__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test1_DSC_5584/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test1_DSC_5584__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test1_strength/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test1_strength__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test1_strength/NIKON/CUSTOMPC/PICCON02.NP3",
+   "file": "out__test1_strength__NIKON__CUSTOMPC__PICCON02.NP3"
+  },
+  {
+   "path": "out/test1b/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test1b__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test2_SKL_3000/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test2_SKL_3000__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test2_SKL_3024/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test2_SKL_3024__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test2_SKL_3027/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test2_SKL_3027__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test2_SKL_3030/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test2_SKL_3030__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test_nekit_autumn/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test_nekit_autumn__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test_nekit_autumn_strength/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__test_nekit_autumn_strength__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "out/test_nekit_autumn_strength/NIKON/CUSTOMPC/PICCON02.NP3",
+   "file": "out__test_nekit_autumn_strength__NIKON__CUSTOMPC__PICCON02.NP3"
+  },
+  {
+   "path": "out/test_nekit_autumn_strength/NIKON/CUSTOMPC/PICCON03.NP3",
+   "file": "out__test_nekit_autumn_strength__NIKON__CUSTOMPC__PICCON03.NP3"
+  },
+  {
+   "path": "out/x100v_proba/NIKON/CUSTOMPC/PICCON01.NP3",
+   "file": "out__x100v_proba__NIKON__CUSTOMPC__PICCON01.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "file": "third_party__samples__comment-a-tonecurve.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a.NP3",
+   "file": "third_party__samples__comment-a.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-ab.NP3",
+   "file": "third_party__samples__comment-ab.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-abcde.NP3",
+   "file": "third_party__samples__comment-abcde.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-hello-in-jp.NP3",
+   "file": "third_party__samples__comment-hello-in-jp.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment-emj.NP3",
+   "file": "third_party__samples__longest-comment-emj.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment-jp.NP3",
+   "file": "third_party__samples__longest-comment-jp.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "file": "third_party__samples__longest-comment.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "file": "third_party__samples__tonecurve-black.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-max-point.NP3",
+   "file": "third_party__samples__tonecurve-max-point.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-noop.NP3",
+   "file": "third_party__samples__tonecurve-noop.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-white.NP3",
+   "file": "third_party__samples__tonecurve-white.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "file": "third_party__samples__vanilla.NP3"
+  }
+ ],
+ "strength": [
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 0,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__0.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 30,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__30.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 50,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__50.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 70,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__70.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 100,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__100.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/comment-a-tonecurve.NP3",
+   "percent": 150,
+   "file": "third_party__samples__comment-a-tonecurve.NP3__150.json",
+   "bytes": "third_party__samples__comment-a-tonecurve.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 0,
+   "file": "third_party__samples__tonecurve-black.NP3__0.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 30,
+   "file": "third_party__samples__tonecurve-black.NP3__30.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 50,
+   "file": "third_party__samples__tonecurve-black.NP3__50.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 70,
+   "file": "third_party__samples__tonecurve-black.NP3__70.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 100,
+   "file": "third_party__samples__tonecurve-black.NP3__100.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/tonecurve-black.NP3",
+   "percent": 150,
+   "file": "third_party__samples__tonecurve-black.NP3__150.json",
+   "bytes": "third_party__samples__tonecurve-black.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 0,
+   "file": "third_party__samples__vanilla.NP3__0.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 30,
+   "file": "third_party__samples__vanilla.NP3__30.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 50,
+   "file": "third_party__samples__vanilla.NP3__50.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 70,
+   "file": "third_party__samples__vanilla.NP3__70.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 100,
+   "file": "third_party__samples__vanilla.NP3__100.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/vanilla.NP3",
+   "percent": 150,
+   "file": "third_party__samples__vanilla.NP3__150.json",
+   "bytes": "third_party__samples__vanilla.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 0,
+   "file": "third_party__samples__longest-comment.NP3__0.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 30,
+   "file": "third_party__samples__longest-comment.NP3__30.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 50,
+   "file": "third_party__samples__longest-comment.NP3__50.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 70,
+   "file": "third_party__samples__longest-comment.NP3__70.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 100,
+   "file": "third_party__samples__longest-comment.NP3__100.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "third_party/samples/longest-comment.NP3",
+   "percent": 150,
+   "file": "third_party__samples__longest-comment.NP3__150.json",
+   "bytes": "third_party__samples__longest-comment.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 0,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__0.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 30,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__30.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 50,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 70,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__70.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 100,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  },
+  {
+   "path": "out/dsc_6366/NIKON/CUSTOMPC/PICCON01.NP3",
+   "percent": 150,
+   "file": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__150.json",
+   "bytes": "out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3.NP3"
+  }
+ ],
+ "profile": [
+  {
+   "key": "ready-dsc_6366-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-dsc_6366-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-dsc_6366-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-portra400-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-portra400-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-portra400-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-fuji_pro_400_v3-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-fuji_pro_400_v3-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-fuji_pro_400_v3-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-test2_SKL_3024-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-test2_SKL_3024-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-test2_SKL_3024-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-lr_test_sky4-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-lr_test_sky4-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-lr_test_sky4-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-skl-NIKON-CUSTOMPC-PICCON01",
+   "file": "profile/ready-skl-NIKON-CUSTOMPC-PICCON01.bin.br",
+   "np3": "profile/ready-skl-NIKON-CUSTOMPC-PICCON01.NP3"
+  },
+  {
+   "key": "ready-pack1-NIKON-CUSTOMPC-PICCON05",
+   "file": "profile/ready-pack1-NIKON-CUSTOMPC-PICCON05.bin.br",
+   "np3": "profile/ready-pack1-NIKON-CUSTOMPC-PICCON05.NP3"
+  },
+  {
+   "key": "ready-pack1-NIKON-CUSTOMPC-PICCON28",
+   "file": "profile/ready-pack1-NIKON-CUSTOMPC-PICCON28.bin.br",
+   "np3": "profile/ready-pack1-NIKON-CUSTOMPC-PICCON28.NP3"
+  },
+  {
+   "key": "rnd-00",
+   "file": "profile/rnd-00.bin.br",
+   "np3": "profile/rnd-00.NP3"
+  },
+  {
+   "key": "rnd-01",
+   "file": "profile/rnd-01.bin.br",
+   "np3": "profile/rnd-01.NP3"
+  },
+  {
+   "key": "rnd-02",
+   "file": "profile/rnd-02.bin.br",
+   "np3": "profile/rnd-02.NP3"
+  },
+  {
+   "key": "rnd-03",
+   "file": "profile/rnd-03.bin.br",
+   "np3": "profile/rnd-03.NP3"
+  },
+  {
+   "key": "rnd-04",
+   "file": "profile/rnd-04.bin.br",
+   "np3": "profile/rnd-04.NP3"
+  },
+  {
+   "key": "rnd-05",
+   "file": "profile/rnd-05.bin.br",
+   "np3": "profile/rnd-05.NP3"
+  },
+  {
+   "key": "rnd-06",
+   "file": "profile/rnd-06.bin.br",
+   "np3": "profile/rnd-06.NP3"
+  },
+  {
+   "key": "rnd-07",
+   "file": "profile/rnd-07.bin.br",
+   "np3": "profile/rnd-07.NP3"
+  },
+  {
+   "key": "rnd-08",
+   "file": "profile/rnd-08.bin.br",
+   "np3": "profile/rnd-08.NP3"
+  },
+  {
+   "key": "rnd-09",
+   "file": "profile/rnd-09.bin.br",
+   "np3": "profile/rnd-09.NP3"
+  },
+  {
+   "key": "rnd-10",
+   "file": "profile/rnd-10.bin.br",
+   "np3": "profile/rnd-10.NP3"
+  },
+  {
+   "key": "rnd-11",
+   "file": "profile/rnd-11.bin.br",
+   "np3": "profile/rnd-11.NP3"
+  },
+  {
+   "key": "sat-p100",
+   "file": "profile/sat-p100.bin.br",
+   "np3": "profile/sat-p100.NP3"
+  },
+  {
+   "key": "sat-m100",
+   "file": "profile/sat-m100.bin.br",
+   "np3": "profile/sat-m100.NP3"
+  },
+  {
+   "key": "blending-0",
+   "file": "profile/blending-0.bin.br",
+   "np3": "profile/blending-0.NP3"
+  },
+  {
+   "key": "blending-100",
+   "file": "profile/blending-100.bin.br",
+   "np3": "profile/blending-100.NP3"
+  },
+  {
+   "key": "balance-m100",
+   "file": "profile/balance-m100.bin.br",
+   "np3": "profile/balance-m100.NP3"
+  },
+  {
+   "key": "balance-p100",
+   "file": "profile/balance-p100.bin.br",
+   "np3": "profile/balance-p100.NP3"
+  },
+  {
+   "key": "blender-red-p100",
+   "file": "profile/blender-red-p100.bin.br",
+   "np3": "profile/blender-red-p100.NP3"
+  },
+  {
+   "key": "blender-red-m100",
+   "file": "profile/blender-red-m100.bin.br",
+   "np3": "profile/blender-red-m100.NP3"
+  },
+  {
+   "key": "blender-orange-p100",
+   "file": "profile/blender-orange-p100.bin.br",
+   "np3": "profile/blender-orange-p100.NP3"
+  },
+  {
+   "key": "blender-orange-m100",
+   "file": "profile/blender-orange-m100.bin.br",
+   "np3": "profile/blender-orange-m100.NP3"
+  },
+  {
+   "key": "blender-yellow-p100",
+   "file": "profile/blender-yellow-p100.bin.br",
+   "np3": "profile/blender-yellow-p100.NP3"
+  },
+  {
+   "key": "blender-yellow-m100",
+   "file": "profile/blender-yellow-m100.bin.br",
+   "np3": "profile/blender-yellow-m100.NP3"
+  },
+  {
+   "key": "blender-green-p100",
+   "file": "profile/blender-green-p100.bin.br",
+   "np3": "profile/blender-green-p100.NP3"
+  },
+  {
+   "key": "blender-green-m100",
+   "file": "profile/blender-green-m100.bin.br",
+   "np3": "profile/blender-green-m100.NP3"
+  },
+  {
+   "key": "blender-cyan-p100",
+   "file": "profile/blender-cyan-p100.bin.br",
+   "np3": "profile/blender-cyan-p100.NP3"
+  },
+  {
+   "key": "blender-cyan-m100",
+   "file": "profile/blender-cyan-m100.bin.br",
+   "np3": "profile/blender-cyan-m100.NP3"
+  },
+  {
+   "key": "blender-blue-p100",
+   "file": "profile/blender-blue-p100.bin.br",
+   "np3": "profile/blender-blue-p100.NP3"
+  },
+  {
+   "key": "blender-blue-m100",
+   "file": "profile/blender-blue-m100.bin.br",
+   "np3": "profile/blender-blue-m100.NP3"
+  },
+  {
+   "key": "blender-purple-p100",
+   "file": "profile/blender-purple-p100.bin.br",
+   "np3": "profile/blender-purple-p100.NP3"
+  },
+  {
+   "key": "blender-purple-m100",
+   "file": "profile/blender-purple-m100.bin.br",
+   "np3": "profile/blender-purple-m100.NP3"
+  },
+  {
+   "key": "blender-magenta-p100",
+   "file": "profile/blender-magenta-p100.bin.br",
+   "np3": "profile/blender-magenta-p100.NP3"
+  },
+  {
+   "key": "blender-magenta-m100",
+   "file": "profile/blender-magenta-m100.bin.br",
+   "np3": "profile/blender-magenta-m100.NP3"
+  },
+  {
+   "key": "grade-shadows-000",
+   "file": "profile/grade-shadows-000.bin.br",
+   "np3": "profile/grade-shadows-000.NP3"
+  },
+  {
+   "key": "grade-shadows-045",
+   "file": "profile/grade-shadows-045.bin.br",
+   "np3": "profile/grade-shadows-045.NP3"
+  },
+  {
+   "key": "grade-shadows-090",
+   "file": "profile/grade-shadows-090.bin.br",
+   "np3": "profile/grade-shadows-090.NP3"
+  },
+  {
+   "key": "grade-shadows-135",
+   "file": "profile/grade-shadows-135.bin.br",
+   "np3": "profile/grade-shadows-135.NP3"
+  },
+  {
+   "key": "grade-shadows-180",
+   "file": "profile/grade-shadows-180.bin.br",
+   "np3": "profile/grade-shadows-180.NP3"
+  },
+  {
+   "key": "grade-shadows-225",
+   "file": "profile/grade-shadows-225.bin.br",
+   "np3": "profile/grade-shadows-225.NP3"
+  },
+  {
+   "key": "grade-shadows-270",
+   "file": "profile/grade-shadows-270.bin.br",
+   "np3": "profile/grade-shadows-270.NP3"
+  },
+  {
+   "key": "grade-shadows-315",
+   "file": "profile/grade-shadows-315.bin.br",
+   "np3": "profile/grade-shadows-315.NP3"
+  },
+  {
+   "key": "grade-shadows-m100",
+   "file": "profile/grade-shadows-m100.bin.br",
+   "np3": "profile/grade-shadows-m100.NP3"
+  },
+  {
+   "key": "gradebright-shadows-p100",
+   "file": "profile/gradebright-shadows-p100.bin.br",
+   "np3": "profile/gradebright-shadows-p100.NP3"
+  },
+  {
+   "key": "gradebright-shadows-m100",
+   "file": "profile/gradebright-shadows-m100.bin.br",
+   "np3": "profile/gradebright-shadows-m100.NP3"
+  },
+  {
+   "key": "grade-midtone-000",
+   "file": "profile/grade-midtone-000.bin.br",
+   "np3": "profile/grade-midtone-000.NP3"
+  },
+  {
+   "key": "grade-midtone-045",
+   "file": "profile/grade-midtone-045.bin.br",
+   "np3": "profile/grade-midtone-045.NP3"
+  },
+  {
+   "key": "grade-midtone-090",
+   "file": "profile/grade-midtone-090.bin.br",
+   "np3": "profile/grade-midtone-090.NP3"
+  },
+  {
+   "key": "grade-midtone-135",
+   "file": "profile/grade-midtone-135.bin.br",
+   "np3": "profile/grade-midtone-135.NP3"
+  },
+  {
+   "key": "grade-midtone-180",
+   "file": "profile/grade-midtone-180.bin.br",
+   "np3": "profile/grade-midtone-180.NP3"
+  },
+  {
+   "key": "grade-midtone-225",
+   "file": "profile/grade-midtone-225.bin.br",
+   "np3": "profile/grade-midtone-225.NP3"
+  },
+  {
+   "key": "grade-midtone-270",
+   "file": "profile/grade-midtone-270.bin.br",
+   "np3": "profile/grade-midtone-270.NP3"
+  },
+  {
+   "key": "grade-midtone-315",
+   "file": "profile/grade-midtone-315.bin.br",
+   "np3": "profile/grade-midtone-315.NP3"
+  },
+  {
+   "key": "grade-midtone-m100",
+   "file": "profile/grade-midtone-m100.bin.br",
+   "np3": "profile/grade-midtone-m100.NP3"
+  },
+  {
+   "key": "gradebright-midtone-p100",
+   "file": "profile/gradebright-midtone-p100.bin.br",
+   "np3": "profile/gradebright-midtone-p100.NP3"
+  },
+  {
+   "key": "gradebright-midtone-m100",
+   "file": "profile/gradebright-midtone-m100.bin.br",
+   "np3": "profile/gradebright-midtone-m100.NP3"
+  },
+  {
+   "key": "grade-highlights-000",
+   "file": "profile/grade-highlights-000.bin.br",
+   "np3": "profile/grade-highlights-000.NP3"
+  },
+  {
+   "key": "grade-highlights-045",
+   "file": "profile/grade-highlights-045.bin.br",
+   "np3": "profile/grade-highlights-045.NP3"
+  },
+  {
+   "key": "grade-highlights-090",
+   "file": "profile/grade-highlights-090.bin.br",
+   "np3": "profile/grade-highlights-090.NP3"
+  },
+  {
+   "key": "grade-highlights-135",
+   "file": "profile/grade-highlights-135.bin.br",
+   "np3": "profile/grade-highlights-135.NP3"
+  },
+  {
+   "key": "grade-highlights-180",
+   "file": "profile/grade-highlights-180.bin.br",
+   "np3": "profile/grade-highlights-180.NP3"
+  },
+  {
+   "key": "grade-highlights-225",
+   "file": "profile/grade-highlights-225.bin.br",
+   "np3": "profile/grade-highlights-225.NP3"
+  },
+  {
+   "key": "grade-highlights-270",
+   "file": "profile/grade-highlights-270.bin.br",
+   "np3": "profile/grade-highlights-270.NP3"
+  },
+  {
+   "key": "grade-highlights-315",
+   "file": "profile/grade-highlights-315.bin.br",
+   "np3": "profile/grade-highlights-315.NP3"
+  },
+  {
+   "key": "grade-highlights-m100",
+   "file": "profile/grade-highlights-m100.bin.br",
+   "np3": "profile/grade-highlights-m100.NP3"
+  },
+  {
+   "key": "gradebright-highlights-p100",
+   "file": "profile/gradebright-highlights-p100.bin.br",
+   "np3": "profile/gradebright-highlights-p100.NP3"
+  },
+  {
+   "key": "gradebright-highlights-m100",
+   "file": "profile/gradebright-highlights-m100.bin.br",
+   "np3": "profile/gradebright-highlights-m100.NP3"
+  }
+ ],
+ "detail": [
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__zero",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__zero.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__sharp9",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__sharp9.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__sharpm3",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__sharpm3.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__mid5",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__mid5.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__clarity2",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__clarity2.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__claritm2",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__claritm2.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__all",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__all.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__0__allm",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__0.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__0__allm.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__0__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__zero",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__zero.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__sharp9",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__sharp9.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__sharpm3",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__sharpm3.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__mid5",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__mid5.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__clarity2",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__clarity2.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__claritm2",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__claritm2.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__all",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__all.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__1__allm",
+   "in": "detail/renders__lr_test__DSC_6550.NEF__1.png",
+   "out": "detail/renders__lr_test__DSC_6550.NEF__1__allm.png",
+   "np3": "detail/renders__lr_test__DSC_6550.NEF__1__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__zero",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__zero.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__sharp9",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__sharp9.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__sharpm3",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__sharpm3.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__mid5",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__mid5.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__clarity2",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__clarity2.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__claritm2",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__claritm2.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__all",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__all.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__0__allm",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__0.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__0__allm.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__0__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__zero",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__zero.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__sharp9",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__sharp9.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__sharpm3",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__sharpm3.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__mid5",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__mid5.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__clarity2",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__clarity2.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__claritm2",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__claritm2.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__all",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__all.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__1__allm",
+   "in": "detail/renders__dev_sa__DSC_6474.NEF__1.png",
+   "out": "detail/renders__dev_sa__DSC_6474.NEF__1__allm.png",
+   "np3": "detail/renders__dev_sa__DSC_6474.NEF__1__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__zero",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__zero.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__sharp9",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__sharp9.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__sharpm3",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__sharpm3.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__mid5",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__mid5.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__clarity2",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__clarity2.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__claritm2",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__claritm2.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__all",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__all.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__0__allm",
+   "in": "detail/test1__DSC_5584.NEF__0.png",
+   "out": "detail/test1__DSC_5584.NEF__0__allm.png",
+   "np3": "detail/test1__DSC_5584.NEF__0__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__zero",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__zero.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__sharp9",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__sharp9.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__sharpm3",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__sharpm3.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__mid5",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__mid5.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__clarity2",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__clarity2.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__claritm2",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__claritm2.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__all",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__all.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test1__DSC_5584.NEF__1__allm",
+   "in": "detail/test1__DSC_5584.NEF__1.png",
+   "out": "detail/test1__DSC_5584.NEF__1__allm.png",
+   "np3": "detail/test1__DSC_5584.NEF__1__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__zero",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__zero.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__sharp9",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__sharp9.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__sharpm3",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__sharpm3.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__mid5",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__mid5.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__clarity2",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__clarity2.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__claritm2",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__claritm2.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__all",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__all.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__0__allm",
+   "in": "detail/renders__check__DSC_6132.NEF__0.png",
+   "out": "detail/renders__check__DSC_6132.NEF__0__allm.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__0__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__zero",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__zero.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__sharp9",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__sharp9.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__sharpm3",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__sharpm3.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__mid5",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__mid5.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__clarity2",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__clarity2.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__claritm2",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__claritm2.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__all",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__all.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__1__allm",
+   "in": "detail/renders__check__DSC_6132.NEF__1.png",
+   "out": "detail/renders__check__DSC_6132.NEF__1__allm.png",
+   "np3": "detail/renders__check__DSC_6132.NEF__1__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__zero",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__zero.png",
+   "np3": "detail/test2__SKL_3024.dng__0__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__sharp9",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__sharp9.png",
+   "np3": "detail/test2__SKL_3024.dng__0__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__sharpm3",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__sharpm3.png",
+   "np3": "detail/test2__SKL_3024.dng__0__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__mid5",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__mid5.png",
+   "np3": "detail/test2__SKL_3024.dng__0__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__clarity2",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__clarity2.png",
+   "np3": "detail/test2__SKL_3024.dng__0__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__claritm2",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__claritm2.png",
+   "np3": "detail/test2__SKL_3024.dng__0__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__all",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__all.png",
+   "np3": "detail/test2__SKL_3024.dng__0__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__0__allm",
+   "in": "detail/test2__SKL_3024.dng__0.png",
+   "out": "detail/test2__SKL_3024.dng__0__allm.png",
+   "np3": "detail/test2__SKL_3024.dng__0__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__zero",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__zero.png",
+   "np3": "detail/test2__SKL_3024.dng__1__zero.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__sharp9",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__sharp9.png",
+   "np3": "detail/test2__SKL_3024.dng__1__sharp9.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__sharpm3",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__sharpm3.png",
+   "np3": "detail/test2__SKL_3024.dng__1__sharpm3.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__mid5",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__mid5.png",
+   "np3": "detail/test2__SKL_3024.dng__1__mid5.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 3.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__clarity2",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__clarity2.png",
+   "np3": "detail/test2__SKL_3024.dng__1__clarity2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__claritm2",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__claritm2.png",
+   "np3": "detail/test2__SKL_3024.dng__1__claritm2.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__all",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__all.png",
+   "np3": "detail/test2__SKL_3024.dng__1__all.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 2.0
+  },
+  {
+   "key": "test2__SKL_3024.dng__1__allm",
+   "in": "detail/test2__SKL_3024.dng__1.png",
+   "out": "detail/test2__SKL_3024.dng__1__allm.png",
+   "np3": "detail/test2__SKL_3024.dng__1__allm.NP3",
+   "w": 512,
+   "h": 512,
+   "scale": 4.0
+  }
+ ],
+ "render7": [
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__100",
+   "path": "renders/lr_test/DSC_6550.NEF",
+   "np3": "render7/renders__lr_test__DSC_6550.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__lr_test__DSC_6550.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__lr_test__DSC_6550.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.3428601157379002,
+    1.0525374796929214
+   ]
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__50",
+   "path": "renders/lr_test/DSC_6550.NEF",
+   "np3": "render7/renders__lr_test__DSC_6550.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.NP3",
+   "out": "render7/renders__lr_test__DSC_6550.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.png",
+   "mask": "render7/renders__lr_test__DSC_6550.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.3428601157379002,
+    1.0525374796929214
+   ]
+  },
+  {
+   "key": "renders__lr_test__DSC_6550.NEF__100",
+   "path": "renders/lr_test/DSC_6550.NEF",
+   "np3": "render7/renders__lr_test__DSC_6550.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__lr_test__DSC_6550.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__lr_test__DSC_6550.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.3428601157379002,
+    1.0525374796929214
+   ]
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__100",
+   "path": "renders/dev_sa/DSC_6474.NEF",
+   "np3": "render7/renders__dev_sa__DSC_6474.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__dev_sa__DSC_6474.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__dev_sa__DSC_6474.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.3182073921349469,
+    0.8569120843937239
+   ]
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__50",
+   "path": "renders/dev_sa/DSC_6474.NEF",
+   "np3": "render7/renders__dev_sa__DSC_6474.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.NP3",
+   "out": "render7/renders__dev_sa__DSC_6474.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.png",
+   "mask": "render7/renders__dev_sa__DSC_6474.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.3182073921349469,
+    0.8569120843937239
+   ]
+  },
+  {
+   "key": "renders__dev_sa__DSC_6474.NEF__100",
+   "path": "renders/dev_sa/DSC_6474.NEF",
+   "np3": "render7/renders__dev_sa__DSC_6474.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__dev_sa__DSC_6474.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__dev_sa__DSC_6474.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.3182073921349469,
+    0.8569120843937239
+   ]
+  },
+  {
+   "key": "test1__DSC_5584.NEF__100",
+   "path": "test1/DSC_5584.NEF",
+   "np3": "render7/test1__DSC_5584.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/test1__DSC_5584.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/test1__DSC_5584.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.4871846957025315,
+    1.2773893957220743
+   ]
+  },
+  {
+   "key": "test1__DSC_5584.NEF__50",
+   "path": "test1/DSC_5584.NEF",
+   "np3": "render7/test1__DSC_5584.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.NP3",
+   "out": "render7/test1__DSC_5584.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.png",
+   "mask": "render7/test1__DSC_5584.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.4871846957025315,
+    1.2773893957220743
+   ]
+  },
+  {
+   "key": "test1__DSC_5584.NEF__100",
+   "path": "test1/DSC_5584.NEF",
+   "np3": "render7/test1__DSC_5584.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/test1__DSC_5584.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/test1__DSC_5584.NEF__mask.png",
+   "w": 1008,
+   "h": 1512,
+   "vignette": [
+    -0.4871846957025315,
+    1.2773893957220743
+   ]
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__100",
+   "path": "renders/check/DSC_6132.NEF",
+   "np3": "render7/renders__check__DSC_6132.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__check__DSC_6132.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__check__DSC_6132.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.5074516084092041,
+    1.2245994944570815
+   ]
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__50",
+   "path": "renders/check/DSC_6132.NEF",
+   "np3": "render7/renders__check__DSC_6132.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.NP3",
+   "out": "render7/renders__check__DSC_6132.NEF__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.png",
+   "mask": "render7/renders__check__DSC_6132.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.5074516084092041,
+    1.2245994944570815
+   ]
+  },
+  {
+   "key": "renders__check__DSC_6132.NEF__100",
+   "path": "renders/check/DSC_6132.NEF",
+   "np3": "render7/renders__check__DSC_6132.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/renders__check__DSC_6132.NEF__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/renders__check__DSC_6132.NEF__mask.png",
+   "w": 1512,
+   "h": 1008,
+   "vignette": [
+    -0.5074516084092041,
+    1.2245994944570815
+   ]
+  },
+  {
+   "key": "test2__SKL_3024.dng__100",
+   "path": "test2/SKL_3024.dng",
+   "np3": "render7/test2__SKL_3024.dng__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/test2__SKL_3024.dng__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/test2__SKL_3024.dng__mask.png",
+   "w": 918,
+   "h": 1377,
+   "vignette": [
+    -0.15183407297644932,
+    0.49373745827250104
+   ]
+  },
+  {
+   "key": "test2__SKL_3024.dng__50",
+   "path": "test2/SKL_3024.dng",
+   "np3": "render7/test2__SKL_3024.dng__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.NP3",
+   "out": "render7/test2__SKL_3024.dng__out__dsc_6366__NIKON__CUSTOMPC__PICCON01.NP3__50.png",
+   "mask": "render7/test2__SKL_3024.dng__mask.png",
+   "w": 918,
+   "h": 1377,
+   "vignette": [
+    -0.15183407297644932,
+    0.49373745827250104
+   ]
+  },
+  {
+   "key": "test2__SKL_3024.dng__100",
+   "path": "test2/SKL_3024.dng",
+   "np3": "render7/test2__SKL_3024.dng__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.NP3",
+   "out": "render7/test2__SKL_3024.dng__out__portra400__NIKON__CUSTOMPC__PICCON01.NP3__100.png",
+   "mask": "render7/test2__SKL_3024.dng__mask.png",
+   "w": 918,
+   "h": 1377,
+   "vignette": [
+    -0.15183407297644932,
+    0.49373745827250104
+   ]
+  }
+ ],
+ "render7_regions": {
+  "skin": 1,
+  "green": 5,
+  "sky": 7
+ }
+}

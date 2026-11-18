@@ -1,0 +1,19 @@
+[package]
+name = "np3raw"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+rawler = "0.8.0"
+# uuid внутри rawler требует источник случайности под wasm32; при распаковке он не вызывается
+uuid = { version = "1.29.2", features = ["js"] }
