@@ -15,7 +15,7 @@
 - **WB and exposure from the XMP are subtracted.** They are not part of the profile. If the preset itself sets them, they are subtracted too: this cannot be told from the file. On `test2/` this hurt: the exposure -0.79 worked together with its own curve and Whites +70, and the NP3 curve went into white at an input of about 150.
 - **Warnings about a camera that is not a Z f are not needed.** The user decided so.
 - **Profile strength is made as separate files.** There is no slider in NP3.
-- **ADL is off** for shooting and rendering.
+- **ADL in NX exports is "as shot"** (sidecar value 1): the development was trained this way. Turning ADL off in NX makes frames shot with camera ADL about 0.3 stop brighter. The `sweep.py` packs set `adl_as_shot`.
 - **Detail is a separate step after color, over Y' only.** Color and fitting (`match.py`, `compare.py`) run without it: `Renderer.apply(..., sharp=True)` enables the step only for a frame in `render.py` and `ui.py`. The model is trained per export scale separately (2: the full `--full` development, 4: the 1600 px preview): small-radius sharpening after shrinking is not the same mask with radius/k. If a tool at a scale does not improve the Y' error by at least 2% of the export noise, it is stored as zero there. Sharpening stays linear: nonlinear variants are not better on held-out frames, the remainder is limited by the export noise.
 - **`--refine` accepts one name.** The previous one is the profile the render was made with, the result goes to `name_r1`, `name_r2`. The form with two names remains, the forms differ by argument parity.
 
@@ -58,9 +58,9 @@
 - **There is no WB in NP3.** The match depends on the camera WB.
 - **One preset.** Everything is measured on the preset with Astia. Strong processing beyond ±60 may behave differently.
 - **Colors outside the pairs are not fitted.** Different scenes are needed.
-- **DNG as a target:** only the preview inside the file is read (256x171 for a DNG from Lightroom), the alignment is worse (0.71-0.76). Better give the target as JPEG or TIFF.
+- **DNG as a target:** only the preview inside the file is read (256x171 for a DNG from Adobe DNG Converter), the alignment is worse (0.71-0.76). Better give the target as JPEG or TIFF.
 - **Pairs must be with one preset.** Different manual edits per frame are not repeated by one profile; on `test2/` outside the fit dE is 9.0.
-- **The `Fuji 160C 2N` profile was not applied.** Lightroom did not find it, `fuji160/DSC_4837.tif` has `MissingCameraProfile`. The Fuji targets are Adobe Standard without a Look plus the preset settings. For a real Fuji 160C 2N, a profile in Lightroom, new exports and a new draft are needed.
+- **The `Fuji 160C 2N` camera profile was not applied** by the export tool, `fuji160/DSC_4837.tif` has `MissingCameraProfile`. The Fuji targets are the base rendering without a Look plus the preset settings. For a real Fuji 160C 2N, the camera profile, new exports and a new draft are needed.
 - **`triage.py` does not write `pairs.json`.** A `--refine` from such a profile without copying the file will send WB and exposure into the profile.
 - **The `triage.py` verdict does not check the transfer.** The thresholds were tuned on the same 11 Z f pairs, not validated on independent pairs. Alignments from 0.6 to 0.88 pass without a warning. The NP3-vs-LUT gap, grading strength and Dehaze, Clarity, Texture from XMP do not take part in the verdict.
 - **Dehaze, Clarity, Texture are local.** NP3 has no place for them, the fit tries to replace them with the curve and the blender.

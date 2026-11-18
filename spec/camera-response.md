@@ -108,7 +108,7 @@ Radii sigma in full-frame pixels (6048), the g table over tone is separate for p
 - ADL is applied in NX Studio when rendering a NEF shot with ADL.
 - It changes lightness differently on different scenes, it cannot be compensated in NP3.
 - The effect on FIT2: dE 7.23 with ADL and 5.13 without it, the shots are 5-7 L* brighter than the target.
-- To match Lightroom, ADL must be off for shooting and rendering.
+- To match the targets, the development is trained with ADL "as shot": NX exports must not turn ADL off, see [memory/adl-as-shot.md](memory/adl-as-shot.md).
 
 ## The on-screen chart: what it does not show
 
@@ -124,9 +124,9 @@ Radii sigma in full-frame pixels (6048), the g table over tone is separate for p
 - Matrix and curve from 35 frames: 2.22 on held-out frames.
 - With a residual 3D LUT: 17 knots 1.89, 25 knots 1.85, 33 knots 1.86.
 
-## Lightroom
+## WB metadata mapping
 
-- Temperature and Tint are related to the camera's WB_RBLevels. Over 21 As Shot frames the log(R/G) and log(B/G) error is about 0.004.
+- The XMP Temperature/Tint values are related to the camera's WB_RBLevels. Over 21 As Shot frames the log(R/G) and log(B/G) error is about 0.004.
 - Features: 1, mired, mired^2, tint, tint*mired.
 - Georgia was shot with the PC profile `KEktr-100-skinfixG2`, the validation shots with `Modern Chrome Hi g2`, so their embedded JPEGs are not neutral.
 

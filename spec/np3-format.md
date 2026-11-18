@@ -85,9 +85,9 @@ NX Studio 1.11 applies a profile written into the sidecar of a NEF copy: verifie
 - Exporting PORTRA and FIT4 from the written profile differs from the old exports by 0.53-0.59 dE, two neutrals differ by as much.
 - NX may append a suffix of a past export to the export name, e.g. `_portra400`.
 
-## Lightroom export
+## The export's XMP block
 
-JPEG and TIFF carry an XMP block with the `crs:` settings: `WhiteBalance`, `Temperature`, `Tint`, `Exposure2012`, crop, masks, grain, vignetting. There is no block if "All metadata" was not chosen in the export, or the shot went through social networks and other editors.
+JPEG and TIFF targets carry an XMP block with the `crs:` settings: `WhiteBalance`, `Temperature`, `Tint`, `Exposure2012`, crop, masks, grain, vignetting. There is no block if "All metadata" was not chosen in the export, or the shot went through social networks and other editors.
 
 There is no orientation in the export's XMP. The crop is given in the sensor frame. When tilted, `CropLeft/Top` and `CropRight/Bottom` are the diagonal corners of the rotated frame, not its sides:
 

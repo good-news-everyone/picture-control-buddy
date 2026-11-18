@@ -7,11 +7,6 @@ docstrings, commit messages, specs and UI strings. Write all new code and
 comments in English only — no Russian (or other non-English) text, including
 printouts and error messages.
 
-The chart-fitting branch lives in a separate local-only project
-`../np3-fit-charts` (not published, intentionally left in Russian). The
-legacy chart entry points of `match.py --chart` and `model.load()` expect
-that project to sit next to this repository.
-
 ## Project
 
 np3-fit infers and emulates Nikon Flexible Color picture control (NP3)
@@ -38,7 +33,8 @@ WebGL) that applies and exports NP3 profiles.
 ## Local-only data (gitignored)
 
 `_local/` (raw photos, sweep exports, aligned pairs, check renders), `out/`
-(fitted profiles and packs), `renders/` (NX Studio / Lightroom exports).
+(fitted profiles and packs), `renders/` (NX Studio renders and target
+exports).
 Pipeline scripts that fit or validate models (`sweep.py`, `match.py`,
 `profile_model.py`, `detail.py`, `render.py` on real files) need this data
 present locally; a fresh clone only supports the tests below.

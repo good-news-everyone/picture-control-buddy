@@ -4,13 +4,13 @@ Draft from 2026-11-16. A separate specification of the first interface iteration
 
 ## Interface edits 2026-11-17 (UI-2 package)
 
-The second package of look edits following Lightroom (slider references — [sliders/](sliders/): `saturation.png`, `hue.png`, `saturation_by_color_chroma.png`, `luminance.png`). Item statuses are in the log of [ui-manual-mvp-plan.md](ui-manual-mvp-plan.md) (section 5, entry "UI-2 interface edits"); marked as they are completed.
+The second package of look edits (UI-2). Item statuses are in the log of [ui-manual-mvp-plan.md](ui-manual-mvp-plan.md) (section 5, entry "UI-2 interface edits"); marked as they are completed.
 
 1. The Import/Export buttons move under the frame info (`#info`), not under the drop zone.
 2. The "Before/after" button is removed; instead, a caption in the viewer area that switching works by holding space. The space behavior (and the "Before — neutral"/"After — NP3" captions) is kept.
-3. The Saturation (Basic), Color Blender and Color Grading sliders get LR-style gradient tracks: the global Saturation is grey -> rainbow, saturation grows along the whole track (the grey section is noticeable); the blender Hue is only the spectrum of the current color (±55 degrees around it, not the whole circle); the blender Saturation is from grey to the row color; Luminance is black -> color -> white; the saturation of all gradients is muted (-30 from full). The implementation is a CSS track gradient (`--track` on `input[type=range].grad`). Refs: [sliders/](sliders/), [color-blending/](color-blending/), [color-grading/](color-grading/).
-4. Color Grading switches to the LR style per [color-grading/ref.png](color-grading/ref.png): the **HSL / Color** toggle group first, then the **Shadows / Midtones / Highlights** zone selector and a color preview window; HSL is rows of Hue/Saturation/Luminance of the selected zone (the Saturation/Luminance gradients are tinted with the selected Hue); Color is a single wheel (dragging sets Hue+Saturation) with a "Hue … Sat …" readout and Luminance below it; **Blending and Balance** (shared NP3 fields) — in both modes, one row each, without duplicate labels and zone names. The Point Color tab is not implemented.
-5. Color Blender is rearranged as in LR per [color-blending/](color-blending/): the **Adjust: HSL / Color** switch; HSL is **Hue | Saturation | Luminance | All** tabs with 8 rows by colors (name on the left, a gradient track, the value on the right); Color is a row of 8 color dots (color selection) and Hue/Saturation/Luminance of the selected color. The internal fields and NP3 keys do not change.
+3. The Saturation (Basic), Color Blender and Color Grading sliders get gradient tracks: the global Saturation is grey -> rainbow, saturation grows along the whole track (the grey section is noticeable); the blender Hue is only the spectrum of the current color (±55 degrees around it, not the whole circle); the blender Saturation is from grey to the row color; Luminance is black -> color -> white; the saturation of all gradients is muted (-30 from full). The implementation is a CSS track gradient (`--track` on `input[type=range].grad`).
+4. Color Grading switches to the HSL / Color layout: the **HSL / Color** toggle group first, then the **Shadows / Midtones / Highlights** zone selector and a color preview window; HSL is rows of Hue/Saturation/Luminance of the selected zone (the Saturation/Luminance gradients are tinted with the selected Hue); Color is a single wheel (dragging sets Hue+Saturation) with a "Hue … Sat …" readout and Luminance below it; **Blending and Balance** (shared NP3 fields) — in both modes, one row each, without duplicate labels and zone names. The Point Color tab is not implemented.
+5. Color Blender is rearranged as a mixer: the **Adjust: HSL / Color** switch; HSL is **Hue | Saturation | Luminance | All** tabs with 8 rows by colors (name on the left, a gradient track, the value on the right); Color is a row of 8 color dots (color selection) and Hue/Saturation/Luminance of the selected color. The internal fields and NP3 keys do not change.
 6. Label renames: Blender Chroma -> Saturation, Brightness -> Luminance; Grading Chroma -> Saturation, Brightness -> Luminance. The internal field names (`np3.py`) are not touched.
 7. The **Details** and **Curve** groups swap places: the panel order is Profile, Basic, Curve, Details, Color Blender, Color Grading.
 8. By default only the **Profile** and **Basic** groups are open; the rest are collapsed.
@@ -79,13 +79,13 @@ The profile panel order top to bottom:
 2. **Basic** — the second group, open by default together with Profile.
 3. **Curve** — collapsed by default.
 4. **Details** — after Curve, collapsed by default.
-5. **Color Blender** — LR style: Hue / Saturation / Luminance sections of 8 colors each (UI-2 package).
-6. **Color Grading** — the last group; LR style with the HSL / Color switch (UI-2 package).
+5. **Color Blender** — mixer style: Hue / Saturation / Luminance sections of 8 colors each (UI-2 package).
+6. **Color Grading** — the last group; mixer style with the HSL / Color switch (UI-2 package).
 7. **Reset** — a button at the very bottom of the panel: resets all editable values to neutral (the `np3.Control` defaults, as in a new profile): sliders, the curve (turned off), strength — to 100%. The name and comment are not edited by sliders and are not subject to reset.
 
 Export is available without a RAW. NP3 import is also available before loading a RAW.
 
-Every slider's track is filled with color from the minimum to the current value (the CSS variable `--fill`, set by `panels.js` on every change); the fill color or gradient is overridden per slider via `--fill-color`. The Saturation (Basic), Color Blender and Color Grading sliders (UI-2 package) use an LR-style gradient of the whole track instead of the fill (`--track` on `input[type=range].grad`, CSS in `index.html`). The fill and gradients are part of the interface style and do not affect behavior.
+Every slider's track is filled with color from the minimum to the current value (the CSS variable `--fill`, set by `panels.js` on every change); the fill color or gradient is overridden per slider via `--fill-color`. The Saturation (Basic), Color Blender and Color Grading sliders (UI-2 package) use a full-track gradient instead of the fill (`--track` on `input[type=range].grad`, CSS in `index.html`). The fill and gradients are part of the interface style and do not affect behavior.
 
 ## Profile fields
 
@@ -169,14 +169,14 @@ Strength is a multiplier on top of the base profile, not a change of the panel v
 
 ### Color Blender (UI-2 package)
 
-Shown as in Lightroom ([color-blending/](color-blending/)): the **Adjust: HSL / Color** switch. In the HSL mode — **Hue**, **Saturation**, **Luminance**, **All** tabs: for the selected attribute (or all at once in All) 8 rows by color (red, orange, yellow, green, cyan, blue, purple, magenta) — color name on the left, an LR-style gradient track, the numeric value on the right. Gradients: Hue is the spectrum ±55 degrees around the row color; Saturation is grey -> row color; Luminance is black -> row color -> white; the saturation is muted. In the Color mode — a row of 8 color dots (color selection) and Hue/Saturation/Luminance sliders of the selected color. Field labels are Hue/Saturation/Luminance (the internal NP3 names are unchanged).
+Shown with the **Adjust: HSL / Color** switch. In the HSL mode — **Hue**, **Saturation**, **Luminance**, **All** tabs: for the selected attribute (or all at once in All) 8 rows by color (red, orange, yellow, green, cyan, blue, purple, magenta) — color name on the left, a gradient track, the numeric value on the right. Gradients: Hue is the spectrum ±55 degrees around the row color; Saturation is grey -> row color; Luminance is black -> row color -> white; the saturation is muted. In the Color mode — a row of 8 color dots (color selection) and Hue/Saturation/Luminance sliders of the selected color. Field labels are Hue/Saturation/Luminance (the internal NP3 names are unchanged).
 
 ### Color Grading (UI-2 package)
 
-Shown as in Lightroom ([color-grading/ref.png](color-grading/ref.png)):
+Shown as:
 
-- On top — the **HSL / Color** toggle group (first), then the **Shadows / Midtones / Highlights** zone selector (LR-style text, without "Adjust:"). The resulting-color preview window (Hue + Saturation at the zone's lightness; slider width, about two rows high) is only in the HSL mode, above the sliders.
-- **HSL** — rows of Hue/Saturation/Luminance of the selected zone with LR-style gradients (Hue is the full but muted spectrum at the zone's lightness; Saturation is grey -> the selected Hue color; Luminance is black -> the Hue color -> white; the Saturation/Luminance gradients are repainted on a Hue change).
+- On top — the **HSL / Color** toggle group (first), then the **Shadows / Midtones / Highlights** zone selector (text buttons, without "Adjust:"). The resulting-color preview window (Hue + Saturation at the zone's lightness; slider width, about two rows high) is only in the HSL mode, above the sliders.
+- **HSL** — rows of Hue/Saturation/Luminance of the selected zone with gradient tracks (Hue is the full but muted spectrum at the zone's lightness; Saturation is grey -> the selected Hue color; Luminance is black -> the Hue color -> white; the Saturation/Luminance gradients are repainted on a Hue change).
 - **Color** — a single color wheel of the selected zone (centered): dragging the dot sets Hue (angle from the top) and Saturation (radius, 0..100); below the wheel — numeric Hue (0..359) and Saturation (0..100) inputs synced with the dot; the Luminance slider is full width.
 - **Blending and Balance** — global NP3 fields (`blending`, `balance`, written to the file in either mode and independent of the zone), shown in both modes below the mode bodies, separated by a divider; each is one row with a label (no duplicate headings). No zone names are repeated above the wheel and under the buttons. The key `grade[zone] = [hue, chroma, brightness]` and the NP3 ranges do not change (Chroma is shown as Saturation; negative values are available in the HSL mode).
 - The Point Color tab is not implemented and not offered.

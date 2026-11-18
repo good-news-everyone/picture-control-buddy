@@ -9,11 +9,13 @@ State as of 2026-11-10. Goal and milestones: [stages.md](stages.md).
 | File | About |
 |---|---|
 | [np3-format.md](np3-format.md) | The NP3 format, SD card layout, NX Studio sidecars |
-| [camera-response.md](camera-response.md) | What was measured about Nikon and Lightroom processing |
+| [camera-response.md](camera-response.md) | What was measured about Nikon and NX Studio processing |
 | [tools.md](tools.md) | Modules, commands, data, workflow |
+| [tools/](tools/README.md) | Per-utility documentation: arguments and how each tool works |
 | [results.md](results.md) | All measurements: ΔE tables across versions |
 | [decisions.md](decisions.md) | Decisions, dead ends, found bugs, limitations |
 | [web-tests.md](web-tests.md) | Browser version (`web/`): reference tests against Python |
+| [test-plan.md](test-plan.md) | Test coverage gaps and the plan to close them |
 | [stages.md](stages.md) | Project goal and milestones: what is done, what is in progress, what comes later |
 | [roadmap.md](roadmap.md) | What is next and what we are waiting for |
 | [charts.md](charts.md) | Fitting from printed chart sheets — moved to the local chart project (`../np3-fit-charts`) |
@@ -25,7 +27,7 @@ State as of 2026-11-10. Goal and milestones: [stages.md](stages.md).
 
 ## In short
 
-- Final profile for the Astia preset: `out/fit4/NIKON/CUSTOMPC/PICCON01.NP3` (`NPF-FIT4`). The camera accepts it, the in-camera JPEG matches NX Studio (ΔE 0.97) and differs from Lightroom by ΔE 3.69.
+- Final profile for the Astia preset: `out/fit4/NIKON/CUSTOMPC/PICCON01.NP3` (`NPF-FIT4`). The camera accepts it, the in-camera JPEG matches NX Studio (ΔE 0.97) and differs from the target by ΔE 3.69.
 - Best result of the automatic process: `out/m3b` (`NPF-M3B`), 3 pairs and one render round, ΔE 2.84 on frames outside the fit. Downside: reds 6.34 vs 3.40 for FIT4.
 - Working tool: `match.py`, accepts NEF and DNG. Calibrated only for the Z f.
 - Portra and Fuji: `out/portra400_r2` and `out/fuji160_r2`, corrected over 5 frames. Prediction 3.39 and 2.46, not yet verified against real renders.

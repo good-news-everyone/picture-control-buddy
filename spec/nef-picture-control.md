@@ -23,7 +23,7 @@ A run with a TIFF walk in Node (a reconnaissance script, not kept):
 
 - `rawler` (web/raw.wasm) returns only `make, model, dng, sensor, wb, black, white, orientation, k` in `info` — it does **not** return the Picture Control, it must be parsed from the file bytes by us.
 - The block was found at offset ~37300: version `0200`, the custom style name `ktr-100-skinfix`, base `FLEXIBLE COLOR`. That is, the camera writes the full set: sharpening, contrast, highlights/shadows, whites/blacks, saturation; for Flexible Color also the Color Blender (hue/chroma/brightness for 8 colors) and Color Grading by zones.
-- The file also contains an **embedded Adobe XMP** (`crd:` — Camera Raw Defaults: SharpenRadius 2.00, Clarity2012, HueAdjustment* and so on, `CameraProfile` = "Camera Flexible Color") — these are Lightroom/ACR metadata, easy to confuse with the camera style; **not a source of truth**.
+- The file also contains an **embedded Adobe XMP** (`crd:` — Camera Raw Defaults: SharpenRadius 2.00, Clarity2012, HueAdjustment* and so on, `CameraProfile` = "Camera Flexible Color") — these are Adobe Camera Raw metadata, easy to confuse with the camera style; **not a source of truth**.
 - The second occurrence of `Nikon\0` (offset ~248824) is probably a copy in the preview/JPEG thumbnail; it is not needed for reading the style.
 
 ## Caveats and limitations

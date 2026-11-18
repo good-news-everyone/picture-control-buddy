@@ -1,6 +1,6 @@
 # Results
 
-dE2000 to the target. Target: the Lightroom preset (Adobe Standard, Astia Look, contrast/highlight/HSL/grading edits).
+dE2000 to the target. Target: the finished exports of the preset (Astia Look base, contrast/highlight/HSL/grading edits).
 
 ## Georgia: the ceiling on 60 frames
 
@@ -50,9 +50,9 @@ DSC_6582 and DSC_6702 did not take part in the FIT3 fitting. DSC_4902 and DSC_51
 | Reds | 4.50 | 3.33 |
 | Bright highlights, target Y 0.75-0.9 | 7.78 | 5.21 |
 | Sky, tones 270-315 | 2.60 | 3.15 |
-| Blown DSC_4902 (LR 5.4%) | 23.9% | 0% |
-| Blown DSC_6522 (LR 5.1%) | 11.5% | 6.1% |
-| Blown DSC_6702 (LR 0%) | 1.8% | 0% |
+| Blown DSC_4902 (target 5.4%) | 23.9% | 0% |
+| Blown DSC_6522 (target 5.1%) | 11.5% | 6.1% |
+| Blown DSC_6702 (target 0%) | 1.8% | 0% |
 | Skin DSC_4902 | 4.87 | 4.36 |
 | Skin DSC_5118 | 3.71 | 3.58 |
 
@@ -63,8 +63,8 @@ DSC_6582 and DSC_6702 did not take part in the FIT3 fitting. DSC_4902 and DSC_51
 | Comparison | 6755 | 6756 | 6757 | Mean |
 |---|---|---|---|---|
 | Camera JPEG vs NX | 0.97 | 0.83 | 1.11 | 0.97 |
-| Camera JPEG vs LR | 3.90 | 3.96 | 3.22 | 3.69 |
-| NX vs LR | 3.72 | 3.80 | 2.97 | 3.49 |
+| Camera JPEG vs target | 3.90 | 3.96 | 3.22 | 3.69 |
+| NX vs target | 3.72 | 3.80 | 2.97 | 3.49 |
 
 ## How many pairs are needed (prediction)
 
@@ -107,7 +107,7 @@ M3b on all 11 frames 2.85, FIT4 3.24. Neutral tones 2.53 vs 3.14. Reds 6.34 vs 3
 
 ## The `--scene` mode (prediction)
 
-There were no other cameras: Lightroom exports were distorted (crop, scale, tilt, perspective, 4:3, noise) or neighboring frames were taken. dE on the other frames.
+There were no other cameras: target exports were distorted (crop, scale, tilt, perspective, 4:3, noise) or neighboring frames were taken. dE on the other frames.
 
 | Case | Blocks | Exact pair |
 |---|---|---|
@@ -149,7 +149,7 @@ Mean outside the fit 9.0. Alignment 0.89-0.97. Profile from all four: `out/skl`.
 
 Fitting by SKL_3030 only (`out/test_nekit_autumn`): neutral 12.23, prediction on the same frame 3.54. The curve reaches white at an input of about 150 of 255.
 
-The Lightroom settings of the frames differ:
+The per-frame settings of the targets differ:
 
 | Setting | 3000 | 3024 | 3027 | 3030 |
 |---|---|---|---|---|
@@ -163,7 +163,7 @@ The Lightroom settings of the frames differ:
 | Dehaze | +9 | +39 | +39 | +18 |
 | Vibrance | +65 | +70 | +56 | +56 |
 
-Shared: Contrast -25, Saturation +5, own 20-point curve, grain 10, Adobe Standard, WB Custom.
+Shared: Contrast -25, Saturation +5, own 20-point curve, grain 10, WB Custom.
 
 ## DNG check
 
@@ -245,7 +245,7 @@ The reference 11 Z f pairs with one preset: NP3 1.40-3.63, own LUT 0.99-3.90, al
 
 ## Portra 400 and Fuji 160, correction by 5 frames (prediction)
 
-Z f, `--refine` from `portra400` and `fuji160` against real NX renders. Targets from Lightroom: As Shot, exposure 0, no masks. On the left is the error of the previous version's render, on the right the prediction. Not verified by renders of `_r2`.
+Z f, `--refine` from `portra400` and `fuji160` against real NX renders. Targets: As Shot, exposure 0, no masks. On the left is the error of the previous version's render, on the right the prediction. Not verified by renders of `_r2`.
 
 | Frame | portra400 | portra400_r2 | fuji160 | fuji160_r2 |
 |---|---|---|---|---|
@@ -341,9 +341,9 @@ Smoothness turned out to be irrelevant: with the penalty 3 and 10 times weaker, 
 
 The result with the light almost-grey pixels (`T-*`): **1.22**.
 
-## Lightroom preset: fitting without NX and Active D-Lighting
+## Fitting a preset without NX and Active D-Lighting
 
-2026-11-10. A new Lightroom preset (Camera Rich Tone Portrait profile, grain 18) on 11 South Africa frames, new for the development. `match.py` from three (6248, 6840, 5940) in 31 s, on the fitting frames the prediction vs the preset is 2.6-3.1. The NX pack `renders/sweep/lr_test_nx` with ADL off (0) in NX:
+2026-11-10. A new preset (Rich Tone Portrait base, grain 18) on 11 South Africa frames, new for the development. `match.py` from three (6248, 6840, 5940) in 31 s, on the fitting frames the prediction vs the preset is 2.6-3.1. The NX pack `renders/sweep/lr_test_nx` with ADL off (0) in NX:
 
 | | Fit, 3 | Validation, 8 |
 |---|---|---|
@@ -363,13 +363,13 @@ On 6550, 6088, 5940, 6248, 6366 our neutral is darker than NX by 3.2-6.1 L evenl
 
 The `match.py` prediction (3.00) matches what NX gives (2.84): the NX-render correction adds almost nothing, the second step through NX is not needed. Ceiling: a 9^3 3D LUT from our neutral to the preset, own per frame, on the held-out half of pixels 1.91 (1.51-2.36). The NP3 residual above the ceiling is about 0.9.
 
-More fitting frames, the same 5 held out (7100, 6635, 7247, 6878, 6088), our prediction vs the preset: 3 frames 2.98, 5 frames 3.08, 6 frames 2.99. On the fitting frames 2.90, on the held-out 2.99: the fit does not overfit, the mean shifts by zones and colors are up to 1-2. One shared color table for all frames (the honest ceiling of global processing) on the same held-out: 9^3 by 3 frames 2.64, by 6 frames 2.48; 17^3 by 3 frames 2.49, by 6 frames 2.34. NP3 lags it by 0.5-0.65 and does not gain from the number of frames, the table gains 0.15. The rest is done by the preset's local processing: Highlights -18, Shadows -19, Whites -39 are adaptive in Lightroom, plus grain 18 and sharpening 40. Three frames with a wide color coverage are enough for the fit.
+More fitting frames, the same 5 held out (7100, 6635, 7247, 6878, 6088), our prediction vs the preset: 3 frames 2.98, 5 frames 3.08, 6 frames 2.99. On the fitting frames 2.90, on the held-out 2.99: the fit does not overfit, the mean shifts by zones and colors are up to 1-2. One shared color table for all frames (the honest ceiling of global processing) on the same held-out: 9^3 by 3 frames 2.64, by 6 frames 2.48; 17^3 by 3 frames 2.49, by 6 frames 2.34. NP3 lags it by 0.5-0.65 and does not gain from the number of frames, the table gains 0.15. The rest is done by the preset's local processing: Highlights -18, Shadows -19, Whites -39 are adaptive in the target's processing, plus grain 18 and sharpening 40. Three frames with a wide color coverage are enough for the fit.
 
-The `--refine` correction by the draft's NX renders on the three fitting frames (`out/lr_test_r1`, pack `renders/sweep/lr_test_nx_r1`), vs Lightroom, 8 validation frames: NX draft 2.84 -> NX correction 2.57, our render 3.00 -> 2.83. On the fitting frames NX 2.69 -> 2.21. The correction transfers to new frames: it fixes a systematic error of the model, not noise. Our render vs NX for the correction is 1.26-2.11, as for the draft. The previous conclusion "the NX correction adds almost nothing" is wrong: the gain is about 0.27.
+The `--refine` correction by the draft's NX renders on the three fitting frames (`out/lr_test_r1`, pack `renders/sweep/lr_test_nx_r1`), vs the targets, 8 validation frames: NX draft 2.84 -> NX correction 2.57, our render 3.00 -> 2.83. On the fitting frames NX 2.69 -> 2.21. The correction transfers to new frames: it fixes a systematic error of the model, not noise. Our render vs NX for the correction is 1.26-2.11, as for the draft. The previous conclusion "the NX correction adds almost nothing" is wrong: the gain is about 0.27.
 
 ## Region breakdown, rare-color weight, frame analysis
 
-2026-11-10. Lightroom preset, 11 frames, NX renders `KC5F` (`lr_test_nx_de2k_f`) vs the targets. An NX substitute for comparing fits: the NX neutral (`lr_test_nx_adl`) through our profile model, 2.63 vs the real NX 2.58.
+2026-11-10. The preset, 11 frames, NX renders `KC5F` (`lr_test_nx_de2k_f`) vs the targets. An NX substitute for comparing fits: the NX neutral (`lr_test_nx_adl`) through our profile model, 2.63 vs the real NX 2.58.
 
 The region errors of `KC5F` in NX repeat across frames: saturated warm colors (vest, car) are darker by 3-7 L (6840 orange L -6.7, red -5.9; 7155 vest L -4.8 and C +8.9); skin is darker by 2-5 L at the same chroma, hence redder; the sky is lighter and paler (6248 L +3.5 C -4.8, 6635 L +3.5 and +16 degrees toward magenta); teal and water are -14...-21 degrees toward green. Per pixels 2.58, per color bins 3.15.
 
@@ -397,7 +397,7 @@ Check on frames outside the fit (NX substitute), halves A = 5940 6248 6840 7155 
 On five frames outside all fits (6088 6366 6550 7100 7247): `KC5F` 2.72 / 3.29, the same three frames with the new weight 2.80 / 3.27 (sky 3.1 -> 2.8, greys L -0.1 -> -0.7), the `--analyze` advice (7155 6878 6635) 2.72 / 3.36 (sky 2.2, saturated warm 3.7 -> 4.8). Conclusions:
 - The rare-color weight with development trust: the gain is small (0.03-0.06), the error moves from large areas to rare colors. Adopted: the eye sees the sky, skin and the vest, not the mean.
 - More frames and color coverage on new frames do not help. What matters is the set's lift: fitting by the half with darker targets made the other half darker by 1.2 L. The set advice keeps the mean lift at the median.
-- Colors in the target argue with each other: Lightroom compresses a very saturated orange (vest) and does not touch a less saturated one (car); NP3 cannot do that, a frame with the vest in the fit spoils the other warm colors.
+- Colors in the target argue with each other: the target's processing compresses a very saturated orange (vest) and does not touch a less saturated one (car); NP3 cannot do that, a frame with the vest in the fit spoils the other warm colors.
 - Profiles `out/lr_test_p0.5_old`, `_off`, `_all` for checking in NX.
 
 ## South Africa pack: sky and bright colors (sweep5)
@@ -433,7 +433,7 @@ The model before retraining on these new frames: sets 0.67, colors ±40 0.51, ±
 | Tool pairs | 80 | 0.71 | 5.17 |
 | 30 recipes with all tools, outside training | 300 | **1.00** | 6.86 |
 
-The previous `sweep2` groups did not change: 1.07 / 0.75 / 0.86. `match.py` now also fits Saturation, three zone brightnesses, Blending and Balance (17 s for three pairs). Lightroom preset, our prediction: fit 2.82 -> 2.73, validation 3.00 -> 2.94; the fit took zone brightnesses -32 and -26, Saturation +4, kept Blending and Balance. Check in NX (`renders/sweep/lr_test_nx_all`, vs the Lightroom preset):
+The previous `sweep2` groups did not change: 1.07 / 0.75 / 0.86. `match.py` now also fits Saturation, three zone brightnesses, Blending and Balance (17 s for three pairs). The preset, our prediction: fit 2.82 -> 2.73, validation 3.00 -> 2.94; the fit took zone brightnesses -32 and -26, Saturation +4, kept Blending and Balance. Check in NX (`renders/sweep/lr_test_nx_all`, vs the preset):
 
 | | fit | validation |
 |---|---|---|

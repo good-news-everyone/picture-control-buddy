@@ -31,10 +31,10 @@ python3 analyze.py [--adl Off] [--save name] a.NEF b.NEF folder/ ...
 
 Rules for pairs:
 - Different scenes that together cover the needed colors: sky, skin, saturated red.
-- Lightroom export with all metadata.
+- The finished export must carry all metadata (the XMP block).
 - WB and exposure from the XMP are subtracted automatically; for `--refine` they are taken from `out/<name>/pairs.json`, so the paths to the finished shots must match. The correction copies `pairs.json` into the new version. Profiles from `triage.py` have no such file.
 - A custom version name can be given first: `--refine name2 name render.TIF a.jpg`. Existing folders are not overwritten by the auto-name.
-- `--refine` needs both files per frame: an NX Studio render with the previous profile and a Lightroom export with the preset. The export can be JPEG or TIFF.
+- `--refine` needs both files per frame: an NX Studio render with the previous profile and a target export with the preset. The export can be JPEG or TIFF.
 - The name in the command is not verified against the render: the code assumes the TIF was made with profile `name`. There is no profile name in a TIF, the sidecar stores only the last assignment.
 - A frame not from the draft with WB or exposure edits needs a `pairs.json` entry, otherwise the edits go into the profile. Frames with As Shot and zero exposure have nothing to take out.
 - Profiles from `triage.py` lack `pairs.json`: copy the file from the shared profile before the correction.
@@ -43,7 +43,6 @@ Rules for pairs:
 ### Different shots of one scene, another camera
 
 ```
-python3 match.py --chart name folder|patches.npz [--hold sheet=N|series=N|ev=N]   # printed sheets, see charts.md in np3-fit-charts
 python3 match.py --scene name a.NEF a.jpg [b.NEF b.jpg ...]
 python3 match.py --scene-refine name render_a.TIF a.jpg [...]
 ```
@@ -105,20 +104,11 @@ The render is approximate, numbers in `results.md`. A real render is needed for 
 python3 check.py renders/check/<folder with NX renders>
 ```
 
-Targets are taken from `renders/check/lightroom/` and `renders/check/done/`. Pairs are saved to `data/check.npz`. Not suitable for own frames: the XMP crop and the WB/exposure take-out are not accounted for. The render error on one's own frame is shown by the `now` line in `--refine`.
-
-### Preset calibration by the chart (the manual FIT1-FIT4 path)
-
-```
-python3 extract_chart.py          # patches of 29 probes and targets -> data/chart.npz
-python3 fit.py fit1               # fitting by the chart
-python3 fit.py fit2 fit1          # correction by the FIT1.TIF render
-python3 fit_photos.py fit3 fit2   # the chart and frames from data/check.npz
-```
-
-(the chart path now lives in the np3-fit-charts project)
+Targets are taken from `renders/check/done/`. Pairs are saved to `data/check.npz`. Not suitable for own frames: the XMP crop and the WB/exposure take-out are not accounted for. The render error on one's own frame is shown by the `now` line in `--refine`.
 
 ## Modules
+
+Per-utility documentation (arguments, internals): [tools/](tools/README.md).
 
 | File | Purpose |
 |---|---|
@@ -132,7 +122,7 @@ python3 fit_photos.py fit3 fit2   # the chart and frames from data/check.npz
 | `profile_model.py` | The step-based profile model: grading, blender, curve. Trained on single probes `data/sweep.npz`, `data/sweep3.npz` and `data/sweep4.npz` (Saturation, tonal sliders, zone masks, grading brightness) -> `data/profile_model.npz` (about 5 minutes), validation on `data/sweep2.npz`. It is used by `render.py`, `ui.py`, `compare.py`, `match.py`. `Pixels` precomputes everything that depends only on the neutral and remembers blender inputs by grading, and the pre-curve result by grading and blender: the numerical jacobian moves one parameter at a time. Fitting FIT4 from three pairs: 25 s instead of 313 |
 | `vignette.py` | Vignette correction from the NEF and the embedded JPEG, cache `data/vignette/` |
 | `devmodel.py` | Training NEF development -> Nikon neutral; `--render` writes `data/devmodel_render.npz` for `render.py` and `match.py` |
-| `wbmap.py` | Lightroom Temperature/Tint <-> NEF WB_RBLevels |
+| `wbmap.py` | The XMP Temperature/Tint -> NEF WB_RBLevels relation |
 | `match.py` | The main command |
 | `strength.py` | Profile versions at different strengths |
 | `render.py` | Approximate NEF or DNG render with an NP3: development and a baked 33^3 3D LUT |
@@ -140,7 +130,7 @@ python3 fit_photos.py fit3 fit2   # the chart and frames from data/check.npz
 | `compare.py`, `compare.html` | A page comparing the prediction with NX renders (kept locally in `_local/`) |
 | `triage.py` | Pair triage: a profile per frame and a fit assessment (kept locally in `_local/`) |
 | `scene.py` | Alignment of different shots and color blocks |
-| `check.py` | Checking NX renders against Lightroom exports (kept locally in `_local/`) |
+| `check.py` | Checking NX renders against target exports (kept locally in `_local/`) |
 | `match_check.py` | Fit validation by NX renders: `fit` fits 14 finished profiles from three pairs with NX exports, `pack` puts the original and fitted profiles onto 8 other frames into `renders/sweep/match_check`, `eval` compares the NX renders of the fitted and original |
 | `eval_path.py` | Prediction from a NEF against the real FIT4 render (kept locally in `_local/`) |
 | `how_many.py` | How many pairs are needed (kept locally in `_local/`) |
@@ -149,8 +139,6 @@ python3 fit_photos.py fit3 fit2   # the chart and frames from data/check.npz
 | `pick_frame.py` | NEF rating by color coverage |
 | `analyze.py` | Candidate scoring for fitting, region reports |
 | `test_np3.py` | Checks |
-
-The chart-specific modules (`chart_patches.py`, `charts.py`, `print_chart.py`, `extract_chart.py`, `fit_photos.py`, `test_charts.py`) live in the np3-fit-charts project, as do the training-data collections (`data/sweep*.npz` etc. locally in `_local/`).
 
 ## How `match.py` works
 
@@ -191,9 +179,9 @@ Unreadable file, poor alignment, no XMP, masks, vignette, grain, colors almost o
 |---|---|
 | `out/pack1/` | Probes `NIKON/CUSTOMPC`, `chart.png`, `manifest.json`, chart NEFs (gitignored, generated) |
 | `out/fit1...fit4/`, `out/m1`, `m1b`, `m3`, `m3b`, `test1`, `test1b` | Profiles (gitignored) |
-| `portra400/`, `fuji160/` | NEFs, Lightroom targets, NX renders (gitignored, local) |
+| `portra400/`, `fuji160/` | NEFs, targets, NX renders (gitignored, local) |
 | `out/portra400*`, `out/fuji160*` | Profiles. Working `_r2`, `out/fuji160_r1` was fitted to wrong targets (gitignored) |
-| `renders/check/` | 11 NEFs and renders by `nxstudio*` folders; Lightroom exports in `lightroom/` and `done/` (gitignored) |
+| `renders/check/` | 11 NEFs and renders by `nxstudio*` folders; target exports in `done/` (gitignored) |
 | `renders/dev/` | 35 NEFs and neutral renders `neutral/` for development training (gitignored) |
 | `renders/dev_africa/` | 25 NEFs from South Africa and neutral renders `neutral/` for development training: magenta, red, orange, skin, sky. A new set is added to `devpairs.SETS` (gitignored) |
 | `renders/sweep/` | NEF copies and sidecars of `sweep.py`, export into `<set>/tif/`. `pilot`: 12 copies, export in the folder root (gitignored) |
