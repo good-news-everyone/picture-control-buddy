@@ -27,6 +27,33 @@ const rootFile = (p) => {
   return null;
 };
 
+// The parallel Jacobian (lib/fit-pool.js) for the Node fit levels 1f and 9. Node has no Web
+// Worker, so the lib/fit-jac-worker.js helpers run in worker_threads behind a tiny `self` shim.
+// The orchestrator runs 1f and 9 concurrently, so each takes half of the spare cores (>= 2).
+async function nodeFitPool() {
+  const { Worker } = await import("node:worker_threads");
+  const { pathToFileURL } = await import("node:url");
+  const { availableParallelism } = await import("node:os");
+  const { createFitPool } = await import("./lib/fit-pool.js");
+  const helperUrl = pathToFileURL(path.join(HERE, "lib/fit-jac-worker.js")).href;
+  const shim = `const { parentPort, workerData } = require("node:worker_threads");
+    globalThis.self = { postMessage: (m, t) => parentPort.postMessage(m, t), onmessage: null };
+    parentPort.on("message", (d) => self.onmessage && self.onmessage({ data: d }));
+    import(workerData.url);`;
+  const spawn = () => {
+    const w = new Worker(shim, { eval: true, workerData: { url: helperUrl } });
+    const o = { postMessage: (m, t) => w.postMessage(m, t), terminate: () => w.terminate(), onmessage: null, onerror: null };
+    w.on("message", (d) => o.onmessage && o.onmessage({ data: d }));
+    w.on("error", (e) => o.onerror && o.onerror(e));
+    return o;
+  };
+  const size = Math.max(2, Math.min(8, Math.floor((availableParallelism() - 1) / 2)));
+  const profileMeta = JSON.parse(await readFile(path.join(HERE, "model/profile.json"), "utf8"));
+  const pb = await readFile(path.join(HERE, "model/profile.bin"));
+  const profileBin = pb.buffer.slice(pb.byteOffset, pb.byteOffset + pb.byteLength);
+  return { size, makePool: (qs) => createFitPool({ spawn, size, profileMeta, profileBin, qs }) };
+}
+
 export const LEVELS = {
   "1": level1,
   "1a": level1A,
@@ -410,6 +437,9 @@ async function level1f(ctx) {
   const FIT_X_NORM_TOL = 1e-3;    // measured 2026-11-19: |dx|_2 <= 1.4e-5 (LAPACK-vs-JS divergence)
   const FIT_COST_SEQ_TOL = 1e-4;  // measured 2026-11-19: max rel diff over iterations.costs <= 1.1e-8
   const SCORE_TOL = 0.05;
+  // the single fit runs the sync lm (the reference of the parallel check below); the two-pair
+  // fit — the long one — runs through the parallel Jacobian, bit-identical to sync by that check
+  const fitPool = await nodeFitPool();
   const syncFits = {};
   for (const [name, keys] of [["single", ["dsc_6550"]], ["two", ["dsc_6550", "skl_3024"]]]) {
     const fdoc = JSON.parse(await readFile(path.join(HERE, "golden/fit", `${name}.json`), "utf8"));
@@ -424,7 +454,14 @@ async function level1f(ctx) {
       `1f predict ${name}: cost ${cost0.toFixed(6)} vs golden ${fdoc.cost.toFixed(6)} (rel ${rel0.toExponential(1)})`);
     // the full fit from the zero init
     const t0 = Date.now();
-    const got = F.fit(qs, fdoc.iterations.requested);
+    const parallel = name === "two";
+    let got;
+    if (parallel) {
+      const pool = await fitPool.makePool(qs);
+      try { got = await F.fitAsync(qs, fdoc.iterations.requested, {}, pool.jacobian); } finally { pool.terminate(); }
+    } else {
+      got = F.fit(qs, fdoc.iterations.requested);
+    }
     const secs = (Date.now() - t0) / 1000;
     syncFits[name] = { got, qs, iters: fdoc.iterations.requested, secs };
     const relF = Math.abs(got.cost - fdoc.cost) / fdoc.cost;
@@ -458,33 +495,16 @@ async function level1f(ctx) {
       `1f fit ${name}: cost rel ${relF.toExponential(1)}, |dx|_2 ${normX.toExponential(1)},` +
       ` history ${seqOk ? "same length" : "DIFFERS"} (rel ${maxC.toExponential(1)}),` +
       ` control ${ctrlSame ? "exact" : "DIFFERS"}, ${secs.toFixed(1)}s` +
+      (parallel ? ` (parallel, ${fitPool.size} helpers)` : " (sync)") +
       (bad.length ? ` — ${bad.join("; ")}` : ""));
   }
 
   // --- the parallel Jacobian (lib/fit-pool.js + lib/fit-jac-worker.js): bit-identical to the sync fit ---
-  // Node has no Web Worker, so the helpers run in worker_threads behind a tiny `self` shim.
   {
-    const { Worker } = await import("node:worker_threads");
-    const { pathToFileURL } = await import("node:url");
-    const { createFitPool, poolSize } = await import("./lib/fit-pool.js");
-    const helperUrl = pathToFileURL(path.join(HERE, "lib/fit-jac-worker.js")).href;
-    const shim = `const { parentPort, workerData } = require("node:worker_threads");
-      globalThis.self = { postMessage: (m, t) => parentPort.postMessage(m, t), onmessage: null };
-      parentPort.on("message", (d) => self.onmessage && self.onmessage({ data: d }));
-      import(workerData.url);`;
-    const spawn = () => {
-      const w = new Worker(shim, { eval: true, workerData: { url: helperUrl } });
-      const o = { postMessage: (m, t) => w.postMessage(m, t), terminate: () => w.terminate(), onmessage: null, onerror: null };
-      w.on("message", (d) => o.onmessage && o.onmessage({ data: d }));
-      w.on("error", (e) => o.onerror && o.onerror(e));
-      return o;
-    };
     const { got, qs, iters, secs } = syncFits.single;
+    const size = fitPool.size;
     const t0 = Date.now();
-    const { availableParallelism } = await import("node:os");
-    const size = Math.max(2, poolSize(availableParallelism()));    // this machine's real pool size
-    const pool = await createFitPool({ spawn, size, profileMeta: pmeta,
-      profileBin: pbin.buffer.slice(pbin.byteOffset, pbin.byteOffset + pbin.byteLength), qs });
+    const pool = await fitPool.makePool(qs);
     let par;
     try { par = await F.fitAsync(qs, iters, {}, pool.jacobian); } finally { pool.terminate(); }
     const psecs = (Date.now() - t0) / 1000;
@@ -895,14 +915,17 @@ async function level9(ctx) {
   const pythonMean = sums.de.map((v, i) => (sums.n[i] > 0 ? v / sums.n[i] : null));
   const TOL = 0.1;    // the level-9 tolerance: no group worse than Python by more than 0.1 dE
 
+  // the fits run as in the page: free sampling + the parallel Jacobian (lib/fit-pool.js)
+  const fitPool = await nodeFitPool();
   // the single-pair case asserts the quality bar; the two-pair case runs free as the
   // runtime/convergence data point (its per-group table is printed below — see web-tests.md
   // for why the 0.1 dE bar is not asserted there)
   for (const [name, keys, assertBar] of [["single", ["dsc_6550"], true],
                                          ["two", ["dsc_6550", "skl_3024"], false]]) {
     const t0 = Date.now();
-    const out = S.runFreeFit(keys.map((k) => prepared[k]),
-                             { dev, model, seed: 0, iters: 30, baseName: "level9" });
+    const out = await S.runFreeFitParallel(keys.map((k) => prepared[k]),
+                                           { dev, model, seed: 0, iters: 30, baseName: "level9",
+                                             makePool: fitPool.makePool });
     const secs = (Date.now() - t0) / 1000;
     // the browser control applied to the prepared x through the CPU prediction path
     const p = PR.paramsOf(JSON.parse(JSON.stringify(out.control)), model);
