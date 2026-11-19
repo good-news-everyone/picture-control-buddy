@@ -44,7 +44,9 @@ export function createBeforeAfter(slot, { state, renderCurrent }) {
 
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== " " || ev.repeat) return;
-    if (editableTarget(ev.target) || !state.raw) return;   // only after a successful RAW development
+    // only the manual-editor step (in a text field space is the native input undo anyway);
+    // on the Comparison screen space is the hold-key image swap (compare-view.js)
+    if (editableTarget(ev.target) || !state.raw || state.step !== "edit") return;
     ev.preventDefault();   // do not scroll the page with space
     show(true);
   });

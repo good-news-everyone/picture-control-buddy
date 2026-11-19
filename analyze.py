@@ -284,10 +284,15 @@ def region_sums(pred: np.ndarray, target: np.ndarray) -> dict:
     dh = (hp - ht + 180) % 360 - 180
     n = len(GROUPS)
     b = bins(lt)
+    # Per-group target/render Lab sums (swatch means = sums / n): the report table shows mean Lab
+    # per group, they cannot be derived from the dE/dL/dC sums above.
+    t_lab = np.stack([np.bincount(g, lt[:, c], n) for c in range(3)], 1)
+    p_lab = np.stack([np.bincount(g, lp[:, c], n) for c in range(3)], 1)
     return {"n": np.bincount(g, minlength=n), "de": np.bincount(g, de, n), "dL": np.bincount(g, lp[:, 0] - lt[:, 0], n),
             "dC": np.bincount(g, cp - ct, n), "dh": np.bincount(g, np.where(ct > 8, dh, 0), n),
             "nh": np.bincount(g, (ct > 8).astype(float), n),
-            "bn": np.bincount(b, minlength=NBINS), "bde": np.bincount(b, de, NBINS), "all": float(de.mean())}
+            "bn": np.bincount(b, minlength=NBINS), "bde": np.bincount(b, de, NBINS), "all": float(de.mean()),
+            "tLabSum": t_lab, "pLabSum": p_lab}
 
 
 def region_line(s: dict, min_share: float = REPORT_SHARE) -> str:
@@ -309,7 +314,7 @@ def bin_mean(s: dict, min_n: int = 50) -> float:
 
 
 def total(rows: list[dict]) -> dict:
-    out = {k: sum(r[k] for r in rows) for k in ("n", "de", "dL", "dC", "dh", "nh", "bn", "bde")}
+    out = {k: sum(r[k] for r in rows) for k in ("n", "de", "dL", "dC", "dh", "nh", "bn", "bde", "tLabSum", "pLabSum")}
     out["all"] = float(np.mean([r["all"] for r in rows]))
     return out
 

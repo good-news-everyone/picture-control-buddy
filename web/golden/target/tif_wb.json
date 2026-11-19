@@ -1,0 +1,61 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "tif_wb.tif",
+ "case": "TIFF, XMP tag 700 with WB + exposure edits",
+ "image": {
+  "format": "TIFF",
+  "w": 208,
+  "h": 160,
+  "mode": "RGB",
+  "storedSize": [
+   208,
+   160
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": false,
+   "profile": null,
+   "treatedAsSrgb": true,
+   "normalizedTo": "sRGB (assumed)"
+  }
+ },
+ "xmp": {
+  "Version": "18.5",
+  "ProcessVersion": "15.4",
+  "Make": "NIKON CORPORATION",
+  "Model": "NIKON Z f",
+  "WhiteBalance": "Custom",
+  "Temperature": "6500",
+  "Tint": "+12",
+  "Exposure2012": "+0.50",
+  "_masks": false
+ },
+ "gain": [
+  1.3815363047570182,
+  1.4142135623730951,
+  0.9667350436738954
+ ],
+ "gainNote": "WB 6500 K, +12 (R x0.977, B x0.684), exposure +0.50",
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   208,
+   160
+  ],
+  "xmpHasLightroom": true,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "tif_wb.tif: read only the 208x160 preview, better give a JPEG or TIFF"
+ ],
+ "content": {
+  "clippedShare": 0.0
+ },
+ "exercises": "the edit_gain path on TIFF: XMP lives in TIFF tag 700, not a JPEG APP1 segment"
+}

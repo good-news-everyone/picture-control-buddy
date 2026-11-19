@@ -1,0 +1,127 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "jpg_masks.jpg",
+ "case": "JPEG, MaskGroupBasedCorrections / MaskGroupBasedCorrections_ (local masks)",
+ "image": {
+  "format": "JPEG",
+  "w": 384,
+  "h": 256,
+  "mode": "RGB",
+  "storedSize": [
+   384,
+   256
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": false,
+   "profile": null,
+   "treatedAsSrgb": true,
+   "normalizedTo": "sRGB (assumed)"
+  }
+ },
+ "xmp": {
+  "Version": "18.5",
+  "ProcessVersion": "15.4",
+  "Make": "NIKON CORPORATION",
+  "Model": "NIKON Z f",
+  "WhiteBalance": "As Shot",
+  "MaskGroupBasedCorrections": "&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;MaskGroupBasedCorrections version=&quot;1.0&quot;&gt;&lt;/MaskGroupBasedCorrections&gt;",
+  "MaskGroupBasedCorrections_1": "{&quot;name&quot;:&quot;Mask 1&quot;,&quot;classification&quot;:&quot;linear&quot;,&quot;maskGrads&quot;:[],&quot;maskBrushes&quot;:[{&quot;value&quot;:20}],&quot;maskCircles&quot;:[],&quot;maskPolygons&quot;:[]}",
+  "_masks": true
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   384,
+   256
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": true,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "jpg_masks.jpg: read only the 384x256 preview, better give a JPEG or TIFF",
+  "jpg_masks.jpg: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile",
+  "jpg_masks.jpg: has masks, local corrections are not carried into NP3"
+ ],
+ "content": {
+  "clippedShare": 0.0
+ },
+ "ref": {
+  "file": "jpg_masks.ref.f32",
+  "gridW": [
+   0,
+   12,
+   24,
+   37,
+   49,
+   61,
+   74,
+   86,
+   98,
+   111,
+   123,
+   135,
+   148,
+   160,
+   172,
+   185,
+   197,
+   210,
+   222,
+   234,
+   247,
+   259,
+   271,
+   284,
+   296,
+   308,
+   321,
+   333,
+   345,
+   358,
+   370,
+   383
+  ],
+  "gridH": [
+   0,
+   11,
+   22,
+   33,
+   44,
+   55,
+   66,
+   77,
+   88,
+   99,
+   110,
+   121,
+   133,
+   144,
+   155,
+   166,
+   177,
+   188,
+   199,
+   210,
+   221,
+   232,
+   243,
+   255
+  ],
+  "source": "raw",
+  "browserMaxLevels": 0.5
+ },
+ "exercises": "the xmpMasks check and the masks warning"
+}

@@ -1,0 +1,115 @@
+{
+ "schemaVersion": 1,
+ "kind": "preparedPair",
+ "id": "skl_3024__dsc_5584",
+ "files": {
+  "raw": "SKL_3024.dng",
+  "target": "DSC_5584.jpg"
+ },
+ "generation": {
+  "session": 0,
+  "pair": 0,
+  "task": 0
+ },
+ "cancelled": false,
+ "superseded": false,
+ "warnings": [],
+ "role": "blocked",
+ "h3": 256,
+ "w3": 170,
+ "size": {
+  "w": 512,
+  "h": 768
+ },
+ "ncc": 0.025087304413318634,
+ "transform": {
+  "crop": {
+   "hasCrop": true,
+   "left": 0.006742,
+   "top": 0.02427,
+   "right": 0.993258,
+   "bottom": 0.97573,
+   "angleDeg": -0.95,
+   "angleSign": 1
+  },
+  "orientation": 1,
+  "lensRadial": {
+   "scale": 1.046,
+   "k": 0.04000000000000002
+  },
+  "radialScale": 1.104,
+  "radialK": -0.088,
+  "scale": 1.1349120000000001,
+  "warpScale": 1.028,
+  "shiftX": -0.72,
+  "shiftY": 11.520000000000003
+ },
+ "vignette": {
+  "a": -0.15183407297644932,
+  "b": 0.49373745827250104
+ },
+ "gain": [
+  0.8464282165934286,
+  0.8705505632961241,
+  0.7753922605916914
+ ],
+ "gainNote": "WB 5450 K, +14 (R x0.972, B x0.891), exposure -0.20",
+ "checks": {
+  "camera": "NIKON Z 8",
+  "adl": "?",
+  "targetSize": [
+   3333,
+   5000
+  ],
+  "xmpHasLightroom": true,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 18.0,
+  "blocked": {
+   "code": "ncc_low",
+   "detail": "ncc=0.025 < 0.6"
+  }
+ },
+ "analysis": {
+  "name": "SKL_3024",
+  "ncc": 0.025,
+  "adl": "?",
+  "groups": {
+   "greys": 0.372329650092081,
+   "skin": 0.0,
+   "warm saturated": 0.017288213627992634,
+   "warm muted": 0.01655156537753223,
+   "yellows": 0.11535451197053408,
+   "greens": 0.023089318600368326,
+   "teal/water": 0.11942909760589318,
+   "sky": 0.25041436464088396,
+   "dark blues": 0.08554327808471456,
+   "purple": 0.0
+  },
+  "L": 39.51618622501345,
+  "dark": 0.3069852941176471,
+  "light": 0.010477941176470587,
+  "clipped": 0.001838235294117647,
+  "lift": 3.1149352427870767,
+  "verdict": {
+   "state": "bad",
+   "reasons": [
+    "alignment 0.03"
+   ]
+  },
+  "warnings": [
+   "DSC_5584.jpg: grain from the preset has no place in NP3"
+  ]
+ },
+ "arrays": {
+  "x": "pair/skl_3024__dsc_5584.x.f32.br",
+  "y": "pair/skl_3024__dsc_5584.y.f32.br",
+  "masks": "pair/skl_3024__dsc_5584.masks.u8",
+  "maskPlanes": [
+   "clip",
+   "report",
+   "valid",
+   "nearWhite"
+  ]
+ }
+}

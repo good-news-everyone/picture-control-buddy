@@ -1,0 +1,111 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "tif_icc.tif",
+ "case": "TIFF, embedded non-sRGB ICC",
+ "image": {
+  "format": "TIFF",
+  "w": 208,
+  "h": 160,
+  "mode": "RGB",
+  "storedSize": [
+   208,
+   160
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": true,
+   "profile": "np3-target-adobe v1.0\n",
+   "treatedAsSrgb": false,
+   "normalizedTo": "sRGB (converted via the embedded profile)"
+  }
+ },
+ "xmp": {
+  "_masks": false
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   208,
+   160
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "tif_icc.tif: read only the 208x160 preview, better give a JPEG or TIFF",
+  "tif_icc.tif: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile"
+ ],
+ "content": {
+  "clippedShare": 0.0005
+ },
+ "iccMatrix": {
+  "m": [
+   0.715200549578014,
+   0.2848043478339631,
+   8.692097447577658e-05,
+   6.015138395696539e-06,
+   1.0000097813422362,
+   -2.275894072319027e-05,
+   9.501220204523226e-07,
+   0.04117224823693754,
+   0.9584560521640633
+  ],
+  "trc": [
+   {
+    "x": 0,
+    "r": 0.0,
+    "g": 0.0,
+    "b": 0.0
+   },
+   {
+    "x": 0.1,
+    "r": 0.010025177386129548,
+    "g": 0.010025177386129548,
+    "b": 0.010025177386129548
+   },
+   {
+    "x": 0.25,
+    "r": 0.05088120851453422,
+    "g": 0.05088120851453422,
+    "b": 0.05088120851453422
+   },
+   {
+    "x": 0.5,
+    "r": 0.21404592965590907,
+    "g": 0.21404592965590907,
+    "b": 0.21404592965590907
+   },
+   {
+    "x": 0.75,
+    "r": 0.5225185015640498,
+    "g": 0.5225185015640498,
+    "b": 0.5225185015640498
+   },
+   {
+    "x": 0.9,
+    "r": 0.7874189364461738,
+    "g": 0.7874189364461738,
+    "b": 0.7874189364461738
+   },
+   {
+    "x": 1.0,
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.0
+   }
+  ]
+ },
+ "exercises": "ICC normalization on TIFF"
+}

@@ -22,6 +22,11 @@ State as of 2026-11-10. Goal and milestones: [stages.md](stages.md).
 | [ui.md](ui.md) | Interface specification: from a RAW + JPEG pair to manual NP3 adjustment |
 | [ui-manual-mvp.md](ui-manual-mvp.md) | First iteration: RAW upload, sliders, curve, strength, NP3 import and export in the browser |
 | [ui-manual-mvp-plan.md](ui-manual-mvp-plan.md) | Implementation and verification plan for the manual-adjustment MVP |
+| [ui-plan.md](ui-plan.md) | Work plan for the full RAW + target fitting interface (all steps) |
+| [ui-mobile.md](ui-mobile.md) | Mobile version: separate `web/mobile.html` on the shared JS core, load-time redirect, single-tool panel, touch gestures, Lucide icons |
+| [ui-mobile-plan.md](ui-mobile-plan.md) | Agent work plan for the mobile version: fixed contracts, file ownership, stages M0–M4 with tasks, tests and a log |
+| [web-schemas.md](web-schemas.md) | Serializable contracts: prepared pair, fit result, report, golden fixture plan |
+| [z8-calibration.md](z8-calibration.md) | Z8 calibration: shot list, procedure, known Z8-specific issues |
 | [external.md](external.md) | Third-party projects and licenses |
 | [memory/](memory/) | Copies of the Claude memory notes about the project |
 

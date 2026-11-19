@@ -14,7 +14,7 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  body { display: grid; grid-template-columns: 260px 1fr 330px; }
+  body { display: grid; grid-template-columns: 260px 1fr 330px 380px; }
   aside { background: var(--panel); overflow: auto; padding: 14px; }
   #files { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   #files > :last-child { margin-bottom: 2px; }
@@ -137,14 +137,231 @@
   #nogl { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center;
     padding: 24px; text-align: center; }
   #nogl[hidden] { display: none; }   /* otherwise the display:grid above overrides the hidden attribute */
-  @media (max-width: 980px) { body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; }
+
+  /* Report panel (stage 5B, spec/ui.md "Report") — the same component on the Compare
+     screen and beside the manual editor; hidden on Start/More and narrow screens */
+  #report { display: none; background: var(--panel); border-left: 1px solid var(--line);
+    overflow: auto; padding: 14px; }
+  body.step-edit #report, body.step-compare #report { display: block; }
+  #rep-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #rep-scope { flex: 1; min-width: 150px; margin: 0; }
+  #rep-updating { color: var(--dim); font-size: 12px; }
+  #rep-body.updating { opacity: .55; }   /* the previous report stays, dimmed, while recomputing */
+  #rep-empty { color: var(--dim); margin-top: 12px; }
+  .rep-kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0;
+    font-variant-numeric: tabular-nums; }
+  .rep-kv dt { color: var(--dim); } .rep-kv dd { margin: 0; text-align: right; }
+  #rep-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #rep-table th { text-align: right; color: var(--dim); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em; cursor: pointer; user-select: none;
+    padding: 2px 4px; border-bottom: 1px solid var(--line); }
+  #rep-table th.tg, #rep-table td.tg { text-align: left; }
+  #rep-table td { padding: 2px 4px; text-align: right; border-bottom: 1px solid #2a2a2a; }
+  #rep-table tbody tr { cursor: pointer; }
+  #rep-table tbody tr:hover { background: #2a2a2a; }
+  #rep-table tbody tr.sel { background: #383838; }
+  .rep-sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line);
+    display: inline-block; vertical-align: middle; }
+  #rep-map { width: 100%; image-rendering: pixelated; border: 1px solid var(--line);
+    border-radius: 3px; }
+  .rep-legend { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  #rep-legend-bar { width: 120px; height: 8px; border-radius: 2px; }
+  #rep-legend-ticks { flex: 1; display: flex; justify-content: space-between;
+    color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .rep-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--dim);
+    font-size: 10px; }
+  .rep-chip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  #rep-overlay-box { display: flex; align-items: center; gap: 6px; color: var(--dim);
+    font-size: 12px; margin: 4px 0 0; }
+  .rep-prow { display: grid; grid-template-columns: 1fr 44px 56px; gap: 2px 8px;
+    font-variant-numeric: tabular-nums; padding: 1px 0; }
+  .rep-prow .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rep-prow .val { text-align: right; }
+  .rep-prow.zero { opacity: .4; }              /* zero fields are muted (spec/ui.md) */
+  .rep-prow.clip .val:last-child { color: var(--bad); font-weight: 600; }
+  .rep-prow.head { color: var(--dim); font-size: 10px; text-transform: uppercase;
+    letter-spacing: .04em; }
+  .rep-delta { color: var(--ok); font-size: 10px; margin-left: 4px; }
+  #rep-curve svg { width: 100%; background: #202020; border: 1px solid var(--line);
+    border-radius: 3px; }
+  .rep-curve-line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+
+  /* Start screen (stage 1 of the full flow, spec/ui.md step 1) */
+  #start { display: none; grid-column: 1 / -1; overflow: auto; }
+  body.step-start { grid-template-columns: 1fr; }
+  body.step-start #start { display: block; }
+  body.step-start #files, body.step-start #view, body.step-start #panel { display: none; }
+  .start-col { max-width: 780px; margin: 0 auto; padding: 24px 18px 56px; }
+  .start-col > .hint { margin: 4px 0 0; }
+  .start-col ul.dash { margin: 4px 0 12px; padding-left: 18px; }
+  .start-col ul.dash li { margin: 3px 0; }
+  .zones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 6px; }
+  .zone { border: 1px dashed #555; border-radius: 6px; padding: 14px 10px; text-align: center;
+    color: var(--dim); cursor: pointer; }
+  .zone.over { border-color: var(--accent); color: var(--accent); }
+  .zone b { color: inherit; font-weight: 600; }
+  #pairs { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+  .pair { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px 10px; }
+  .pair.selected { border-color: #6a6a6a; }
+  .pair.blocked { opacity: .8; }
+  .pair-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .pair-inc { color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .pair-meta { margin: 6px 0 0; }
+  .pair-warn { margin: 6px 0 0; padding-left: 18px; color: #cfa15a; }
+  .pair-blocked { margin-top: 6px; }
+  #fit-name { width: 100%; margin: 2px 0; }
+  #fit-name-err { margin: 2px 0; }
+  #fit { width: 100%; margin-top: 10px; padding: 7px 8px; font-weight: 600; }
+  #to-compare { width: 100%; margin-top: 6px; }
+  #to-start { width: 100%; margin-bottom: 10px; }
+
+  /* Comparison screen (stage 4 of the full flow, spec/ui.md step 2) */
+  #compare, #more { display: none; }
+  body.step-compare { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
+  body.step-compare #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; }
+  body.step-more #more { display: block; grid-column: 1 / -1; }
+  body.step-compare #files, body.step-compare #view, body.step-compare #panel,
+  body.step-more #files, body.step-more #view, body.step-more #panel { display: none; }
+  #cmp-strip { display: flex; gap: 8px; padding: 10px 14px 0; flex-wrap: wrap; }
+  .cmp-th { position: relative; border: 2px solid var(--line); border-radius: 4px;
+    cursor: pointer; line-height: 0; background: #000; }
+  .cmp-th.selected { border-color: var(--accent); }
+  .cmp-th.blocked { opacity: .55; cursor: not-allowed; }
+  .cmp-th-badge { position: absolute; left: 0; right: 0; bottom: 0; line-height: 1.2;
+    text-align: center; font-size: 10px; color: #fff; background: rgba(160, 40, 30, .85);
+    padding: 1px 0; }
+  #cmp-bar { display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+    flex-wrap: wrap; }
+  #cmp-modes { width: 260px; margin: 0; }
+  #cmp-strength-box { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  #cmp-strength-box input[type="range"] { width: 180px; }
+  #cmp-strength-val { font-variant-numeric: tabular-nums; color: var(--dim); width: 42px; }
+  #cmp-main { flex: 1; min-height: 0; display: flex; }
+  #cmp-box { flex: 1; position: relative; margin: 0 0 12px 14px; background: #000;
+    border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  #cc { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    cursor: grab; }
+  #cmp-sidepanel { width: 250px; flex: none; padding: 0 14px 12px; overflow: auto;
+    display: flex; flex-direction: column; gap: 6px; }
+  #cmp-versions button { width: 100%; display: flex; justify-content: space-between;
+    gap: 8px; margin-bottom: 4px; }
+  #cmp-versions button.active { border-color: var(--accent); }
+  .cmp-v-badge { color: var(--dim); font-size: 11px; }
+  #cmp-hint { margin-top: auto; }
+
+  @media (max-width: 980px) { body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto auto; }
+    body.step-start { grid-template-rows: 1fr; }
+    body.step-compare { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
     #files { border-right: 0; border-bottom: 1px solid var(--line); }
-    #panel { border-left: 0; border-top: 1px solid var(--line); } }
+    #panel { border-left: 0; border-top: 1px solid var(--line); }
+    #report { border-left: 0; border-top: 1px solid var(--line); max-height: 45vh; }
+    .zones { grid-template-columns: 1fr; } }
 </style>
 </head>
-<body>
+<body class="step-start">
+<section id="start">
+  <div class="start-col">
+    <h1 data-i18n="NP3 profile fitting">NP3 profile fitting</h1>
+    <div class="hint" data-i18n="Assemble RAW + JPEG pairs, fit an NP3 profile, adjust it manually — all locally in the browser.">
+      Assemble RAW + JPEG pairs, fit an NP3 profile, adjust it manually — all locally in the browser.</div>
+
+    <h2 data-i18n="DISCLAIMER">DISCLAIMER</h2>
+    <ul class="dash">
+      <li data-i18n="The render is approximate: on average it differs from the real NX Studio render by dE ≈ 1.85.">
+        The render is approximate: on average it differs from the real NX Studio render by dE ≈ 1.85.</li>
+      <li data-i18n="The development is calibrated for the Nikon Z f; with other cameras the result is worse.">
+        The development is calibrated for the Nikon Z f; with other cameras the result is worse.</li>
+      <li data-i18n="Frames are processed locally in the browser and are never sent anywhere.">
+        Frames are processed locally in the browser and are never sent anywhere.</li>
+    </ul>
+
+    <h2 data-i18n="Pair recommendations">Pair recommendations</h2>
+    <ul class="dash">
+      <li data-i18n="The JPEG is made from the same RAW with one preset, without manual edits and local masks">
+        The JPEG is made from the same RAW with one preset, without manual edits and local masks</li>
+      <li data-i18n="The frame is not cropped or rotated, without strong vignetting and grain">
+        The frame is not cropped or rotated, without strong vignetting and grain</li>
+      <li data-i18n="Little overexposure in the frame: the white share in the target is below 30%">
+        Little overexposure in the frame: the white share in the target is below 30%</li>
+      <li data-i18n="Active D-Lighting is left as shot">Active D-Lighting is left as shot</li>
+      <li data-i18n="The more different colors the better: greys, skin, greenery, sky, saturated warm colors">
+        The more different colors the better: greys, skin, greenery, sky, saturated warm colors</li>
+      <li data-i18n="More than 6 frames usually does not help the fit">More than 6 frames usually does not help the fit</li>
+    </ul>
+
+    <h2 data-i18n="Pairs">Pairs</h2>
+    <div class="zones">
+      <div id="raw-drop" class="zone">
+        <b data-i18n="RAW (.NEF / .DNG)">RAW (.NEF / .DNG)</b><br>
+        <span data-i18n="Drop RAW files here or click to choose">Drop RAW files here or click to choose</span>
+      </div>
+      <div id="target-drop" class="zone">
+        <b data-i18n="JPEG targets (.JPG)">JPEG targets (.JPG)</b><br>
+        <span data-i18n="Drop JPEG targets here or click to choose">Drop JPEG targets here or click to choose</span>
+      </div>
+    </div>
+    <input type="file" id="raw-file" accept=".nef,.NEF,.dng,.DNG" multiple hidden>
+    <input type="file" id="target-file" accept=".jpg,.JPG,.jpeg,.JPEG" multiple hidden>
+    <div class="hint" data-i18n="A RAW and a JPEG with the same base name form a pair; the remaining files are matched in the order they were added. TIFF targets are not accepted in the browser — the Python CLI covers them.">
+      A RAW and a JPEG with the same base name form a pair; the remaining files are matched in the order they were added.
+      TIFF targets are not accepted in the browser — the Python CLI covers them.</div>
+    <div id="pairs"></div>
+    <div id="start-status" class="hint"></div>
+
+    <h2 data-i18n="Profile name">Profile name</h2>
+    <input type="text" id="fit-name" maxlength="19" spellcheck="false">
+    <div id="fit-name-err" class="bad" hidden data-i18n="Name must be 1–19 ASCII characters">
+      Name must be 1–19 ASCII characters</div>
+    <button id="fit" type="button" disabled data-i18n="Fit">Fit</button>
+    <button id="to-compare" type="button" disabled data-i18n="Comparison">Comparison</button>
+  </div>
+</section>
+
+<section id="compare">
+  <div id="cmp-strip"></div>
+  <div id="cmp-bar">
+    <div class="tgl" id="cmp-modes">
+      <button type="button" data-mode="side" class="active" data-i18n="Side by side">Side by side</button>
+      <button type="button" data-mode="curtain" data-i18n="Curtain">Curtain</button>
+      <button type="button" data-mode="toggle" data-i18n="Key toggle">Key toggle</button>
+    </div>
+    <button type="button" id="cmp-reset" data-i18n="Reset view">Reset view</button>
+    <label id="cmp-strength-box">
+      <span data-i18n="Profile strength">Profile strength</span>
+      <input type="range" id="cmp-strength" min="0" max="150" step="5">
+      <span id="cmp-strength-val">100%</span>
+    </label>
+  </div>
+  <div id="cmp-main">
+    <div id="cmp-box"><canvas id="cc"></canvas></div>
+    <div id="cmp-sidepanel">
+      <h2 data-i18n="Versions">Versions</h2>
+      <div id="cmp-versions"></div>
+      <h2 data-i18n="Next">Next</h2>
+      <button type="button" id="cmp-manual" data-i18n="Looks good — manual adjustment">Looks good — manual adjustment</button>
+      <button type="button" id="cmp-more" data-i18n="Continue fitting">Continue fitting</button>
+      <button type="button" id="cmp-start" data-i18n="Back to Start">Back to Start</button>
+      <div id="cmp-hint" class="hint"
+           data-i18n="Wheel — zoom to the cursor, drag — pan (in the curtain mode drag the divider); hold Space to swap the images in the key-toggle mode.">
+        Wheel — zoom to the cursor, drag — pan (in the curtain mode drag the divider); hold Space to swap the images in the key-toggle mode.</div>
+    </div>
+  </div>
+</section>
+
+<section id="more">
+  <div class="start-col">
+    <h1 data-i18n="More frames">More frames</h1>
+    <p class="hint"
+       data-i18n="Stage 7 of the work plan: loading more pairs, color-coverage advice and the refit into the next _rN version. Not implemented yet — this screen is an honest stub.">
+      Stage 7 of the work plan: loading more pairs, color-coverage advice and the refit into the next _rN
+      version. Not implemented yet — this screen is an honest stub.</p>
+    <button id="more-back" type="button" data-i18n="Back to Comparison">Back to Comparison</button>
+  </div>
+</section>
+
 <aside id="files">
   <h1 data-i18n="NP3 profile editor">NP3 profile editor</h1>
+  <button id="to-start" type="button" data-i18n="Back to Start">Back to Start</button>
   <div class="hint" data-i18n="RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.">
     RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.</div>
 
@@ -199,6 +416,8 @@
   <div id="panel-scroll"></div>
   <div id="panel-foot"></div>
 </aside>
+
+<aside id="report"></aside>
 
 <div id="nogl" hidden>
   <div>

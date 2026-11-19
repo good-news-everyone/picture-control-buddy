@@ -1,0 +1,219 @@
+{
+ "schemaVersion": 1,
+ "note": "Kernel micro-fixtures for web/lib/resample.js (spec/web-tests.md level 1d). Conventions: PIL resize = separable convolution, center-aligned samples, kernel widened by max(1, scale) on downsampling, PIL F mode accumulates in float64, 8-bit images use int32-quantized weights (22 precision bits) per pass with an 8-bit intermediate; transform/rotate = point-sampled inverse map (0.5-center convention, no antialiasing, out-of-source centers filled with 0); devpairs.radial/shrink are numpy ports (radial runs in float64 with the pipeline's float64 s,k).",
+ "tolerances": {
+  "f32": {
+   "max": 1e-05
+  },
+  "u8": {
+   "max": 0
+  }
+ },
+ "inputs": {
+  "in_smooth": {
+   "w": 37,
+   "h": 53,
+   "channels": 3,
+   "dtype": "f32",
+   "file": "resample/in_smooth.f32.br"
+  },
+  "in_big": {
+   "w": 400,
+   "h": 301,
+   "channels": 3,
+   "dtype": "f32",
+   "file": "resample/in_big.f32.br"
+  },
+  "in_edgy": {
+   "w": 256,
+   "h": 171,
+   "channels": 3,
+   "dtype": "f32",
+   "file": "resample/in_edgy.f32.br"
+  },
+  "in_photo": {
+   "w": 256,
+   "h": 171,
+   "channels": 3,
+   "dtype": "u8",
+   "file": "resample/in_photo.u8"
+  }
+ },
+ "cases": [
+  {
+   "name": "lanczos_up_f",
+   "op": "resize",
+   "in": "in_smooth",
+   "kernel": "lanczos",
+   "dtype": "f32",
+   "outW": 536,
+   "outH": 768,
+   "ref": "PIL F-mode LANCZOS resize to the working size (536, 768) (k = 768/max, round)",
+   "out": "resample/lanczos_up_f.out.f32.br"
+  },
+  {
+   "name": "lanczos_down_f",
+   "op": "resize",
+   "in": "in_big",
+   "kernel": "lanczos",
+   "dtype": "f32",
+   "outW": 768,
+   "outH": 578,
+   "ref": "PIL F-mode LANCZOS resize to the working size (768, 578) (downscale)",
+   "out": "resample/lanczos_down_f.out.f32.br"
+  },
+  {
+   "name": "box_work_f",
+   "op": "resize",
+   "in": "in_big",
+   "kernel": "box",
+   "dtype": "f32",
+   "outW": 768,
+   "outH": 578,
+   "ref": "PIL F-mode BOX resize to the working size (768, 578) (devpairs.matched a_s)",
+   "out": "resample/box_work_f.out.f32.br"
+  },
+  {
+   "name": "box_half_f",
+   "op": "resize",
+   "in": "in_edgy",
+   "kernel": "box",
+   "dtype": "f32",
+   "outW": 128,
+   "outH": 85,
+   "ref": "PIL F-mode BOX resize to (w//2, h//2) (128, 85) (devpairs.matched half)",
+   "out": "resample/box_half_f.out.f32.br"
+  },
+  {
+   "name": "shrink3_f",
+   "op": "shrink",
+   "in": "in_edgy",
+   "k": 3,
+   "dtype": "f32",
+   "outW": 85,
+   "outH": 57,
+   "ref": "devpairs.shrink 3x3 box mean (numpy, not PIL) -> (w//3, h//3)",
+   "out": "resample/shrink3_f.out.f32.br"
+  },
+  {
+   "name": "lanczos_up_u8",
+   "op": "resize",
+   "in": "in_photo",
+   "kernel": "lanczos",
+   "dtype": "u8",
+   "outW": 768,
+   "outH": 513,
+   "ref": "PIL RGB LANCZOS resize to the working size (768, 513) (pairs.py target path, 8-bit quantized weights)",
+   "out": "resample/lanczos_up_u8.out.u8"
+  },
+  {
+   "name": "bilinear_down_u8",
+   "op": "resize",
+   "in": "in_photo",
+   "kernel": "bilinear",
+   "dtype": "u8",
+   "outW": 128,
+   "outH": 85,
+   "ref": "PIL RGB BILINEAR resize to (128, 85) (pairs.align half-size target)",
+   "out": "resample/bilinear_down_u8.out.u8"
+  },
+  {
+   "name": "rotate_p25_f",
+   "op": "rotate",
+   "in": "in_smooth",
+   "angle": 2.5,
+   "center": [
+    23.4,
+    31.7
+   ],
+   "kernel": "bicubic",
+   "dtype": "f32",
+   "outW": 37,
+   "outH": 53,
+   "ref": "PIL F-mode rotate(2.5, BICUBIC, center) (devpairs.crop_float)",
+   "out": "resample/rotate_p25_f.out.f32.br"
+  },
+  {
+   "name": "rotate_m25_f",
+   "op": "rotate",
+   "in": "in_smooth",
+   "angle": -2.5,
+   "center": [
+    23.4,
+    31.7
+   ],
+   "kernel": "bicubic",
+   "dtype": "f32",
+   "outW": 37,
+   "outH": 53,
+   "ref": "PIL F-mode rotate(-2.5, BICUBIC, center) (the other angle sign)",
+   "out": "resample/rotate_m25_f.out.f32.br"
+  },
+  {
+   "name": "rotate_p25_u8",
+   "op": "rotate",
+   "in": "in_photo",
+   "angle": 2.5,
+   "center": [
+    100.25,
+    60.75
+   ],
+   "kernel": "bicubic",
+   "dtype": "u8",
+   "outW": 256,
+   "outH": 171,
+   "ref": "PIL RGB rotate(2.5, BICUBIC, center) (pairs.pick_geometry crop search)",
+   "out": "resample/rotate_p25_u8.out.u8"
+  },
+  {
+   "name": "warp_affine_f",
+   "op": "warpAffine",
+   "in": "in_edgy",
+   "kernel": "bilinear",
+   "dtype": "f32",
+   "outW": 256,
+   "outH": 171,
+   "m": [
+    0.9775171065493647,
+    0.0,
+    1.2160312805473978,
+    0.0,
+    0.9775171065493647,
+    2.802052785923749
+   ],
+   "ref": "PIL F-mode transform AFFINE BILINEAR, pairs.warp(s=1.023, dx=1.7, dy=-0.9)",
+   "out": "resample/warp_affine_f.out.f32.br"
+  },
+  {
+   "name": "warp_affine_u8",
+   "op": "warpAffine",
+   "in": "in_photo",
+   "kernel": "bilinear",
+   "dtype": "u8",
+   "outW": 256,
+   "outH": 171,
+   "m": [
+    1.0131712259371835,
+    0.0,
+    0.6443768996960415,
+    0.0,
+    1.0131712259371835,
+    -2.3419452887538057
+   ],
+   "ref": "PIL RGB transform AFFINE BILINEAR, pairs.warp(s=0.987, dx=-2.3, dy=1.2)",
+   "out": "resample/warp_affine_u8.out.u8"
+  },
+  {
+   "name": "warp_radial_f",
+   "op": "warpRadial",
+   "in": "in_edgy",
+   "s": 1.031,
+   "k": -0.024,
+   "dtype": "f32",
+   "outW": 256,
+   "outH": 171,
+   "ref": "devpairs.radial (numpy bilinear, float64 s/k as fit_radial returns)",
+   "out": "resample/warp_radial_f.out.f32.br"
+  }
+ ]
+}

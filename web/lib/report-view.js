@@ -1,0 +1,472 @@
+// The report panel (stage 5B, spec/ui.md "Report"): renders the report DTO of the
+// selected pair (state.pairs[].report, spec/web-schemas.md §4.3, computed by
+// web/lib/report-worker.js) and the aggregate over the compared pairs
+// (state.reportAggregate) — the summary, the sortable color-match table with the
+// target/render swatches, the per-pixel error map with the sequential/diverging
+// legends, the two-column NP3 parameters view with the curve thumbnail, and the §4.4
+// JSON download. Pure presentation: every number comes from web/lib/analyze.js / the
+// report worker; this module owns no color science. The same component shows on the
+// Compare screen and beside the manual editor (spec/ui.md steps 2 and 3.1); a row
+// click highlights the group's pixels on the compare image through the onHighlight
+// callback (the stage-4 geometry: one report pixel = one 3×3 block of the working
+// grid), the error map can be overlaid on the compare image through onMapOverlay.
+import { t } from "./i18n.js";
+import { labToSrgb } from "./color.js";
+import { GROUPS, downloadDoc } from "./analyze.js";
+import { COLORS, ZONES } from "./np3.js";
+
+const GENERATOR = "np3-fit web dev";   // the §4.4 `generator` (a git describe on release builds)
+
+// ---------- the error-map scales (spec/ui.md: dE sequential with 0/2/5/10+, dL/dC/dh diverging) ----------
+// Sequential dE: dark blue -> light blue -> yellow -> red; above 10 stays at the last stop.
+const SEQ_STOPS = [[0, [43, 62, 138]], [2, [71, 139, 204]], [5, [248, 214, 92]], [10, [214, 46, 38]]];
+const DIV_NEG = [33, 102, 172], DIV_ZERO = [178, 178, 178], DIV_POS = [214, 46, 38];
+// The separate neutral colors (spec/ui.md): overexposed and unaligned pixels.
+const CLIP_RGB = [154, 154, 154], INVALID_RGB = [58, 58, 58];
+const MAP_MODES = {
+  dE: { diverging: false, max: 10 },
+  dL: { diverging: true, max: 20 },
+  dC: { diverging: true, max: 20 },
+  dh: { diverging: true, max: 180 },
+};
+
+function seqColor(v) {
+  if (v <= SEQ_STOPS[0][0]) return SEQ_STOPS[0][1];
+  for (let i = 1; i < SEQ_STOPS.length; i++) {
+    if (v <= SEQ_STOPS[i][0]) {
+      const [v0, c0] = SEQ_STOPS[i - 1], [v1, c1] = SEQ_STOPS[i];
+      const k = (v - v0) / (v1 - v0);
+      return c0.map((c, j) => Math.round(c + (c1[j] - c) * k));
+    }
+  }
+  return SEQ_STOPS[SEQ_STOPS.length - 1][1];
+}
+
+function divColor(v, max) {
+  const k = Math.min(1, Math.max(-1, v / max));
+  const [from, to] = k < 0 ? [DIV_ZERO, DIV_NEG] : [DIV_ZERO, DIV_POS];
+  const a = Math.abs(k);
+  return from.map((c, j) => Math.round(c + (to[j] - c) * a));
+}
+
+function mapColor(mode, v) {
+  const cfg = MAP_MODES[mode];
+  return cfg.diverging ? divColor(v, cfg.max) : seqColor(v);
+}
+
+function paintMapPixels(im, mode, data, clipMask, validMask) {
+  const n = data.length;
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    let rgb = null;
+    if (validMask && validMask.length === n && !validMask[i]) rgb = INVALID_RGB;
+    else if (clipMask && clipMask.length === n && clipMask[i]) rgb = CLIP_RGB;
+    else {
+      const v = data[i];
+      if (Number.isNaN(v)) { im.data[o + 3] = 0; continue; }   // outside the reportMask: transparent
+      rgb = mapColor(mode, v);
+    }
+    im.data[o] = rgb[0]; im.data[o + 1] = rgb[1]; im.data[o + 2] = rgb[2]; im.data[o + 3] = 255;
+  }
+}
+
+// ---------- formatting ----------
+const f2 = (v) => (typeof v === "number" && !Number.isNaN(v) ? v.toFixed(2) : "—");
+const fsign = (v) => (v >= 0 ? "+" : "") + v.toFixed(2);
+const meanFinite = (xs) => {
+  const ok = xs.filter((v) => typeof v === "number" && !Number.isNaN(v));
+  return ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : NaN;
+};
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("data-")) el.dataset[k.slice(5)] = v;
+    else el.setAttribute(k, v);
+  }
+  el.append(...kids);
+  return el;
+}
+
+// The §3.3 parameter groups (the same fields as the manual tools): label + a control path.
+const PARAM_SECTIONS = [
+  { title: "Basic", rows: [
+    ["Saturation", "saturation"], ["Contrast", "contrast"], ["Highlights", "highlights"],
+    ["Shadows", "shadows"], ["White level", "white"], ["Black level", "black"]] },
+  { title: "Details", rows: [
+    ["Sharpening", "sharpening"], ["Mid-range sharpening", "mid_sharpening"], ["Clarity", "clarity"]] },
+  { title: "Color Blender", rows: COLORS.flatMap((c) =>
+    ["Hue", "Chroma", "Brightness"].map((a, i) =>
+      [`${c[0].toUpperCase()}${c.slice(1)} ${a}`, `blender.${c}.${i}`])) },
+  { title: "Color Grading", rows: ZONES.flatMap((z) =>
+    ["Hue", "Chroma", "Brightness"].map((a, i) =>
+      [`${z === "midtone" ? "Midtones" : z[0].toUpperCase() + z.slice(1)} ${a}`, `grade.${z}.${i}`]))
+    .concat([["Blending", "blending"], ["Balance", "balance"]]) },
+];
+
+function valueAt(ctl, path) {
+  const parts = path.split(".");
+  let v = ctl;
+  for (const p of parts) v = Array.isArray(v) ? v[Number(p)] : v[p];
+  return v;
+}
+
+// Clipped fields at strength > 100% (web/lib/strength.js semantics, the panels.js rule):
+// the scaled value would leave the NP3 range.
+function clippedPaths(base, strength) {
+  const k = strength / 100;
+  const out = new Set();
+  const lim = (key, v, lo, hi) => { if (v * k < lo - 0.5 || v * k > hi + 0.5) out.add(key); };
+  for (const s of ["saturation", "contrast", "highlights", "shadows", "white", "black"])
+    lim(s, base[s], -100, 100);
+  for (const c of COLORS) {
+    lim(`blender.${c}.1`, base.blender[c][1], -100, 100);
+    lim(`blender.${c}.2`, base.blender[c][2], -100, 100);
+  }
+  for (const z of ZONES) {
+    lim(`grade.${z}.1`, base.grade[z][1], 0, 100);
+    lim(`grade.${z}.2`, base.grade[z][2], -100, 100);
+  }
+  return out;
+}
+
+/**
+ * state — the session contract (pairs[].report, reportAggregate, selectedPairId,
+ * selectedVersionId); onHighlight(labels, groupIndex | null) — the row-click region
+ * highlight on the compare image; onMapOverlay(canvas | null) — the error-map overlay.
+ */
+export function createReport({ state, onHighlight = null, onMapOverlay = null }) {
+  const root = document.getElementById("report");
+
+  // ---------- the head: the scope switch, the updating badge, the download ----------
+  const scopeTgl = h("div", { class: "tgl", id: "rep-scope", hidden: "" },
+    h("button", { type: "button", "data-scope": "pair" }, t("This pair")),
+    h("button", { type: "button", "data-scope": "aggregate" }, t("All pairs")));
+  const updating = h("span", { id: "rep-updating", hidden: "" }, t("Updating…"));
+  const downloadBtn = h("button", { type: "button", id: "rep-download", disabled: "" },
+    t("Download report"));
+  const head = h("div", { id: "rep-head" }, scopeTgl, updating, downloadBtn);
+
+  // ---------- the body ----------
+  const empty = h("div", { id: "rep-empty", hidden: "" },
+    t("Fit a profile to see the report."));
+  const summaryDl = h("dl", { class: "rep-kv" },
+    h("dt", {}, t("Strength")), h("dd", { id: "rep-strength" }, "—"),
+    h("dt", {}, t("Render vs target")), h("dd", { id: "rep-render-de" }, "—"),
+    h("dt", {}, t("Neutral vs target")), h("dd", { id: "rep-neutral-de" }, "—"),
+    h("dt", {}, t("Bin mean")), h("dd", { id: "rep-bin-mean" }, "—"),
+    h("dt", { id: "rep-delta-dt", hidden: "" }, t("Vs fitted")),
+    h("dd", { id: "rep-delta", hidden: "" }, "—"));
+  const tableEl = h("table", { id: "rep-table" });
+  const mapModes = h("div", { class: "tgl", id: "rep-map-modes" },
+    ...Object.keys(MAP_MODES).map((m) => h("button", { type: "button", "data-mode": m }, m)));
+  const mapCanvas = h("canvas", { id: "rep-map", width: 8, height: 8 });
+  const legendBar = h("canvas", { id: "rep-legend-bar", width: 140, height: 8 });
+  const legendTicks = h("div", { id: "rep-legend-ticks" });
+  const overlayChk = h("input", { type: "checkbox", id: "rep-overlay" });
+  const overlayBox = h("label", { id: "rep-overlay-box" }, overlayChk, t("Overlay on the image"));
+  const clipChip = h("span", { class: "rep-chip" }, h("i", { style: `background:rgb(${CLIP_RGB.join(",")})` }),
+    t("Overexposed"));
+  const invalidChip = h("span", { class: "rep-chip" }, h("i", { style: `background:rgb(${INVALID_RGB.join(",")})` }),
+    t("Unaligned"));
+  const mapSection = h("div", { id: "rep-map-section" },
+    mapModes, mapCanvas,
+    h("div", { class: "rep-legend" }, legendBar, legendTicks),
+    h("div", { class: "rep-legend" }, clipChip, invalidChip),
+    overlayBox);
+  const paramsEl = h("div", { id: "rep-params" });
+  const curveEl = h("div", { id: "rep-curve" });
+  const body = h("div", { id: "rep-body" }, empty,
+    h("h2", { "data-i18n": "Summary" }, t("Summary")), summaryDl,
+    h("h2", { "data-i18n": "Color match" }, t("Color match")), tableEl,
+    h("h2", { "data-i18n": "Error map" }, t("Error map")), mapSection,
+    h("h2", { "data-i18n": "NP3 parameters" }, t("NP3 parameters")), paramsEl, curveEl);
+
+  root.replaceChildren(head, body);
+
+  // ---------- state ----------
+  let scope = "pair";                  // "pair" | "aggregate"
+  let sort = { key: "share", dir: -1 };
+  let mapMode = "dE";
+  let hlGroup = null;                  // the highlighted GROUPS index
+  let lastLabels = null;               // the labels the highlight belongs to
+
+  const pairReports = () => state.pairs.filter((p) => p.report);
+  const currentPair = () => {
+    const sel = state.pairs.find((p) => p.id === state.selectedPairId && p.report);
+    return sel ?? pairReports()[0] ?? null;
+  };
+
+  // ---------- the color-match table ----------
+  const COLS = [
+    ["group", t("Group")], ["share", t("Share")], ["target", t("Target")],
+    ["render", t("Render")], ["dE", "dE"], ["dL", "dL"], ["dC", "dC"], ["dh", "dh"],
+  ];
+  const colValue = {
+    group: (r) => r.group,
+    share: (r) => r.share,
+    target: (r) => r.targetLab[0],
+    render: (r) => r.renderLab[0],
+    dE: (r) => r.dE, dL: (r) => r.dL, dC: (r) => r.dC,
+    dh: (r) => (r.dh == null ? -Infinity : r.dh),
+  };
+
+  function swatch(lab) {
+    const d = h("div", { class: "rep-sw" });
+    const out = labToSrgb(Float64Array.from(lab));
+    const c = [0, 1, 2].map((k) => Math.round(255 * Math.min(1, Math.max(0, out[k]))));
+    d.style.background = `rgb(${c.join(",")})`;
+    d.title = `L ${f2(lab[0])}, a ${f2(lab[1])}, b ${f2(lab[2])}`;
+    return d;
+  }
+
+  function renderTable(rows) {
+    const thead = h("thead", {});
+    const tr = h("tr", {});
+    for (const [key, label] of COLS) {
+      const active = sort.key === key;
+      tr.append(h("th", { "data-key": key, class: key === "group" || key === "share" ? "tg" : "" },
+        label + (active ? (sort.dir > 0 ? " ↑" : " ↓") : "")));
+    }
+    thead.append(tr);
+    const sorted = [...rows].sort((a, b) => {
+      const va = colValue[sort.key](a), vb = colValue[sort.key](b);
+      const d = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+      return d * sort.dir;
+    });
+    const tbody = h("tbody", {});
+    for (const r of sorted) {
+      const gi = GROUPS.indexOf(r.group);
+      const row = h("tr", { "data-group": r.group, class: gi === hlGroup ? "sel" : "" },
+        h("td", { class: "tg" }, r.group),
+        h("td", {}, `${(100 * r.share).toFixed(1)}%`),
+        h("td", {}, swatch(r.targetLab)),
+        h("td", {}, swatch(r.renderLab)),
+        h("td", {}, f2(r.dE)), h("td", {}, fsign(r.dL)), h("td", {}, fsign(r.dC)),
+        h("td", {}, r.dh == null ? "—" : `${r.dh.toFixed(1)}°`));
+      row.addEventListener("click", () => {
+        hlGroup = hlGroup === gi ? null : gi;      // a second click clears
+        onHighlight?.(hlGroup == null ? null : lastLabels, hlGroup);
+        for (const tr2 of tbody.children)
+          tr2.classList.toggle("sel", GROUPS.indexOf(tr2.dataset.group) === hlGroup);
+      });
+      tbody.append(row);
+    }
+    tableEl.replaceChildren(thead, tbody);
+  }
+
+  tableEl.addEventListener("click", (e) => {
+    const th = e.target.closest("th");
+    if (!th) return;
+    const key = th.dataset.key;
+    if (sort.key === key) sort.dir = -sort.dir;
+    else sort = { key, dir: key === "group" || key === "share" ? 1 : -1 };
+    refresh();
+  });
+
+  // ---------- the error map ----------
+  function paintLegend() {
+    const cfg = MAP_MODES[mapMode];
+    const ctx = legendBar.getContext("2d");
+    const im = ctx.createImageData(legendBar.width, legendBar.height);
+    for (let x = 0; x < legendBar.width; x++) {
+      const v = cfg.diverging ? (x / (legendBar.width - 1) * 2 - 1) * cfg.max
+                              : x / (legendBar.width - 1) * cfg.max;
+      const rgb = mapColor(mapMode, v);
+      for (let y = 0; y < legendBar.height; y++) {
+        const o = (y * legendBar.width + x) * 4;
+        im.data[o] = rgb[0]; im.data[o + 1] = rgb[1]; im.data[o + 2] = rgb[2]; im.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(im, 0, 0);
+    const ticks = cfg.diverging
+      ? [`−${cfg.max}`, "0", `+${cfg.max}`]
+      : ["0", "2", "5", "10+"];
+    legendTicks.replaceChildren(...ticks.map((s) => h("span", {}, s)));
+  }
+
+  function paintMapSection(rep, agg) {
+    // the map is per-pixel: only for a single pair (in the aggregate scope it is hidden)
+    if (agg || !rep?.maps) {
+      mapSection.hidden = true;
+      if (overlayChk.checked) { overlayChk.checked = false; onMapOverlay?.(null); }
+      return;
+    }
+    mapSection.hidden = false;
+    const p = currentPair();
+    const masks = p?.prepared?.masks ?? {};
+    mapCanvas.width = rep.w3;
+    mapCanvas.height = rep.h3;
+    const ctx = mapCanvas.getContext("2d");
+    const im = ctx.createImageData(rep.w3, rep.h3);
+    paintMapPixels(im, mapMode, rep.maps[mapMode], masks.clipMask, masks.validMask);
+    ctx.putImageData(im, 0, 0);
+    paintLegend();
+    if (overlayChk.checked) onMapOverlay?.(mapCanvas);
+  }
+
+  for (const btn of mapModes.querySelectorAll("button")) {
+    btn.addEventListener("click", () => {
+      mapMode = btn.dataset.mode;
+      for (const b of mapModes.querySelectorAll("button"))
+        b.classList.toggle("active", b === btn);
+      paintMapSection(currentPair()?.report ?? null, scope === "aggregate" ? state.reportAggregate : null);
+    });
+  }
+  mapModes.querySelector("button")?.classList.add("active");
+  overlayChk.addEventListener("change", () =>
+    onMapOverlay?.(overlayChk.checked ? mapCanvas : null));
+
+  // ---------- the NP3 parameters ----------
+  function renderParams(rep) {
+    paramsEl.replaceChildren();
+    curveEl.replaceChildren();
+    if (!rep?.parameters) return;
+    const { base, result, deltas } = rep.parameters;
+    const clipped = clippedPaths(base, rep.strength);
+    let first = true;
+    for (const sec of PARAM_SECTIONS) {
+      const head = h("div", { class: "rep-prow rep-prow head" },
+        h("span", {}), h("span", {}, t("Profile")),
+        h("span", first ? { id: "rep-result-h" } : {}, t("Result · {strength}%", { strength: rep.strength })));
+      first = false;
+      const secEl = h("div", { class: "rep-sec" }, h("div", { class: "sub" }, t(sec.title)), head);
+      for (const [label, path] of sec.rows) {
+        const bv = valueAt(base, path), rv = valueAt(result, path);
+        const row = h("div", { class: "rep-prow", "data-path": path },
+          h("span", { class: "lbl" }, t(label)),
+          h("span", { class: "val" }, String(bv)),
+          h("span", { class: "val" }, String(rv)));
+        if (bv === 0 && rv === 0) row.classList.add("zero");          // zero fields are muted
+        if (clipped.has(path)) row.classList.add("clip");             // clipped at this strength
+        if (deltas && typeof deltas === "object" && deltas[path] != null)
+          row.children[2].append(h("span", { class: "rep-delta" }, fsign(deltas[path])));
+        secEl.append(row);
+      }
+      paramsEl.append(secEl);
+    }
+    // the curve thumbnail from the curve raw table (the result at this strength)
+    const curve = result?.curve ?? base?.curve;
+    if (curve) {
+      const W = 150, H = 84;
+      const NS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      const pts = curve.raw.map((v, i) =>
+        `${(2 + i / 256 * (W - 4)).toFixed(1)},${(H - 2 - (v / 32767) * (H - 4)).toFixed(1)}`);
+      const poly = document.createElementNS(NS, "polyline");
+      poly.setAttribute("points", pts.join(" "));
+      poly.setAttribute("class", "rep-curve-line");
+      svg.append(poly);
+      curveEl.append(h("div", { class: "sub" }, t("Curve")), svg);
+    } else {
+      curveEl.append(h("div", { class: "sub" }, t("Curve")),
+        h("div", { class: "hint" }, t("off")));
+    }
+  }
+
+  // ---------- the summary ----------
+  function renderSummary(rep, agg) {
+    const blank = !rep && !agg;
+    const reports = pairReports().map((p) => p.report);
+    const s = blank ? null
+      : agg
+      ? { strength: rep?.strength ?? null, renderDE: agg.regionSums.all,
+          neutralDE: meanFinite(reports.map((r) => r.summary.neutralDE)),
+          binMean: agg.binMean,
+          fittedDelta: meanFinite(reports.map((r) => r.summary.fittedDelta).filter((v) => v != null)) }
+      : rep.summary;
+    document.getElementById("rep-strength").textContent = s == null || s.strength == null ? "—" : `${s.strength}%`;
+    document.getElementById("rep-render-de").textContent = f2(s?.renderDE);
+    document.getElementById("rep-neutral-de").textContent = f2(s?.neutralDE);
+    document.getElementById("rep-bin-mean").textContent = f2(s?.binMean);
+    const deltaEl = document.getElementById("rep-delta");
+    const deltaDt = document.getElementById("rep-delta-dt");
+    const showDelta = s?.fittedDelta != null && !Number.isNaN(s.fittedDelta);
+    deltaEl.hidden = !showDelta;
+    deltaDt.hidden = !showDelta;
+    if (showDelta) deltaEl.textContent = fsign(s.fittedDelta);
+  }
+
+  // ---------- the §4.4 download ----------
+  function sumsJson(s) {
+    const out = {};
+    for (const k of Object.keys(s))
+      out[k] = ArrayBuffer.isView(s[k]) ? Array.from(s[k]) : s[k];
+    return out;
+  }
+
+  function download() {
+    const rep = currentPair()?.report;
+    if (!rep) return;
+    const agg = scope === "aggregate" ? state.reportAggregate : null;
+    const reports = pairReports().map((p) => p.report);
+    const summary = agg
+      ? { strength: rep.strength, renderDE: agg.regionSums.all,
+          neutralDE: meanFinite(reports.map((r) => r.summary.neutralDE)),
+          binMean: agg.binMean,
+          fittedDelta: meanFinite(reports.map((r) => r.summary.fittedDelta).filter((v) => v != null)) }
+      : rep.summary;
+    const doc = downloadDoc({
+      generator: GENERATOR,
+      files: rep.files,
+      version: { id: state.selectedVersionId ?? rep.id.split(":")[0],
+                 name: rep.parameters.base.name, strength: rep.strength },
+      summary,
+      table: agg ? agg.table : rep.table,
+      aggregate: state.reportAggregate ? sumsJson(state.reportAggregate.regionSums) : null,
+      parameters: rep.parameters,
+    });
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);          // the transfer.js download pattern
+    const a = h("a", { href: url, download: `${rep.parameters.base.name}-report.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+  downloadBtn.addEventListener("click", download);
+
+  // ---------- the scope switch ----------
+  for (const btn of scopeTgl.querySelectorAll("button")) {
+    btn.addEventListener("click", () => { scope = btn.dataset.scope; refresh(); });
+  }
+  function syncScope() {
+    for (const b of scopeTgl.querySelectorAll("button"))
+      b.classList.toggle("active", b.dataset.scope === scope);
+  }
+
+  // ---------- refresh ----------
+  function refresh() {
+    const rep = currentPair()?.report ?? null;
+    const reports = pairReports();
+    const multi = reports.length >= 2;
+    scopeTgl.hidden = !multi;
+    if (!multi) scope = "pair";
+    if (scope === "aggregate" && !state.reportAggregate) scope = "pair";
+    syncScope();
+    // the highlight belongs to the labels it was made from — a new report invalidates it
+    const labels = rep?.labels ?? null;
+    if (labels !== lastLabels) {
+      hlGroup = null;
+      lastLabels = labels;
+      onHighlight?.(null);
+    }
+    const agg = scope === "aggregate" ? state.reportAggregate : null;
+    empty.hidden = !!(rep || agg);
+    downloadBtn.disabled = !rep;
+    renderSummary(rep, agg);
+    renderTable(agg ? agg.table : (rep?.table ?? []));
+    renderParams(rep);
+    paintMapSection(rep, agg);
+  }
+
+  function setUpdating(on) {
+    updating.hidden = !on;
+    body.classList.toggle("updating", on);
+  }
+
+  refresh();
+  return { refresh, setUpdating, download,
+           get scope() { return scope; } };
+}

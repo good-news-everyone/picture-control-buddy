@@ -38,7 +38,7 @@ On steps 2 and 3.1 there is a **profile strength** slider (see the "Profile stre
    - Active D-Lighting is left "as shot" ([memory/adl-as-shot.md](memory/adl-as-shot.md));
    - the more different colors in the frame the better: greys, skin, greenery, sky, saturated warm colors;
    - more than 6 frames usually does not help the fit (`MAX_FRAMES`).
-3. Pair loading: a RAW field (`.NEF`, `.DNG`) and a target field (`.JPG`, `.TIF`). Drag-and-drop or file pickers.
+3. Pair loading: a RAW field (`.NEF`, `.DNG`) and a target field (`.JPG`). Drag-and-drop or file pickers, several files at once. **TIFF targets are not accepted in the browser interface** (decision 2026-11-19: nobody loads TIFFs into the browser; TIFF pairs remain fully supported by the Python CLI). Pairing rule (implemented in stage 1): a RAW and a JPEG with the same base name form one pair; the remaining files are matched in the order they arrived — a file joins the first pair that has the other kind of file and lacks its own; with no candidate a new pair is created (possibly a single-file pair, completed later). Re-dropping a RAW with the same name as a not-yet-ready slot retries that pair. Until real pair preparation arrives (stage 2), a target whose aspect ratio does not match the RAW frame (either orientation, ±2%) is rejected as a crop/rotation hint — a documented stage-1 guard, not the alignment check.
 4. Profile name. This is the `name` field in NP3: 1 to 19 ASCII characters (`np3.serialize`). By default the name is taken from the RAW, as in `match.py`. Invalid characters are highlighted right away, before the run.
 5. A "Fit" button.
 
@@ -91,7 +91,7 @@ The starting values are taken from the selected profile version.
 - Tools the browser render does not understand yet (an analog of `Renderer.unrendered`) are visible and marked.
 - Undo and redo. Reset of a field, a group or the whole profile to the fitted values. Changed fields get a mark.
 - "Save NP3": the browser creates and downloads the file without contacting the server. Strength is already applied in the file.
-- "Save a strength set": several NP3s at once, e.g. 30, 50, 70 and 100%. The computation matches `strength.py name 30 50 70` but runs in the browser.
+- "Save a strength set": several NP3s at once, e.g. 30, 50, 70 and 100%. The computation matches `strength.py name 30 50 70` but runs in the browser; file names are derived from the base name and are unique (no field of the NP3 itself is renamed).
 - One can return to step 2 and continue fitting. Manual edits are not carried over in that case, a warning is needed.
 
 ## Step 3.2. More frames
@@ -104,6 +104,17 @@ The starting values are taken from the selected profile version.
 
 This is not `match.py --refine`: that one corrects a profile against an NX render, and here NX is not needed. Fitting in the interface is a new fit over the extended pair set. An open question: whether to start it from the previous version instead of zero.
 
+## Decisions
+
+Fixed 2026-11-19 at the start of the full-flow implementation ([ui-plan.md](ui-plan.md) section 2). Where an earlier section of this document disagrees, this section wins.
+
+1. **Strength UI.** No preset buttons (30/50/70/100%) — a slider only. The profile and file name do not change at any strength: no `-70`-style suffix, no truncation. The strength-set export (several NP3s at once) stays; its files get valid unique names derived from the base name. This keeps the manual-MVP behavior; the older preset-button/suffix requirements above are superseded.
+2. **Reset semantics.** In the fitting flow (steps 2, 3.1, 3.2) reset of a field, a group or the whole profile returns to the selected fitted version. Standalone manual editing (the current single-RAW editor) keeps the neutral-default reset. Changed-field marks and undo/redo use the fitted baseline.
+3. **Refit initialization.** A refit is a new deterministic fit from the same zero initialization as `match.py`, over all selected pairs. The previous version is kept unchanged. Warm-start from the previous control or from manual edits is a separate quality experiment, not UI behavior.
+4. **Versions and persistence.** Fit versions are immutable and live in tab memory only: `draft`, `_r1`, `_r2`, ... Versions store controls and fit metadata, not pixel buffers. Nothing is written to `out/`, there is no server storage. Session export/autosave is out of scope.
+5. **Strength.** 0-150%, applied after every fit/refit (fitting always runs at 100%); no separate color/curve strengths. Single and batch exports always scale from the base control, never from an already scaled result.
+6. **Open product items.** The disclaimer stays a `DISCLAIMER` stub until approved. Hold-out validation is not part of the first full-flow delivery. No version-retention limit until memory measurements justify one.
+
 ## Profile strength
 
 Strength sets what part of the way from the Nikon neutral to the profile to go. The computation is as in `strength.scaled`:
@@ -115,11 +126,10 @@ Strength sets what part of the way from the Nikon neutral to the profile to go. 
 **Behavior**
 
 - Strength is a multiplier on top of the profile, not an edit of its fields. At step 3.1 the sliders show the profile values at 100%, strength is applied to them at render and at save. So strength can be changed back and forth without losses, and manual edits are not reset.
-- Buttons 30, 50, 70, 100% next to the slider.
 - Above 100% the profile is strengthened. Fields that hit ±100 and get clipped are highlighted, a warning next to them.
 - Fitting (steps 1 and 3.2) always runs at 100%. The chosen strength is kept after it and applied to the new version.
 - The report states the strength it is computed at. NP3 parameters are shown in two columns: profile and result with strength.
-- If strength is not 100%, a `-70` suffix is added to the name in the NP3, the name is truncated to fit 19 characters (as in `strength.save`). The user sees the final name before saving.
+- The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions").
 
 ## Report
 
@@ -152,8 +162,8 @@ The report can be downloaded as a JSON file: summary, table, parameters, file na
 ## Open questions
 
 1. The disclaimer text.
-2. Refitting: from zero or from the previous version? And should manual edits be kept as the starting point?
-3. Is a check on frames outside the fit needed: hold out one pair and show the error on it separately?
-4. How many versions to keep and where: in `out/` or in a separate session folder.
-5. The upper strength bound: 150% or more. Above 100% the blender increasingly hits ±100.
-6. Is a separate strength for color and curve needed (it is in [roadmap.md](roadmap.md) as a possible improvement).
+2. ~~Refitting: from zero or from the previous version?~~ Resolved: from zero, deterministically (see "Decisions").
+3. Is a check on frames outside the fit needed: hold out one pair and show the error on it separately? (Not part of the first full-flow delivery.)
+4. ~~How many versions to keep and where~~ Resolved: immutable versions in tab memory, no retention limit for now (see "Decisions").
+5. ~~The upper strength bound~~ Resolved: 150% (see "Decisions").
+6. ~~A separate strength for color and curve~~ Resolved: no (see "Decisions").

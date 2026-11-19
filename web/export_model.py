@@ -121,12 +121,20 @@ def export_detail(out: str):
     print("model/detail.json, model/detail.bin:", {t: list(v) for t, v in parts.items()})
 
 
+def export_wbmap(out: str):
+    """data/wbmap.json (5x2 LR Temperature/Tint -> log WB coefficients) -> model/wbmap.json."""
+    w = json.load(open(os.path.join(HERE, "..", "data", "wbmap.json")))
+    json.dump({"version": 1, "weights": w}, open(os.path.join(out, "wbmap.json"), "w"))
+    print("model/wbmap.json")
+
+
 def main():
     out = os.path.join(HERE, "model")
     os.makedirs(out, exist_ok=True)
     export_dev(out)
     export_profile(out)
     export_detail(out)
+    export_wbmap(out)
 
 
 if __name__ == "__main__":
