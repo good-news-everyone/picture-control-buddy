@@ -129,7 +129,7 @@ Strength sets what part of the way from the Nikon neutral to the profile to go. 
 - Above 100% the profile is strengthened. Fields that hit ±100 and get clipped are highlighted, a warning next to them.
 - Fitting (steps 1 and 3.2) always runs at 100%. The chosen strength is kept after it and applied to the new version.
 - The report states the strength it is computed at. NP3 parameters are shown in two columns: profile and result with strength.
-- The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions").
+- The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions"). Only the strength-set files differ: `<name>-<percent>.NP3` (the NP3 inside keeps the base name).
 
 ## Report
 

@@ -636,7 +636,9 @@ export async function runLevel8({ browser, port, report, skip }) {
         };
       }, preSnap);
       report(lockedBefore.fitted === false && lockedBefore.satMark
-             && lockedBefore.groupMarks.join(",") === "basic,curve,grading",
+             // the edited groups are marked; earlier scenarios (every slider moved in
+             // scenario 1) may leave other groups off neutral too, so a superset is fine
+             && ["basic", "curve", "grading"].every((g) => lockedBefore.groupMarks.includes(g)),
         `8 stage 6: standalone editing compares against neutral — marks on the edited fields` +
         ` (groups ${lockedBefore.groupMarks.join(",")})`);
       report(post.marks === 0, `8 stage 6: the standalone Reset (to neutral) clears every mark (${post.marks} left)`);
@@ -1119,6 +1121,13 @@ export async function runLevel8({ browser, port, report, skip }) {
           document.querySelector(zone).dispatchEvent(
             new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
         };
+        // the slider helper too: the stage-6 and stage-7 scenarios below edit the panel
+        window.__t8.groupSlider = (group, idx, v) => {
+          const inp = document.querySelectorAll(`#panel [data-group="${group}"] input[type=range]`)[idx];
+          inp.value = v;
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+        };
       });
       // a real aligned pair (DSC_5584.NEF + its own export) and a cross pair
       // (SKL_3024 RAW against the DSC_5584 target — NCC below 0.6 blocks it)
@@ -1514,8 +1523,11 @@ export async function runLevel8({ browser, port, report, skip }) {
           const more = await ev(() => ({ step: window.__np3app.state.step,
             shown: getComputedStyle(document.getElementById("more")).display !== "none",
             text: document.getElementById("more").textContent }));
-          report(more.step === "more" && more.shown && /stage 7/i.test(more.text),
-            "8 exit: Continue fitting goes to the honest stage-7 stub");
+          const moreUi = await ev(() => ({ refit: !!document.getElementById("more-refit"),
+            cards: document.querySelectorAll("#more-pairs .pair").length,
+            pairs: window.__np3app.state.pairs.length }));
+          report(more.step === "more" && more.shown && moreUi.refit && moreUi.cards === moreUi.pairs,
+            `8 exit: Continue fitting goes to the More frames step (${moreUi.cards} pair cards, the refit bar)`);
           await ev(() => document.getElementById("more-back").click());
           await page.waitForFunction(`window.__np3app.state.step === "compare"`,
             { timeout: 60000, polling: 200 });
@@ -2279,6 +2291,192 @@ export async function runLevel8({ browser, port, report, skip }) {
     await viewAssertions("1280×800");
     await page.setViewport({ width: 800, height: 600 });
     await ev(() => window.__np3app.compare.draw());
+
+    // --- stage 7: More frames — more pairs, advice, the recommended set, refit (spec/ui.md step 3.2) ---
+    // the second pair: the DSC_5584 RAW + its own export again under new names (DSC_5584B.*) —
+    // a pair known to prepare in every browser (the files of level 8 already); the advice,
+    // the selection and the refit only need a second usable pair, not a different scene
+    if (!rootFile("test1/DSC_5584.jpg")) {
+      skip("8 stage 7: no test1/DSC_5584.jpg — the More-step scenarios are skipped");
+    } else {
+      const moreSettle = (cond, ms = 300000) => page.waitForFunction(cond, { timeout: ms, polling: 250 });
+      // the session strength 80% on Compare: the refit must keep it
+      await ev(() => {
+        const inp = document.getElementById("cmp-strength");
+        inp.value = "80";
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const v0 = await ev(() => {
+        const s = window.__np3app.state;
+        return { n: s.versions.length, sel: s.selectedVersionId,
+                 selName: s.versions.find((v) => v.id === s.selectedVersionId).name,
+                 names: s.versions.map((v) => v.name),
+                 versionsJson: JSON.stringify(s.versions.map((v) => ({ id: v.id, control: v.control }))) };
+      });
+
+      // the editor's Continue fitting with manual edits goes through the leave warning
+      await ev(() => document.getElementById("cmp-manual").click());
+      await moreSettle(`window.__np3app.state.step === "edit"`, 60000);
+      await ev(() => window.__t8.groupSlider("basic", 0, 37));
+      const lw = await ev(() => {
+        document.getElementById("ed-to-more").click();
+        return { shown: !document.getElementById("leave-confirm").hidden,
+                 step: window.__np3app.state.step,
+                 btn: !document.getElementById("ed-to-more").hidden };
+      });
+      report(lw.btn && lw.shown && lw.step === "edit",
+        "8 stage 7: Continue fitting from the editor with manual edits asks first (the leave warning)");
+      await ev(() => document.getElementById("leave-discard").click());
+      await moreSettle(`window.__np3app.state.step === "more"`, 60000);
+
+      // the screen: the session's pairs as cards with Remove, the advice of the selected pairs
+      await moreSettle(`window.__np3app.state.advice && window.__np3app.state.advice.coverage.length === 10
+                        && window.__np3app.state.advice.pending === 0`, 120000);
+      const m0 = await ev(() => {
+        const A = window.__np3app, s = A.state;
+        window.__t8.prep1 = s.pairs.find((p) => p.id === 1)?.prepared ?? null;
+        return { step: s.step, shown: getComputedStyle(document.getElementById("more")).display !== "none",
+                 cards: [...document.querySelectorAll("#more-pairs .pair")].map((c) => c.dataset.pairId),
+                 removes: document.querySelectorAll("#more-pairs .pair-remove").length,
+                 rows: document.querySelectorAll("#more-advice .more-cov tr").length,
+                 advice: s.advice, ids: document.getElementById("more-refit").dataset.pairIds,
+                 verdict1: document.querySelector('#more-pairs .pair[data-pair-id="1"] .pair-verdict')?.dataset.verdict ?? null };
+      });
+      report(m0.shown && m0.cards.length >= 1 && m0.removes === m0.cards.length && m0.rows === 10
+             && m0.advice.selected.join(",") === m0.ids && m0.verdict1 !== null,
+        `8 stage 7: the More screen — ${m0.cards.length} pair cards with Remove, coverage of ${m0.rows} groups` +
+        ` over the selected pairs (${m0.ids}), pair 1 verdict "${m0.verdict1}"`);
+
+      // remove a pair (the blocked preview pair): pair 1 keeps its preparation, the versions stay
+      const victim = await ev(() => window.__np3app.state.pairs.find((p) => p.id !== 1)?.id ?? null);
+      if (victim !== null) {
+        await ev((v) => document.querySelector(`#more-pairs .pair[data-pair-id="${v}"] .pair-remove`).click(), victim);
+        const rm = await ev(() => {
+          const s = window.__np3app.state;
+          return { ids: s.pairs.map((p) => p.id), cards: document.querySelectorAll("#more-pairs .pair").length,
+                   kept1: s.pairs.find((p) => p.id === 1)?.prepared === window.__t8.prep1, versions: s.versions.length };
+        });
+        report(!rm.ids.includes(victim) && rm.cards === rm.ids.length && rm.kept1 && rm.versions === v0.n,
+          `8 stage 7: removing pair ${victim} keeps the other prepared pairs and the versions (pairs ${rm.ids})`);
+      } else {
+        skip("8 stage 7: no second pair to remove");
+      }
+
+      // a new pair through the More screen's zones (the same loading path and checks)
+      await ev(() => window.__t8.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
+      await ev(() => window.__t8.dropOn("#more-target-drop", "/test1/DSC_5584.jpg", "DSC_5584B.jpg"));
+      // wait for a terminal state of the new pair (analyzed, or failed — reported below)
+      await moreSettle(`(() => { const s = window.__np3app.state;
+                         const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+                         return p && (p.raw === "error" || p.prepError || p.fitBlocked || p.prepared?.blocked
+                                      || (p.frame && p.prepared && s.advice.candidates.includes(p.id)
+                                          && s.advice.pending === 0)); })()`, 600000);
+      const m1 = await ev(() => {
+        const s = window.__np3app.state;
+        const p3 = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+        return { id3: p3.id, target: p3.targetFile?.name, ncc: p3.prepared?.ncc ?? 0,
+                 err: p3.prepError ?? p3.rawError ?? p3.fitBlocked?.code ?? p3.prepared?.blocked?.code ?? null, versions: s.versions.length,
+                 fitting: s.fitting, selected: s.advice.selected, coverage: s.advice.coverage,
+                 card: !!document.querySelector(`#more-pairs .pair[data-pair-id="${p3.id}"] .pair-verdict`),
+                 status: s.status };
+      });
+      report(m1.target === "DSC_5584B.jpg" && m1.ncc >= 0.6 && m1.card && !m1.err,
+        `8 stage 7: a pair added on the More screen is decoded, prepared and analyzed (NCC ${m1.ncc.toFixed(3)}` +
+        `${m1.err ? ", " + m1.err : ""})`);
+      report(m1.versions === v0.n && !m1.fitting && m1.selected.includes(m1.id3)
+             && JSON.stringify(m1.coverage) !== JSON.stringify(m0.advice.coverage),
+        `8 stage 7: the advice follows the new pair without a fit (selected ${m1.selected}, versions ${m1.versions})`);
+
+      // exclude / include: the advice and the displayed refit ids follow, still no fit
+      const toggle3 = () => ev((id) =>
+        document.querySelector(`#more-pairs .pair[data-pair-id="${id}"] .pair-inc-box`).click(), m1.id3);
+      await toggle3();
+      const ex = await ev(() => ({ selected: window.__np3app.state.advice.selected,
+        ids: document.getElementById("more-refit").dataset.pairIds,
+        coverage: window.__np3app.state.advice.coverage, versions: window.__np3app.state.versions.length }));
+      report(!ex.selected.includes(m1.id3) && ex.ids === ex.selected.join(",")
+             && JSON.stringify(ex.coverage) === JSON.stringify(m0.advice.coverage) && ex.versions === v0.n,
+        `8 stage 7: excluding a pair updates the advice and the refit ids (${ex.ids}) without a fit`);
+      await toggle3();
+      const inc = await ev(() => document.getElementById("more-refit").dataset.pairIds);
+      report(inc.split(",").map(Number).includes(m1.id3), `8 stage 7: including it back (${inc})`);
+
+      // the recommended set: one click selects it, the user can override it afterwards
+      {
+        const rec0 = await ev(() => window.__np3app.state.advice.recommended);
+        const sel0 = await ev(() => window.__np3app.state.advice.selected);
+        if (rec0.length) {
+          if (rec0.length === sel0.length && rec0.every((id) => sel0.includes(id))) await toggle3();
+          const r = await ev(() => {
+            const b = document.getElementById("more-use-rec");
+            const enabled = b && !b.disabled;
+            b?.click();
+            const s = window.__np3app.state;
+            return { enabled, rec: s.advice.recommended, selected: s.advice.selected,
+                     text: document.querySelector("#more-advice .more-rec")?.textContent ?? "" };
+          });
+          const same = r.rec.length === r.selected.length && r.rec.every((id) => r.selected.includes(id));
+          report(r.enabled && same && /Recommended set/.test(r.text),
+            `8 stage 7: "Use the recommended selection" selects the recommended set (${r.rec}) — "${r.text.slice(0, 50)}"`);
+        } else {
+          skip("8 stage 7: no recommended set (every candidate is bad)");
+        }
+        // override: both pairs in the refit
+        await ev((id3) => {
+          for (const id of [1, id3]) {
+            const b = document.querySelector(`#more-pairs .pair[data-pair-id="${id}"] .pair-inc-box`);
+            if (b && !b.checked && !b.disabled) b.click();
+          }
+        }, m1.id3);
+      }
+
+      // cancel path: a cancelled refit leaves the session unchanged
+      await ev(() => document.getElementById("more-refit").click());
+      await moreSettle(`/iteration/.test(window.__np3app.state.status)`, 300000);
+      await ev(() => document.getElementById("more-cancel").click());
+      const cx = await ev(() => {
+        const s = window.__np3app.state;
+        return { status: s.status, fitting: s.fitting, versions: s.versions.length, sel: s.selectedVersionId,
+                 step: s.step, btn: document.getElementById("more-refit").disabled };
+      });
+      report(cx.status.startsWith("Refit cancelled") && !cx.fitting && cx.versions === v0.n
+             && cx.sel === v0.sel && cx.step === "more" && !cx.btn,
+        `8 stage 7: a cancelled refit leaves the session unchanged ("${cx.status}")`);
+
+      // refit: exactly the displayed ids, the next _rN version, back to Compare, strength kept
+      const shown = await ev(() => document.getElementById("more-refit").dataset.pairIds);
+      await ev(() => document.getElementById("more-refit").click());
+      await moreSettle(`window.__np3app.state.status.startsWith("Refit finished")
+                        && window.__np3app.state.step === "compare"`, 900000);
+      const rf = await ev(() => {
+        const s = window.__np3app.state;
+        const v = s.versions[s.versions.length - 1];
+        return { n: s.versions.length, id: v.id, name: v.name, kind: v.kind, parentId: v.parentId,
+                 pairIds: v.pairIds, ctlName: v.control.name, sel: s.selectedVersionId, step: s.step,
+                 strength: s.strength, nParams: v.fitVector.length,
+                 versionsJson: JSON.stringify(s.versions.slice(0, -1).map((x) => ({ id: x.id, control: x.control }))),
+                 btn: !!document.querySelector(`#cmp-versions button[data-version="${v.id}"]`) };
+      });
+      report(rf.n === v0.n + 1 && rf.kind === "refit" && rf.name === `${v0.selName}_r1`
+             && rf.ctlName === rf.name && !v0.names.includes(rf.name) && rf.parentId === v0.sel && rf.nParams === 56,
+        `8 stage 7: the refit creates "${rf.name}" (id ${rf.id}, kind ${rf.kind}, parent ${rf.parentId})`);
+      report(rf.pairIds.join(",") === shown && shown.split(",").length >= 2,
+        `8 stage 7: the refit used exactly the displayed pair ids (${rf.pairIds} vs ${shown})`);
+      report(rf.sel === rf.id && rf.step === "compare" && rf.strength === 80 && rf.btn
+             && rf.versionsJson === v0.versionsJson,
+        "8 stage 7: back on Compare with the new version selected, strength 80% kept, earlier versions unchanged");
+      // the draft stays selectable and unchanged
+      await ev(() => document.querySelector('#cmp-versions button[data-version="draft"]').click());
+      const back = await ev(() => ({ sel: window.__np3app.state.selectedVersionId,
+        json: JSON.stringify(window.__np3app.state.versions.slice(0, -1).map((x) => ({ id: x.id, control: x.control }))) }));
+      report(back.sel === "draft" && back.json === v0.versionsJson,
+        "8 stage 7: the draft stays selectable after the refit, unchanged");
+      await ev(() => {
+        const inp = document.getElementById("cmp-strength");
+        inp.value = "100";
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
 
     // --- criterion 11: statics by GET only, no request bodies ---
     report(netBad.length === 0,

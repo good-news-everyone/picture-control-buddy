@@ -32,9 +32,11 @@ import { createHistory } from "./history.js";
 import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
+import { createMore, computeAdvice, frameOf } from "./more-view.js";
 import { warpToWorking } from "./pair-prepare.js";
 import { assignFile, pruneEmpty, defaultProfileName, isRawReady, isTargetReady,
-         isCompletePair, dimsCompatible, draftVersion } from "./session.js";
+         isCompletePair, dimsCompatible, draftVersion, refitPairIds,
+         makeRefitVersion } from "./session.js";
 import { neutralControl, isDirty, fieldDeltas } from "./baseline.js";
 import { decodeTarget, editGain, editWarningCodes, setWbMapWeights, wbMultipliers,
          MIN_TARGET } from "./target.js";
@@ -61,11 +63,12 @@ for (const c of COLORS) control.blender[c] = [0, 0, 0];   // newProfile leaves e
 for (const z of ZONES) control.grade[z] = [0, 0, 0];
 const state = {
   // --- session (spec/ui-plan.md §3) ---
-  step: "start",              // start | compare | edit (manual adjustment) | more (stage-7 stub)
+  step: "start",              // start | compare | edit (manual adjustment) | more (step 3.2, stage 7)
   pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, included, blocked }]
   selectedPairId: null,
   versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
   selectedVersionId: null,
+  advice: null,               // stage 7: computeAdvice() over the frame records (more-view.js)
   reportAggregate: null,      // the aggregate report over the pairs (spec §3; stage 5A compute, 5B display)
   fitting: false,             // a fit runs in the fit Worker (progress in the status line)
   profileName: "",            // the NP3 name for the fit: 1–19 ASCII (the np3.serialize rule)
@@ -87,10 +90,12 @@ const state = {
 };
 const statusEl = $("status");
 const startStatusEl = $("start-status");
+const moreStatusEl = $("more-status");
 function setStatus(s) {
   state.status = s;
   statusEl.textContent = s;
   if (startStatusEl) startStatusEl.textContent = s;
+  if (moreStatusEl) moreStatusEl.textContent = s;
 }
 
 // RAW is decoded in a Worker (lib/loader.js), and renderer.setFrame expects {develop} in place.
@@ -299,10 +304,9 @@ const compareView = createCompare({ state,
     const p = state.pairs.find((q) => q.id === state.selectedPairId);
     if (p) enterEditor(p);                // step 3.1 with the selected version as the baseline
   },
-  onMore: () => { state.step = "more"; syncStep(); },   // the stage-7 stub
+  onMore: () => enterMore(),             // step 3.2 (stage 7)
   onStart: () => showStart(),
 });
-$("more-back").addEventListener("click", () => { state.step = "compare"; syncStep(); });
 
 // ---------- the report panel (stage 5B, spec/ui.md "Report") ----------
 // The same component on the Compare screen and beside the manual editor (step 3.1); it
@@ -324,6 +328,28 @@ const start = createStart({ state, setStatus,
   onAddTargets: (files) => { for (const f of files) addTargetFile(f); },
   onEditPair: (pair) => enterEditor(pair),
   onFit: () => runFitPreparation(),
+});
+
+// ---------- the More frames screen (stage 7, spec/ui.md step 3.2) ----------
+// The pair list is the Start component over the More screen's ids (one loading path); the
+// advice is recomputed from the cached frame records on every pair change — never a fit.
+const more = createMore({ state, setStatus,
+  onAddRaws: (files) => { for (const f of files) addRawFile(f); },
+  onAddTargets: (files) => { for (const f of files) addTargetFile(f); },
+  onRemovePair: (p) => removePair(p),
+  onIncludeChange: () => selectionChanged(),
+  onUseRecommended: () => useRecommended(),
+  onRefit: () => runRefit(),
+  onCancel: () => cancelFit(t("Refit cancelled — the session is unchanged")),
+  onBack: () => enterCompare(),
+});
+function refreshPairsUI() {
+  start.refresh();
+  more?.refresh();
+}
+// the Start screen's include checkbox changes the selection too (the advice follows)
+$("pairs").addEventListener("change", (e) => {
+  if (e.target.classList?.contains("pair-inc-box")) selectionChanged();
 });
 
 // ---------- pair preparation (stage 2, spec/web-schemas.md §2) ----------
@@ -372,6 +398,7 @@ function invalidatePreparation(pair) {
   pair.prepError = null;
   pair.fitBlocked = null;
   pair.report = null;                  // the report belonged to the old preparation
+  pair.frame = null;                   // …and so did the advice frame record (stage 7)
   state.reportAggregate = null;
   reportWorkerPairs.delete(String(pair.id));
   reportView.refresh();
@@ -408,9 +435,24 @@ fitWorker.onmessage = (e) => {
                 { it: m.iteration, total: m.total, cost: m.cost.toFixed(2) }));
     return;
   }
+  const task = fitPending;
   fitPending = null;
   state.fitting = false;
-  if (m.type === "ready") {
+  const refit = task.kind === "refit";
+  if (m.type === "ready" && refit) {
+    // Stage 7: the next immutable version after its parent (the version selected when the
+    // refit started); every earlier version stays as it was; the strength is kept.
+    const parent = state.versions.find((v) => v.id === task.parentId) ?? state.versions[0];
+    const v = makeRefitVersion(state.versions, parent, m.result);
+    state.versions = [...state.versions, v];
+    state.selectedVersionId = v.id;
+    setBaseline(v);              // the editor's baseline follows the selection (stage 6)
+    setStatus(t("Refit finished: {name} ({it} iterations, cost {cost} in {sec}s)", {
+      name: v.name, it: m.result.iterations.run,
+      cost: m.result.cost.toFixed(2), sec: (m.ms / 1000).toFixed(1),
+    }));
+    enterCompare();              // spec/ui.md step 3.2: "Then back to step 2"
+  } else if (m.type === "ready") {
     // The immutable draft version (spec/ui-plan.md §3); the strength is kept for display/export.
     state.versions = [draftVersion(m.result)];
     state.selectedVersionId = "draft";
@@ -421,31 +463,43 @@ fitWorker.onmessage = (e) => {
     enterCompare();              // stage 4: a successful fit goes to step 2 (spec/ui.md scenario)
   } else if (m.type === "error") {
     // A failure keeps the previous session state: no partial versions.
-    setStatus(t("Fit failed: {error}", { error: m.detail }));
+    setStatus(refit ? t("Refit failed: {error}", { error: m.detail })
+                    : t("Fit failed: {error}", { error: m.detail }));
   } else {
-    setStatus(t("Fit cancelled — press Fit to run it again"));
+    setStatus(refit ? t("Refit cancelled — the session is unchanged")
+                    : t("Fit cancelled — press Fit to run it again"));
   }
-  start.refresh();
+  refreshPairsUI();
 };
 
-function cancelFit() {
-  if (!fitPending) return;
-  fitWorker.postMessage({ type: "cancel", id: fitPending.id });
+// Cancels the running fit or refit: nothing it computed is applied (a refit leaves every
+// version and the selection as they were). `msg` — the status text (default: inputs changed).
+function cancelFit(msg = null) {
+  // a plain Fit is cancellable once it is in the Worker (unchanged stage-3 rule); a refit
+  // also while its pairs prepare / the models are fetched (state.fitting is set up front)
+  if (!fitPending && !(state.fitting && fitKind === "refit")) return;
+  if (fitPending) fitWorker.postMessage({ type: "cancel", id: fitPending.id });
+  const refit = fitPending?.kind === "refit" || fitKind === "refit";
   fitPending = null;
   state.fitting = false;
-  setStatus(t("Fit cancelled — the inputs changed"));
+  ++fitGen;                          // a refit still preparing/fetching sees this and stops
+  setStatus(msg ?? (refit ? t("Refit cancelled — the inputs changed")
+                          : t("Fit cancelled — the inputs changed")));
+  refreshPairsUI();
 }
 
-async function startFit(pairs) {
+let fitKind = "fit";                 // the kind of the running fit ("fit" | "refit")
+async function startFit(pairs, { kind = "fit", parentId = null, baseName = state.profileName } = {}) {
   state.fitting = true;
-  start.refresh();
-  setStatus(t("Fitting…"));
+  fitKind = kind;
+  refreshPairsUI();
+  setStatus(kind === "refit" ? t("Refitting…") : t("Fitting…"));
   try {
     const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
     if (!state.fitting) return false;      // superseded while the models were fetched
     const payload = {
       type: "fit", id: ++fitSeq, generation: { session: 0, pair: 0, task: ++fitGen },
-      seed: 0, iters: 30, baseName: state.profileName,
+      seed: 0, iters: 30, baseName,         // decision #3: the zero init, the seed of the draft
       devMeta, devLut, profileMeta, profileBin,    // clones: the cached buffers are kept
       files: { raw: pairs[0].rawFile.name, target: pairs[0].targetFile.name },
       pairs: pairs.map((p) => ({
@@ -466,12 +520,13 @@ async function startFit(pairs) {
                     q.masks.clipMask.buffer, q.masks.reportMask.buffer,
                     q.masks.validMask.buffer, q.masks.nearWhiteMask.buffer);
     }
-    fitPending = { id: payload.id };
+    if (!state.fitting) return true;       // cancelled while the payload was assembled
+    fitPending = { id: payload.id, kind, parentId };
     fitWorker.postMessage(payload, transfer);
     return true;
   } catch (err) {
     state.fitting = false;
-    start.refresh();
+    refreshPairsUI();
     setStatus(t("Fit failed: {error}", { error: String(err.message || err) }));
     return true;                           // reported: the Fit flow ends here
   }
@@ -492,6 +547,7 @@ const reportWorkerPairs = new Map();   // pair name -> the pair generation the W
 reportWorker.onmessage = (e) => {
   const m = e.data;
   if (m.type === "progress") return;          // the map progress is not surfaced (fast)
+  if (m.type === "frames" || m.frames) { framesLanded(m); return; }
   if (!reportPending || m.id !== reportPending.id) return;
   reportPending = null;
   if (!m.generation || m.generation.task !== reportGen) return;   // stale: nothing is applied
@@ -507,6 +563,8 @@ reportWorker.onmessage = (e) => {
     }
     state.reportAggregate = m.aggregate;
     reportView.refresh();
+  } else if (m.type === "error" && m.code === "cache_miss") {
+    for (const n of m.pairs ?? []) reportWorkerPairs.delete(n);   // the next request resends
   }
   // an error keeps the previous reports; rendering is unaffected
 };
@@ -532,31 +590,28 @@ async function requestReport() {
     let deltas = null, fittedRenderDE = null;
     if (manual) {
       deltas = fieldDeltas(state.control, state.baseline.control);
-      // the worker takes one reference dE for the task: exact for a single pair; with more
-      // pairs the delta would mix pairs, so it is left out (shown as absent)
-      const ref = usable.length === 1 ? usable[0].fittedDE : null;
-      if (ref && ref.versionId === version.id && ref.strength === state.strength) fittedRenderDE = ref.value;
+      // stage 7: a per-pair reference — each pair's delta against its own fitted dE at the
+      // same version and strength (the worker takes { pairName: dE }; a pair without its
+      // fitted report gets no delta)
+      fittedRenderDE = {};
+      for (const p of usable) {
+        const ref = p.fittedDE;
+        if (ref && ref.versionId === version.id && ref.strength === state.strength)
+          fittedRenderDE[String(p.id)] = ref.value;
+      }
     }
     const gen = ++reportGen;                  // supersede whatever is running/fetching
-    const pairs = [], transfer = [];
-    for (const p of usable) {
-      const pgen = p.prepGen ?? 0;
-      const entry = { name: String(p.id), generation: pgen,
-                      files: { raw: p.rawFile?.name ?? "", target: p.targetFile?.name ?? "" },
-                      w3: Math.floor(p.prepared.size.w / 3), h3: Math.floor(p.prepared.size.h / 3) };
-      if (reportWorkerPairs.get(entry.name) !== pgen) {
-        entry.x = p.prepared.x.slice();       // copies: the session's prepared arrays survive
-        entry.y = p.prepared.y.slice();
-        entry.masks = { reportMask: p.prepared.masks.reportMask.slice() };
-        entry.gain = p.prepared.gain.slice();
-        transfer.push(entry.x.buffer, entry.y.buffer,
-                      entry.masks.reportMask.buffer, entry.gain.buffer);
-        reportWorkerPairs.set(entry.name, pgen);
-      }
-      pairs.push(entry);
-    }
     const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
     if (gen !== reportGen) return;            // superseded while the models were fetched
+    // the entries are built right before the post (no await in between): a pair is marked
+    // as held by the worker exactly when its arrays are posted (stage 7 — the frame
+    // requests share the cache, and the worker registers arrays in posting order)
+    const pairs = [], transfer = [];
+    for (const p of usable) {
+      if (!compareUsable(p)) continue;        // removed/invalidated while the models were fetched
+      pairs.push(reportEntry(p, transfer));
+    }
+    if (!pairs.length) return;
     const id = ++reportSeq;
     reportPending = { id };
     reportWorker.postMessage({ type: "report", id,
@@ -570,11 +625,87 @@ async function requestReport() {
   }
 }
 
+// A report-worker pair entry: the heavy arrays only until the worker holds this pair
+// generation (the §4.1 cache); shared by the report and the stage-7 frame requests.
+function reportEntry(p, transfer) {
+  const pgen = p.prepGen ?? 0;
+  const entry = { name: String(p.id), generation: pgen,
+                  files: { raw: p.rawFile?.name ?? "", target: p.targetFile?.name ?? "" },
+                  w3: Math.floor(p.prepared.size.w / 3), h3: Math.floor(p.prepared.size.h / 3) };
+  if (reportWorkerPairs.get(entry.name) !== pgen) {
+    entry.x = p.prepared.x.slice();       // copies: the session's prepared arrays survive
+    entry.y = p.prepared.y.slice();
+    entry.masks = { reportMask: p.prepared.masks.reportMask.slice() };
+    entry.gain = p.prepared.gain.slice();
+    transfer.push(entry.x.buffer, entry.y.buffer,
+                  entry.masks.reportMask.buffer, entry.gain.buffer);
+    reportWorkerPairs.set(entry.name, pgen);
+  }
+  return entry;
+}
+
+// ---------- stage 7: the advice frame records ----------
+// Route (the cheapest correct one): the report worker already develops and caches the
+// neutral of every pair it holds (rec.fb = develop(dev, x*gain), Python's m.dev(raw["x"]*g)),
+// so it builds the analyze.frame record there (advice.buildFrame) and returns only the small
+// record — no second develop, no neutral array copied back. Pairs reach the worker through
+// the same cache protocol as the reports (reportEntry). A record is keyed by the pair's
+// preparation generation; a stale one is ignored.
+let framesSeq = 0;
+const framesPending = new Map();       // id -> true
+function frameCandidate(p) {
+  return isCompletePair(p) && p.prepared && p.prepared.x && !p.blocked && !p.fitBlocked
+    && !p.prepError && !frameOf(p);
+}
+async function requestFrames() {
+  const need = state.pairs.filter(frameCandidate);
+  if (!need.length) return;
+  try {
+    const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
+    const transfer = [];
+    const pairs = need.filter(frameCandidate).map((p) => {
+      const e = reportEntry(p, transfer);
+      e.ncc = p.prepared.ncc;
+      e.warnings = (p.warnings ?? []).map((w) => ({ ...w }));
+      return e;
+    });
+    if (!pairs.length) return;
+    const id = `f${++framesSeq}`;
+    framesPending.set(id, pairs.map((e) => e.name));
+    reportWorker.postMessage({ type: "frames", id, pairs, devMeta, devLut, profileMeta, profileBin },
+                             transfer);
+  } catch (err) { void err; /* the advice is optional */ }
+}
+let framesRetries = 0;
+function framesLanded(m) {
+  const names = framesPending.get(m.id);
+  if (!names) return;
+  framesPending.delete(m.id);
+  if (m.type === "error") {
+    // a cache miss (the worker lost or never got a pair's arrays): forget the marks and resend
+    // once more; any other error leaves the advice without those frames
+    for (const n of m.pairs ?? names) reportWorkerPairs.delete(n);
+    if (m.code === "cache_miss" && framesRetries++ < 3) requestFrames();
+  }
+  if (m.type === "frames") {
+    framesRetries = 0;
+    for (const f of m.frames) {
+      const p = state.pairs.find((q) => String(q.id) === f.name);
+      if (p && (p.prepGen ?? 0) === f.generation) p.frame = { gen: f.generation, rec: f.rec };
+    }
+  }
+  updateAdvice();
+}
+function updateAdvice() {
+  state.advice = computeAdvice(state);
+  refreshPairsUI();
+}
+
 async function prepareOne(pair) {
   pair.preparing = true;
   pair.prepStage = "queued";
   pair.prepError = null;
-  start.refresh();
+  refreshPairsUI();
   const gen = pair.prepGen;
   try {
     const rawBytes = new Uint8Array(await pair.rawFile.arrayBuffer());
@@ -595,7 +726,7 @@ async function prepareOne(pair) {
       xmp: pair.target.xmp, rawBytes,
       gain: g.gain, gainNote: g.note,
     }, [rawBytes.buffer, targetU8.buffer], (stage) => {
-      if (pair.prepGen === gen) { pair.prepStage = stage; start.refresh(); }
+      if (pair.prepGen === gen) { pair.prepStage = stage; refreshPairsUI(); }
     });
     if (pair.prepGen !== gen) return false;    // superseded mid-flight: nothing is applied
     if (res && res.error) pair.prepError = res.error.detail;
@@ -604,7 +735,7 @@ async function prepareOne(pair) {
     pair.prepError = String(err.message || err);
   } finally {
     if (pair.prepGen === gen) pair.preparing = false;
-    start.refresh();
+    refreshPairsUI();
   }
   return true;
 }
@@ -622,12 +753,7 @@ async function runFitPreparation() {
   for (const p of pairs) {
     if (p.preparing) continue;
     if (p.prepared) continue;                  // already prepared for this input
-    // the pre-fit check (match.MIN_TARGET): a small target is a preview inside a DNG
-    if (Math.max(p.target.width, p.target.height) < MIN_TARGET) {
-      p.fitBlocked = { code: "target_too_small", detail: `${p.target.width}×${p.target.height}` };
-      start.refresh();
-      continue;
-    }
+    if (sizeBlocked(p)) { refreshPairsUI(); continue; }
     if (!(await prepareOne(p))) {
       setStatus(t("Preparation interrupted by a changed file — press Fit again"));
       return;
@@ -642,6 +768,112 @@ async function runFitPreparation() {
   if (!(await startFit(eligible))) {
     setStatus(t("Fit interrupted by a changed file — press Fit again"));
   }
+}
+
+// ---------- stage 7: More frames — auto-preparation, selection, removal, refit ----------
+// In the More step every complete pair is prepared as soon as both files are decoded (the
+// same checks as Fit: the size pre-check, the alignment, NCC) so its frame record — and the
+// advice — is available before any refit. One serialized chain; a superseded preparation
+// just moves on to the next pair.
+let autoChain = Promise.resolve();
+function sizeBlocked(p) {
+  // the pre-fit check (match.MIN_TARGET): a small target is a preview inside a DNG
+  if (Math.max(p.target.width, p.target.height) < MIN_TARGET) {
+    p.fitBlocked = { code: "target_too_small", detail: `${p.target.width}×${p.target.height}` };
+    return true;
+  }
+  return false;
+}
+function autoPrepare() {
+  autoChain = autoChain.then(async () => {
+    let any = false;
+    for (;;) {
+      const p = state.pairs.find((q) => isCompletePair(q) && !q.blocked && !q.prepared
+        && !q.preparing && !q.prepError && !q.fitBlocked);
+      if (!p) break;
+      if (sizeBlocked(p)) { refreshPairsUI(); continue; }
+      await prepareOne(p);
+      any = true;
+      if (!p.prepared && !p.prepError) break;     // superseded by a changed file: a re-drop re-queues
+    }
+    requestFrames();
+    if (any && state.versions.length) requestReport();   // renderDE of the new pairs (exclusion hints)
+    updateAdvice();
+  });
+  return autoChain;
+}
+
+// A selection change (include/exclude) updates the advice; a refit computing over the old
+// selection is superseded (the refit must use exactly the displayed ids).
+function selectionChanged() {
+  if (state.fitting && fitKind === "refit") cancelFit(t("Refit cancelled — the selection changed"));
+  updateAdvice();
+}
+
+function removePair(p) {
+  const i = state.pairs.indexOf(p);
+  if (i < 0) return;
+  if (state.fitting && fitKind === "refit") cancelFit(t("Refit cancelled — the selection changed"));
+  cancelPreparation(p);
+  p.prepGen = (p.prepGen ?? 0) + 1;        // whatever is still in flight for it is stale
+  state.pairs.splice(i, 1);
+  reportWorkerPairs.delete(String(p.id));
+  if (state.selectedPairId === p.id) {
+    const next = state.pairs.find(compareUsable) ?? state.pairs[0];
+    state.selectedPairId = next ? next.id : null;
+    compareFramePair = null;
+  }
+  state.reportAggregate = null;
+  if (state.versions.length) requestReport();   // the aggregate over the remaining pairs
+  setStatus(t("Removed {name} from the session", { name: p.rawFile?.name ?? p.targetFile?.name ?? `#${p.id}` }));
+  updateAdvice();
+}
+
+function useRecommended() {
+  const a = state.advice;
+  if (!a || !a.recommended.length) return;
+  const rec = new Set(a.recommended);
+  for (const p of state.pairs) if (a.candidates.includes(p.id)) p.included = rec.has(p.id);
+  selectionChanged();
+}
+
+// Refit (spec/ui.md step 3.2, decision #3): a new deterministic fit from the zero init over
+// exactly refitPairIds(session) — the unprepared selected pairs are prepared first, a pair the
+// preparation blocks drops out. The result is the next immutable version after the selected
+// one; a cancelled or superseded refit leaves the session unchanged.
+async function runRefit() {
+  if (state.fitting || !state.versions.length) return;
+  const parent = state.versions.find((v) => v.id === state.selectedVersionId) ?? state.versions[0];
+  state.fitting = true;                       // locks the button while the pairs prepare
+  fitKind = "refit";
+  const gen = ++fitGen;
+  setStatus(t("Refitting…"));
+  refreshPairsUI();
+  await autoPrepare();
+  if (gen !== fitGen || !state.fitting) return;   // cancelled / superseded while preparing
+  const ids = refitPairIds(state);
+  const pairs = ids.map((id) => state.pairs.find((p) => p.id === id))
+    .filter((p) => p && p.prepared && !p.prepared.blocked && !p.prepError && !p.fitBlocked);
+  if (!pairs.length) {
+    state.fitting = false;
+    setStatus(t("Nothing to refit: select at least one usable pair"));
+    refreshPairsUI();
+    return;
+  }
+  await startFit(pairs, { kind: "refit", parentId: parent.id, baseName: parent.name });
+}
+
+function enterMore() {
+  if (guardLeave(enterMore)) return;
+  if (!state.versions.length) {
+    setStatus(t("Fit a profile first — the More frames step needs a version"));
+    return;
+  }
+  state.step = "more";
+  syncStep();
+  updateAdvice();
+  autoPrepare();                // the pairs not prepared yet (e.g. excluded from the first fit)
+  requestFrames();
 }
 
 // ---------- model and RAW loading ----------
@@ -703,7 +935,7 @@ const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => 
     }
     // We do not touch the previous frame and profile: a new file's error goes only to the status.
     setStatus(full);
-    start.refresh();
+    refreshPairsUI();
   } else if (st.type === "ready") {
     if (st.tag?.kind === "pair") {
       const p = st.tag.pair;
@@ -712,7 +944,7 @@ const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => 
         refreshPair(p);
         setStatus(t("Ready"));
       }
-      start.refresh();
+      refreshPairsUI();
     } else {
       applyEditorFrame(st);
     }
@@ -748,7 +980,7 @@ function addRawFile(file) {
   pair.blocked = false;    // a re-drop retries the decode (assignFile matches the same-name slot)
   invalidatePreparation(pair);
   start.setNameDefault(defaultProfileName(file.name));
-  start.refresh();
+  refreshPairsUI();
   rawQueue = rawQueue.then(async () => {
     const bytes = new Uint8Array(await file.arrayBuffer());
     try { pair.wbMult = wbMultipliers(bytes); } catch { pair.wbMult = null; }
@@ -759,7 +991,8 @@ function addRawFile(file) {
       setStatus(t("Decoding of {name} was interrupted — drop the file again", { name: file.name }));
     }
     refreshPair(pair);
-    start.refresh();
+    refreshPairsUI();
+    if (state.step === "more") autoPrepare();
   });
   return rawQueue;
 }
@@ -769,7 +1002,7 @@ async function addTargetFile(file) {
   if (state.selectedPairId == null) state.selectedPairId = pair.id;
   pair.target = "pending";
   invalidatePreparation(pair);
-  start.refresh();
+  refreshPairsUI();
   try {
     const target = await decodeTarget(file);
     // The stage-1 dimension guard (web/lib/session.js): a target whose aspect ratio does not
@@ -779,7 +1012,7 @@ async function addTargetFile(file) {
       pair.targetFile = null;
       pruneEmpty(state.pairs);
       setStatus(t("{name}: dimensions do not match the RAW frame — the target is skipped", { name: file.name }));
-      start.refresh();
+      refreshPairsUI();
       return;
     }
     pair.target = target;
@@ -791,7 +1024,8 @@ async function addTargetFile(file) {
     setStatus(t("{name}: could not be read as a JPEG target — the file is skipped", { name: file.name }));
   }
   refreshPair(pair);
-  start.refresh();
+  refreshPairsUI();
+  if (state.step === "more") autoPrepare();
 }
 
 // ---------- navigation: Start <-> the manual editor ----------
@@ -850,7 +1084,7 @@ function showStart() {
   if (guardLeave(showStart)) return;
   state.step = "start";
   syncStep();
-  start.refresh();       // the assembled session is kept across the navigation
+  refreshPairsUI();       // the assembled session is kept across the navigation
 }
 
 // The Comparison screen (spec/ui.md step 2, stage 4): requires a fitted version — from Fit
@@ -883,12 +1117,14 @@ function syncStep() {
   document.body.classList.toggle("step-compare", state.step === "compare");
   document.body.classList.toggle("step-more", state.step === "more");
   $("ed-to-compare").hidden = !state.versions.length;   // the editor's way back to Compare
+  $("ed-to-more").hidden = !state.versions.length;      // …and on to More frames (stage 7)
   if (state.step !== "edit") leaveKeep();               // a pending warning never outlives the step
 }
 
 $("to-start").addEventListener("click", showStart);
 $("to-compare").addEventListener("click", enterCompare);
 $("ed-to-compare").addEventListener("click", enterCompare);
+$("ed-to-more").addEventListener("click", enterMore);
 
 // An editor-step RAW load: the standalone manual-editor behavior (the frame is replaced,
 // the profile and strength are kept). Pair assembly happens on the Start screen.
@@ -921,7 +1157,7 @@ function routeFile(f) {
   const ext = (f.name.split(".").pop() || "").toLowerCase();
   if (ext === "np3") { transfer.importFile(f); return; }
   if (ext === "nef" || ext === "dng") {
-    if (state.step === "start") addRawFile(f);
+    if (state.step === "start" || state.step === "more") addRawFile(f);
     else editorOpenRaw(f);
   } else if (ext === "jpg" || ext === "jpeg") {
     addTargetFile(f);
@@ -946,4 +1182,5 @@ window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, 
                     gradingView, transfer, beforeAfter, start, hist, compare: compareView,
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
-                    runFitPreparation, prepareOne };
+                    runFitPreparation, prepareOne,
+                    more, enterMore, runRefit, removePair, useRecommended, computeAdvice };

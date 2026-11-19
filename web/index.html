@@ -215,6 +215,22 @@
   #to-compare { width: 100%; margin-top: 6px; }
   #to-start { width: 100%; margin-bottom: 10px; }
   #ed-to-compare { width: 100%; margin: -6px 0 10px; }
+  #ed-to-more { width: 100%; margin: -4px 0 10px; }
+  /* the More frames screen (stage 7): the pair list reuses the Start-screen cards */
+  #more-pairs { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+  #more .pair-verdict { margin-top: 6px; }
+  #more .pair-verdict.v-good { color: #8fc27a; }
+  #more .pair-verdict.v-caution { color: #cfa15a; }
+  #more .pair-verdict.v-bad { color: #e07a6a; }
+  #more .pair-high-error { margin-top: 6px; }
+  .more-cov { border-collapse: collapse; margin: 4px 0 8px; }
+  .more-cov td { padding: 1px 10px 1px 0; }
+  .more-cov td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .more-cov tr.lv-little td { color: #cfa15a; }
+  .more-cov tr.lv-none td { color: #e07a6a; }
+  .more-missing, .more-suggest, .more-rec { margin: 4px 0; }
+  #more-use-rec { margin: 4px 0 8px; }
+  #more-refit, #more-cancel, #more-back { margin-right: 8px; }
 
   /* Stage 6: changed-field marks and reset controls (web/lib/mark.js). A mark keeps its box
      when hidden (visibility) — no layout jump; visible marks are real, focusable buttons. */
@@ -378,10 +394,27 @@
 <section id="more">
   <div class="start-col">
     <h1 data-i18n="More frames">More frames</h1>
-    <p class="hint"
-       data-i18n="Stage 7 of the work plan: loading more pairs, color-coverage advice and the refit into the next _rN version. Not implemented yet — this screen is an honest stub.">
-      Stage 7 of the work plan: loading more pairs, color-coverage advice and the refit into the next _rN
-      version. Not implemented yet — this screen is an honest stub.</p>
+    <div class="hint" data-i18n="Add pairs with the same checks as on the Start screen, see which colors the selected pairs miss, choose the set and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.">
+      Add pairs with the same checks as on the Start screen, see which colors the selected pairs miss, choose the set and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.</div>
+    <div class="zones">
+      <div id="more-raw-drop" class="zone">
+        <b data-i18n="RAW (.NEF / .DNG)">RAW (.NEF / .DNG)</b><br>
+        <span data-i18n="Drop RAW files here or click to choose">Drop RAW files here or click to choose</span>
+      </div>
+      <div id="more-target-drop" class="zone">
+        <b data-i18n="JPEG targets (.JPG)">JPEG targets (.JPG)</b><br>
+        <span data-i18n="Drop JPEG targets here or click to choose">Drop JPEG targets here or click to choose</span>
+      </div>
+    </div>
+    <input type="file" id="more-raw-file" accept=".nef,.NEF,.dng,.DNG" multiple hidden>
+    <input type="file" id="more-target-file" accept=".jpg,.JPG,.jpeg,.JPEG" multiple hidden>
+    <div id="more-pairs"></div>
+    <div id="more-advice"></div>
+    <h2 data-i18n="Refit">Refit</h2>
+    <div id="more-refit-ids" class="hint"></div>
+    <div id="more-status" class="hint"></div>
+    <button id="more-refit" type="button" disabled data-i18n="Refit">Refit</button>
+    <button id="more-cancel" type="button" hidden data-i18n="Cancel the refit">Cancel the refit</button>
     <button id="more-back" type="button" data-i18n="Back to Comparison">Back to Comparison</button>
   </div>
 </section>
@@ -390,6 +423,7 @@
   <h1 data-i18n="NP3 profile editor">NP3 profile editor</h1>
   <button id="to-start" type="button" data-i18n="Back to Start">Back to Start</button>
   <button id="ed-to-compare" type="button" hidden data-i18n="Back to Comparison">Back to Comparison</button>
+  <button id="ed-to-more" type="button" hidden data-i18n="Continue fitting">Continue fitting</button>
   <div class="hint" data-i18n="RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.">
     RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.</div>
 

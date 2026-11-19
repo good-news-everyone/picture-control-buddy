@@ -17,7 +17,15 @@
 //     pairs: [{ name, generation, files, w3, h3,
 //               x?, y?, masks?: { reportMask }, gain? }] }
 //                                                    — arrays present only on a cache miss
+//   { type: "frames", id, devMeta, devLut, profileMeta, profileBin,
+//     pairs: [{ name, generation, files, w3, h3, ncc, warnings, x?, y?, masks?, gain? }] }
+//                                                    — stage 7: the analyze.frame records of
+//                                                      the pairs (advice.buildFrame over the
+//                                                      cached developed neutral `fb`); same
+//                                                      cache protocol, never cancels a report
 //   { type: "cancel", id }
+// fittedRenderDE: a number (one reference for every pair) or { pairName: number } — the
+// per-pair reference of the manual fittedDelta (stage 7; a missing name gives null).
 // Messages out:
 //   { type: "progress", id, pair, stage: "maps", done, total }   — between map chunks
 //   { type: "ready", id, generation, versionId, strength, reports, aggregate, ms }
@@ -25,6 +33,7 @@
 //                                                      maps buffers transferred; aggregate:
 //                                                      totalSums over the task's pairs + its
 //                                                      binMean and table
+//   { type: "frames", id, frames: [{ name, generation, rec }] }    — rec: the frame record
 //   { type: "error", id, generation, code, detail }
 // A cancelled/superseded task posts nothing at all.
 
@@ -32,6 +41,7 @@ import { srgbToLab } from "./color.js";
 import { loadModel, paramsOf, Pixels } from "./profile.js";
 import { loadDev, develop } from "./fit.js";
 import { scaled } from "./strength.js";
+import { buildFrame } from "./advice.js";
 import { labelsOf, binsOf, regionSums, binMean, totalSums, summaryOf, tableOf, mapsOf,
        } from "./analyze.js";
 
@@ -59,10 +69,57 @@ function buildPairCache(rec, dev) {
   rec.neutralAll = rec.neutralSums.all;
 }
 
-async function runReport(m, stale) {
+function ensureModels(m) {
   if (!models)
     models = { dev: loadDev(m.devMeta, m.devLut), model: loadModel(m.profileMeta, m.profileBin) };
-  const { dev, model } = models;
+  return models;
+}
+
+// The arrays of a message are registered when the message is RECEIVED (synchronously in
+// onmessage, in posting order) — not when a task gets to the pair: a report task yields
+// between pairs, and a frames request posted after it may reference a pair whose arrays
+// travelled with the report. The expensive derived cache is built lazily (ensurePair).
+function register(m) {
+  for (const q of m.pairs ?? []) {
+    if (!q.x) continue;
+    pairs.set(q.name, { generation: q.generation, x: q.x, y: q.y, reportMask: q.masks.reportMask,
+                        gain: q.gain, files: q.files, w3: q.w3, h3: q.h3 });
+  }
+}
+
+// the per-pair cache entry; the derived cache is built on first use
+function ensurePair(q, dev) {
+  const rec = pairs.get(q.name);
+  if (!rec || rec.generation !== q.generation) {
+    const err = new Error(`no arrays for pair ${q.name} (generation ${q.generation})`);
+    err.code = "cache_miss";
+    err.pairs = [q.name];
+    throw err;
+  }
+  if (!rec.fb) {
+    buildPairCache(rec, dev);
+    return { rec, built: true };
+  }
+  return { rec, built: false };
+}
+
+// Stage 7: the analyze.frame records for the advice. The neutral is the cached `fb` —
+// develop(dev, x*gain), exactly Python's m.dev(raw["x"]*g) — and the target is the prepared
+// y (Python's raw["t"]); no second develop, no copy back to the main thread.
+function runFrames(m) {
+  const { dev } = ensureModels(m);
+  const frames = [];
+  for (const q of m.pairs) {
+    const { rec } = ensurePair(q, dev);
+    frames.push({ name: q.name, generation: q.generation,
+                  rec: buildFrame({ name: q.name, target: q.files?.target ?? null, ncc: q.ncc,
+                                    warnings: q.warnings ?? [], targetSrgb: rec.y, neutralSrgb: rec.fb }) });
+  }
+  scope.postMessage({ type: "frames", id: m.id, frames });
+}
+
+async function runReport(m, stale) {
+  const { dev, model } = ensureModels(m);
   // the prediction at the applied strength: strength.scaled(base, strength, base.name) —
   // the Python call keeps the base name (web/lib/strength.js scaled() appends "-<p>"; the
   // report result does not rename the profile)
@@ -74,12 +131,8 @@ async function runReport(m, stale) {
   const t0 = Date.now();
   for (const q of m.pairs) {
     if (stale()) return;
-    let rec = pairs.get(q.name);
-    if (!rec || rec.generation !== q.generation) {
-      rec = { generation: q.generation, x: q.x, y: q.y, reportMask: q.masks.reportMask,
-              gain: q.gain, files: q.files, w3: q.w3, h3: q.h3 };
-      buildPairCache(rec, dev);
-      pairs.set(q.name, rec);
+    const { rec, built } = ensurePair(q, dev);
+    if (built) {
       await yield0();                       // pump the queue: an early cancel lands here
       if (stale()) return;
     }
@@ -109,7 +162,8 @@ async function runReport(m, stale) {
       w3: rec.w3, h3: rec.h3,
       labels: rec.labels.slice(),
       summary: summaryOf(sums, rec.neutralAll, m.strength,
-                         m.fittedRenderDE == null ? null : sums.all - m.fittedRenderDE),
+                         refDE(m.fittedRenderDE, q.name) == null ? null
+                           : sums.all - refDE(m.fittedRenderDE, q.name)),
       table: tableOf(sums),
       regionSums: sums,
       maps: { ...maps, mode: "dE" },
@@ -129,8 +183,18 @@ async function runReport(m, stale) {
                       reports, aggregate, ms: Date.now() - t0 }, transfer);
 }
 
+const refDE = (f, name) => (f !== null && typeof f === "object" ? (f[name] ?? null) : f);
+
 scope.onmessage = (e) => {
   const m = e.data;
+  if (m.type === "frames" || m.type === "report") register(m);
+  if (m.type === "frames") {               // independent of the report task (no supersede)
+    try { runFrames(m); } catch (err) {
+      scope.postMessage({ type: "error", id: m.id, frames: true, code: err.code || "frames_failed",
+                          pairs: err.pairs ?? null, detail: String(err.message || err) });
+    }
+    return;
+  }
   if (m.type === "cancel") {
     if (task && task.id === m.id) task.cancelled = true;
     return;
@@ -142,7 +206,7 @@ scope.onmessage = (e) => {
   const stale = () => cur.cancelled || task !== cur;
   runReport(m, stale).catch((err) => {
     if (stale()) return;
-    scope.postMessage({ type: "error", id: m.id, generation: m.generation,
+    scope.postMessage({ type: "error", id: m.id, generation: m.generation, pairs: err.pairs ?? null,
                         code: err.code || "report_failed", detail: String(err.message || err) });
   });
 };

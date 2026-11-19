@@ -6,6 +6,11 @@
 // The disclaimer and the pair recommendations are static markup in index.html; this module
 // renders the dynamic part (pair cards) and forwards user intents to app.js via callbacks.
 // Pair data lives in state.pairs (the session shape, web/lib/session.js).
+// Stage 7: the same component renders the pair list of the More frames screen (step 3.2) —
+// a second instance over its own element ids (`ids`), in mode "more": no name field or Fit
+// button there, every card gets a Remove button, and `decorate(pair, box)` lets the More
+// view add the per-pair advice (verdict, reasons, the high-error hint). One pair list
+// implementation, one loading path (app.js addRawFile/addTargetFile) for both screens.
 import { t } from "./i18n.js";
 import { isValidProfileName, isRawReady, isTargetReady, isCompletePair } from "./session.js";
 
@@ -70,16 +75,24 @@ function blockedText(p, reason) {
  *   setStatus(text)   — the shared status line (app.js owns it).
  * Returns { refresh, setNameDefault }.
  */
-export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit, setStatus }) {
-  const pairsEl = $("pairs");
-  const nameInput = $("fit-name");
-  const nameErr = $("fit-name-err");
-  const fitBtn = $("fit");
-  const toCompareBtn = $("to-compare");
-  const rawZone = $("raw-drop");
-  const targetZone = $("target-drop");
-  const rawPicker = $("raw-file");
-  const targetPicker = $("target-file");
+export const START_IDS = {
+  pairs: "pairs", name: "fit-name", nameErr: "fit-name-err", fit: "fit", toCompare: "to-compare",
+  rawZone: "raw-drop", targetZone: "target-drop", rawPicker: "raw-file", targetPicker: "target-file",
+};
+
+export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit, setStatus,
+                              ids = START_IDS, mode = "start", onRemovePair = null,
+                              onIncludeChange = null, decorate = null }) {
+  const more = mode === "more";
+  const pairsEl = $(ids.pairs);
+  const nameInput = ids.name ? $(ids.name) : null;      // absent on the More screen
+  const nameErr = ids.nameErr ? $(ids.nameErr) : null;
+  const fitBtn = ids.fit ? $(ids.fit) : null;
+  const toCompareBtn = ids.toCompare ? $(ids.toCompare) : null;
+  const rawZone = $(ids.rawZone);
+  const targetZone = $(ids.targetZone);
+  const rawPicker = $(ids.rawPicker);
+  const targetPicker = $(ids.targetPicker);
 
   // ---------- pickers and drag-and-drop zones ----------
   rawZone.addEventListener("click", () => rawPicker.click());
@@ -115,11 +128,12 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
   // ---------- profile name: immediate 1–19 ASCII validation (the np3.serialize rule) ----------
   function validateName() {
     const ok = isValidProfileName(state.profileName);
+    if (!nameInput) return ok;
     nameErr.hidden = ok;
     nameInput.classList.toggle("bad", !ok);
     return ok;
   }
-  nameInput.addEventListener("input", () => {
+  nameInput?.addEventListener("input", () => {
     state.profileName = nameInput.value;
     validateName();
     updateFit();
@@ -132,14 +146,15 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
   // While a fit runs the status line shows the LM progress (iteration/cost) and the button
   // reads "Fitting…".
   function updateFit() {
+    if (!fitBtn) return;
     const preparing = state.pairs.some((p) => p.preparing);
     const fittable = state.pairs.some((p) => p.included && isCompletePair(p) && !blockedReason(p));
     fitBtn.textContent = t(state.fitting ? "Fitting…" : "Fit");
     fitBtn.disabled = state.fitting || !isValidProfileName(state.profileName) || !fittable || preparing;
     // stage 4: the Comparison step needs a fitted version (from Fit or, later, a refit)
-    toCompareBtn.disabled = state.versions.length === 0;
+    if (toCompareBtn) toCompareBtn.disabled = state.versions.length === 0;
   }
-  fitBtn.addEventListener("click", () => onFit());
+  fitBtn?.addEventListener("click", () => onFit());
 
   // ---------- pair cards ----------
   function el(tag, cls, text) {
@@ -171,7 +186,11 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
     incBox.className = "pair-inc-box";
     incBox.checked = p.included && !p.blocked && !blocked;
     incBox.disabled = p.blocked || !!blocked;
-    incBox.addEventListener("change", () => { p.included = incBox.checked; updateFit(); });
+    incBox.addEventListener("change", () => {
+      p.included = incBox.checked;
+      updateFit();
+      onIncludeChange?.(p);
+    });
     const incLabel = el("span", null, t("Include in the fit"));
     incLabel.dataset.i18n = "Include in the fit";
     inc.append(incBox, incLabel);
@@ -180,7 +199,17 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
     edit.dataset.i18n = "Edit";
     edit.disabled = p.blocked || !isRawReady(p);
     edit.addEventListener("click", () => onEditPair(p));
-    top.append(inc, edit);
+    if (more) {
+      // step 3.2: removal from the session (the other pairs, their preparation and the
+      // versions are kept); the editor entry stays on the Start screen
+      const rm = el("button", "pair-remove", t("Remove"));
+      rm.dataset.i18n = "Remove";
+      rm.type = "button";
+      rm.addEventListener("click", () => onRemovePair?.(p));
+      top.append(inc, rm);
+    } else {
+      top.append(inc, edit);
+    }
     box.append(top);
 
     const dl = el("dl", "pair-meta");
@@ -215,6 +244,7 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
       const b = el("div", "bad pair-blocked", blockedText(p, blocked));
       box.append(b);
     }
+    decorate?.(p, box);
     return box;
   }
 
