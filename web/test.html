@@ -14,6 +14,8 @@
 // Runs the web/golden/manifest.json manifest against the Python fixtures made by make_golden.py.
 // Metrics (not verdicts) are written to window.__result, at the end window.__done = true.
 // Level pairs: spec/web-tests.md. Launched by web/test.mjs, there is no interface.
+// web/test.mjs opens one page per level with ?only=2 / 2a / 6 / 7 / 1a so the levels run
+// concurrently; without the parameter all sections run (the standalone default).
 import { initRaw } from "./lib/raw.js";
 import { loadModel, neutralGLSL, program, texture, bindModel, uploadLinear } from "./lib/neutral.js";
 import { fetchDetail, applyDetailGL } from "./lib/detail.js";
@@ -53,6 +55,11 @@ void main() {
 }`;
 
 async function main() {
+  // ?only=2,2a: run just the named sections (web/test.mjs opens one page per level);
+  // no parameter — everything, in the original order
+  const onlyParams = new URLSearchParams(location.search).get("only");
+  const only = onlyParams ? new Set(onlyParams.split(",")) : null;
+  const want = (l) => !only || only.has(l);
   const man = await (await fetch("golden/manifest.json")).json();
   const result = { synthetic: [], frames: [], errors: [], detail: [], render7: [] };
 
@@ -88,6 +95,7 @@ async function main() {
   }
 
   // ---- level 2: neutral on the synthetic grid of linear colors ----
+  if (want("2"))
   for (const s of man.synthetic) {
     const x = await f32("golden/" + s.in);
     const want = await f32("golden/" + s.out);
@@ -111,7 +119,9 @@ async function main() {
   }
 
   // ---- level 2a: neutral on frames, RAW -> screen ----
-  const raw = await initRaw(await fetch("raw.wasm"));
+  const raw = (want("2a") || want("7") || want("1a"))
+    ? await initRaw(await fetch("raw.wasm")) : null;
+  if (want("2a"))
   for (const f of man.frames) {
     const bytes = new Uint8Array(await (await fetch("../" + f.path)).arrayBuffer());
     let img;
@@ -147,7 +157,8 @@ async function main() {
   }
 
   // ---- level 6: Clarity and sharpening on neutral cutouts ----
-  const det = await fetchDetail();
+  const det = (want("6") || want("7")) ? await fetchDetail() : null;
+  if (want("6"))
   for (const e of man.detail || []) {
     const bytes = await pngBytes("golden/" + e.in);
     const c = deserialize(new Uint8Array(await (await fetch("golden/" + e.np3)).arrayBuffer()));
@@ -170,6 +181,7 @@ async function main() {
   }
 
   // ---- level 7: the whole render (RAW -> neutral -> profile -> detail), dE2000 by regions ----
+  if (want("7")) {
   const profMeta = await (await fetch("model/profile.json")).json();
   const profBin = await (await fetch("model/profile.bin")).arrayBuffer();
   const renderer = new Renderer(gl, { dev: model, profile: loadProfile(profMeta, profBin), detail: det }, raw);
@@ -213,8 +225,10 @@ async function main() {
   }
   result.render7_invariant = { develops: renderer.stats.develops, neutrals: renderer.stats.neutrals,
                                cases: (man.render7 || []).length };
+  }
 
   // ---- level 1a: decoding rejections in the browser ----
+  if (want("1a"))
   for (const e of man.errors) {
     const r = await fetch("../" + e.path);
     if (!r.ok) { result.errors.push({ path: e.path, want: e.code, got: null, ok: true, skip: true }); continue; }

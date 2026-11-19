@@ -6,9 +6,13 @@ Part of the pipeline lives in two copies: Python (training, fitting, reference) 
 
 ```
 node web/test.mjs          # from the project root, exit code non-zero on failure
+node web/test.mjs --only 1f,9    # a subset of levels (comma-separated, runs standalone)
+node web/test.mjs --skip 8       # all levels except the listed ones
 ```
 
-- Levels 1 and 1a (RAW decoding) run in Node, levels 2 and 2a (shaders) run on the `web/test.html` page in headless Firefox via puppeteer-core (verified: Firefox uses the GPU, not software rendering).
+- The Node levels (1, 1a, 1b, 1d, 1e, 1f, 1g, 9, 4, 5) run in parallel child processes — one process per level, each loads its own fixtures; their output prints in the canonical level order and a per-level timing line (`summary: …`) prints at the end.
+- The browser levels run as concurrent pages (cap 4) of one headless Firefox: `web/test.html` runs one page per shader level (2, 2a, 6, 7 and the browser-side 1a checks, selected with `?only=`), `web/target-check.html` runs 1c, level 8 keeps its internal order on its own page (its scenarios are NOT split across pages). The locality check (statics by GET) is per-page and unaffected by the parallelism.
+- Levels 1 and 1a (RAW decoding) also run in Node, levels 2 and 2a (shaders) run on the `web/test.html` page in headless Firefox via puppeteer-core (verified: Firefox uses the GPU, not software rendering).
 - Required: node, Firefox (the path can be overridden with the `FIREFOX` variable), `npm install` dependencies in `web/` (installs puppeteer-core). After changing the Rust code: `sh web/build.sh`, then the test.
 - The `web/test.html` page runs the manifest frames and returns the metrics in `window.__result`; there is no interface, no need to open it manually. The visual stand is separate, `web/bench.html`.
 
@@ -22,7 +26,7 @@ node web/test.mjs          # from the project root, exit code non-zero on failur
 ## How it is organized
 
 - `web/make_golden.py` — builds the fixtures from the Python code into `web/golden/`: `manifest.json` (what to check, tolerances) and binary files.
-- `web/test.mjs` — one command: runs both parts, prints metrics with tolerances, exit code non-zero on failure.
+- `web/test.mjs` — one command: runs both parts (the Node levels in parallel child processes, the browser levels as concurrent Firefox pages), prints metrics with tolerances, exit code non-zero on failure.
 - `web/test.html` — the executor of the shader parts: reads the manifest, runs synthetic and frames, metrics into `window.__result`.
 - Timing (decoding, shader) is printed in the stand, not checked in tests.
 
