@@ -609,6 +609,9 @@ export async function runLevel8({ browser, port, report, skip }) {
       const lockedBefore = await ev(() => ({
         ranges: document.querySelectorAll('#panel [data-group="basic"] input[type=range][disabled]').length,
         numbers: document.querySelectorAll('#panel [data-group="basic"] input[type=number][disabled]').length,
+        fitted: window.__np3app.getBaseline().fitted,
+        satMark: document.querySelectorAll('#panel [data-group="basic"] .ctl')[0].classList.contains("chg"),
+        groupMarks: [...document.querySelectorAll("#panel details.grp.chg")].map((d) => d.dataset.group).sort(),
       }));
       const preSnap = await ev(() => window.__t8.snap());
       await ev(() => document.getElementById("p-reset").click());
@@ -629,8 +632,14 @@ export async function runLevel8({ browser, port, report, skip }) {
           name: A.state.control.name,
           fill: sRange.style.getPropertyValue("--fill"),
           val: document.querySelector('#panel [data-group="strength"] .val').value,
+          marks: document.querySelectorAll("#panel .ctl.chg, #panel details.grp.chg, #curve-slot .ce-head.chg").length,
         };
       }, preSnap);
+      report(lockedBefore.fitted === false && lockedBefore.satMark
+             && lockedBefore.groupMarks.join(",") === "basic,curve,grading",
+        `8 stage 6: standalone editing compares against neutral — marks on the edited fields` +
+        ` (groups ${lockedBefore.groupMarks.join(",")})`);
+      report(post.marks === 0, `8 stage 6: the standalone Reset (to neutral) clears every mark (${post.marks} left)`);
       report(lockedBefore.ranges === 5 && lockedBefore.numbers === 5,
         `8 Reset: before the reset the curve locks 5 tonal sliders` +
         ` (ranges ${lockedBefore.ranges}, numbers ${lockedBefore.numbers})`);
@@ -1543,6 +1552,300 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(back2.step === "compare" && back2.selected === "draft" && back2.strength === 100
                  && back2.vbtns === 2 && back2.selectedPair === 1,
             "8 navigation: Start -> Compare preserves the version, the strength and the pair");
+        }
+
+        // --- stage 6: the fitted baseline in the manual editor (spec/ui-plan.md stage 6,
+        // spec/ui.md "Decisions" #2): field/group/tool/profile reset to the selected fit
+        // version, the changed marks (incl. after undo), the manual report, the leave
+        // warning (keep / discard) and the rebaseline on a version switch ---
+        {
+          await ev(() => {   // no modal dialog may ever open: record any attempt
+            window.__t8.modal = 0;
+            window.confirm = () => { window.__t8.modal++; return true; };
+            window.alert = () => { window.__t8.modal++; };
+          });
+          const draftJson0 = await ev(() =>
+            JSON.stringify(window.__np3app.state.versions.find((v) => v.id === "draft").control));
+          // the draft's own report at 100% has landed: the reference of the manual fittedDelta
+          await page.waitForFunction(
+            `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "draft:1"
+             && window.__np3app.state.pairs[0].report.summary.strength === 100`,
+            { timeout: 120000, polling: 200 });
+          await ev(() => document.getElementById("cmp-manual").click());
+          await page.waitForFunction(
+            `window.__np3app.state.step === "edit" && !!window.__np3app.state.raw`,
+            { timeout: 60000, polling: 200 });
+          await settle();
+          // helpers: the visible marks and the enabled reset controls in the panel
+          await ev(() => {
+            const A = window.__np3app;
+            window.__t8.s6 = {
+              marks: () => [...document.querySelectorAll("#panel .ctl.chg")].length,
+              groupMarks: () => [...document.querySelectorAll("#panel details.grp.chg")]
+                .map((d) => d.dataset.group),
+              enabledResets: () => [...document.querySelectorAll("#panel button.grp-reset")]
+                .filter((b) => !b.disabled).length,
+              base: () => A.getBaseline().control,
+              row: (group, idx) => document.querySelectorAll(`#panel [data-group="${group}"] .ctl`)[idx],
+            };
+          });
+          const b0 = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const bl = A.getBaseline();
+            return { fitted: bl.fitted, vid: bl.versionId,
+                     same: JSON.stringify(A.state.control) === JSON.stringify(bl.control),
+                     marks: S.marks(), groups: S.groupMarks().length, resets: S.enabledResets(),
+                     hist: A.hist.length,
+                     backBtn: !document.getElementById("ed-to-compare").hidden };
+          });
+          report(b0.fitted && b0.vid === "draft" && b0.same && b0.marks === 0 && b0.groups === 0
+                 && b0.resets === 0 && b0.hist === 1 && b0.backBtn,
+            `8 stage 6: the editor's baseline is the selected version (${b0.vid}), no marks,` +
+            ` group resets disabled, history restarts at the baseline`);
+
+          // field: an edit shows the mark (row + group), the double click resets to the FITTED value
+          const sat0 = await ev(() => window.__t8.s6.base().saturation);
+          const satEdit = sat0 >= 50 ? sat0 - 30 : sat0 + 30;
+          await ev((v) => window.__t8.groupSlider("basic", 0, v), satEdit);
+          await settle();
+          const f1 = await ev(() => {
+            const S = window.__t8.s6;
+            const row = S.row("basic", 0);
+            return { chg: row.classList.contains("chg"),
+                     markVisible: getComputedStyle(row.querySelector("button.mark")).visibility === "visible",
+                     groups: S.groupMarks(),
+                     basicReset: !document.querySelector('#panel [data-group="basic"] summary .grp-reset').disabled };
+          });
+          report(f1.chg && f1.markVisible && f1.groups.join(",") === "basic" && f1.basicReset,
+            `8 stage 6: an edited field shows its mark and its group's (${f1.groups.join(",")})`);
+          // the manual report: the edited control, deltas vs the baseline, fittedDelta (1 usable pair)
+          await page.waitForFunction(
+            `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "draft+manual:1"`,
+            { timeout: 120000, polling: 200 });
+          const mr = await ev(() => {
+            const r = window.__np3app.state.pairs[0].report;
+            return { sat: r.parameters.base.saturation, delta: r.parameters.deltas?.saturation,
+                     fd: r.summary.fittedDelta };
+          });
+          report(mr.sat === satEdit && mr.delta === satEdit - sat0 && typeof mr.fd === "number",
+            `8 stage 6: a finished manual edit re-runs the report (draft+manual, delta ${mr.delta},` +
+            ` fittedDelta ${typeof mr.fd === "number" ? mr.fd.toFixed(3) : mr.fd})`);
+          const f2 = await ev(() => {
+            const S = window.__t8.s6;
+            S.row("basic", 0).querySelector("input[type=range]")
+              .dispatchEvent(new Event("dblclick", { bubbles: true }));
+            return { sat: window.__np3app.state.control.saturation, marks: S.marks(),
+                     groups: S.groupMarks().length };
+          });
+          report(f2.sat === sat0 && f2.marks === 0 && f2.groups === 0,
+            `8 stage 6: double click resets the field to the fitted value (${f2.sat}, not neutral), the mark clears`);
+
+          // the mark itself is a keyboard-reachable button that resets its field
+          const sh0 = await ev(() => window.__t8.s6.base().sharpening);
+          await ev((v) => window.__t8.groupSlider("details", 0, v), sh0 >= 5 ? sh0 - 2 : sh0 + 2);
+          const mk = await ev(() => {
+            const btn = window.__t8.s6.row("details", 0).querySelector("button.mark");
+            const focusable = btn.tabIndex >= 0 && !btn.disabled;
+            btn.click();
+            return { focusable, sharp: window.__np3app.state.control.sharpening,
+                     marks: window.__t8.s6.marks() };
+          });
+          report(mk.focusable && mk.sharp === sh0 && mk.marks === 0,
+            `8 stage 6: the changed mark is a focusable button resetting its field (Sharpening ${mk.sharp})`);
+
+          // undo: an edit, then Ctrl+Z (the history API) — the value and the mark follow
+          await ev((v) => window.__t8.groupSlider("basic", 0, v), satEdit);
+          const un = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const before = S.marks();
+            A.hist.undo();
+            return { before, after: S.marks(), sat: A.state.control.saturation };
+          });
+          report(un.before === 1 && un.after === 0 && un.sat === sat0,
+            `8 stage 6: undo restores the fitted value and clears the mark (${un.before} -> ${un.after})`);
+
+          // group reset: two Details fields at once, to the fitted values
+          await ev((v) => {
+            window.__t8.groupSlider("details", 0, v[0]);
+            window.__t8.groupSlider("details", 2, v[1]);
+          }, [sh0 >= 5 ? sh0 - 3 : sh0 + 3, -4]);
+          const gr = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const marked = S.marks();
+            document.querySelector('#panel [data-group="details"] summary .grp-reset').click();
+            const b = S.base();
+            return { marked, sharp: A.state.control.sharpening === b.sharpening,
+                     clarity: A.state.control.clarity === b.clarity, marks: S.marks(),
+                     open: document.querySelector('#panel [data-group="details"]').open,
+                     disabled: document.querySelector('#panel [data-group="details"] summary .grp-reset').disabled };
+          });
+          await settle();
+          report(gr.marked >= 1 && gr.sharp && gr.clarity && gr.marks === 0 && gr.disabled,
+            `8 stage 6: the group reset returns the Details fields to the fitted values` +
+            ` (${gr.marked} marked -> 0), its control disables`);
+
+          // the specialized tools: a Color Blender color and a Color Grading zone
+          const bl = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const inp = document.querySelector("#blending-slot input[type=range]");   // HSL: Red hue
+            const b = S.base().blender.red[0];
+            inp.value = b >= 50 ? b - 40 : b + 40;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+            inp.dispatchEvent(new Event("change", { bubbles: true }));
+            A.blendingView.selectColor("red");
+            const dot = document.querySelector('#blending-slot .bl-dot[aria-label="Red"]').classList.contains("chg");
+            const btn = document.querySelector("#blending-slot .bl-chead .grp-reset");
+            const enabled = !btn.disabled;
+            btn.click();
+            return { dot, enabled, back: A.state.control.blender.red[0] === b,
+                     dotAfter: document.querySelector('#blending-slot .bl-dot[aria-label="Red"]').classList.contains("chg") };
+          });
+          report(bl.dot && bl.enabled && bl.back && !bl.dotAfter,
+            "8 stage 6: Color Blender — the color dot carries the mark, Reset color returns the color to the fitted values");
+          const gz = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            A.gradingView.selectZone("shadows");
+            const inp = document.querySelector("#grading-hsl input[type=range]");    // Shadows hue
+            const b = S.base().grade.shadows[0];
+            inp.value = (b + 90) % 360;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+            inp.dispatchEvent(new Event("change", { bubbles: true }));
+            const zoneBtn = document.querySelector("#grading-slot .gr-adjust button.chg");
+            const btn = document.querySelector("#grading-slot .gr-zreset .grp-reset");
+            const enabled = !btn.disabled;
+            btn.click();
+            return { zone: zoneBtn?.textContent ?? null, enabled,
+                     back: A.state.control.grade.shadows[0] === b,
+                     after: document.querySelectorAll("#grading-slot .gr-adjust button.chg").length };
+          });
+          await settle();
+          report(gz.zone === "Shadows" && gz.enabled && gz.back && gz.after === 0,
+            "8 stage 6: Color Grading — the zone button carries the mark, Reset zone returns the zone to the fitted values");
+
+          // the curve tool: one mark for the whole curve, the mark resets it to the baseline
+          const cv = await ev(() => {
+            const A = window.__np3app;
+            const cj = (c) => (c ? JSON.stringify([c.points, Array.from(c.raw)]) : "null");
+            const baseCurve = cj(A.getBaseline().control.curve);
+            if (!A.state.control.curve) {
+              const tg = document.querySelector('#panel [data-group="curve"] input[type="checkbox"]');
+              tg.checked = true;
+              tg.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            // move the first point (an endpoint: y only) with the keyboard — works for any
+            // point count (a fitted curve may already hold the 20-point maximum)
+            const pt = document.querySelector("#curve-slot .ce-pt");
+            const y0 = A.state.control.curve.points[0][1];
+            const key = y0 < 200 ? "ArrowUp" : "ArrowDown";
+            pt.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: true, bubbles: true }));
+            pt.dispatchEvent(new KeyboardEvent("keyup", { key, shiftKey: true, bubbles: true }));
+            const head = document.querySelector("#curve-slot .ce-head");
+            const marked = head.classList.contains("chg");
+            const grp = document.querySelector('#panel [data-group="curve"]').classList.contains("chg");
+            head.querySelector("button.mark").click();
+            return { marked, grp, back: cj(A.state.control.curve) === baseCurve,
+                     after: head.classList.contains("chg") };
+          });
+          await settle();
+          report(cv.marked && cv.grp && cv.back && !cv.after,
+            "8 stage 6: the curve tool has one mark; it resets the curve to the fitted curve");
+
+          // the whole profile: Reset returns every field to the version, keeps the session strength
+          await ev((v) => {
+            window.__t8.groupSlider("basic", 0, v);
+            window.__t8.groupSlider("details", 1, -3);
+            window.__t8.groupSlider("strength", 0, 80);
+          }, satEdit);
+          await settle();
+          const all = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const marked = S.marks();
+            document.getElementById("p-reset").click();
+            const strip = (c) => { const o = JSON.parse(JSON.stringify(c)); delete o.name; delete o.comment; return JSON.stringify(o); };
+            return { marked, same: strip(A.state.control) === strip(S.base()),
+                     strength: A.state.strength, marks: S.marks(), groups: S.groupMarks().length };
+          });
+          await settle();
+          report(all.marked >= 2 && all.same && all.strength === 80 && all.marks === 0 && all.groups === 0,
+            `8 stage 6: Reset returns the whole profile to the fitted version (strength kept at ${all.strength}%)`);
+          await ev(() => window.__t8.groupSlider("strength", 0, 100));
+          await settle();
+
+          // the leave warning: an edit, then Back to Comparison -> the in-page dialog; Keep stays
+          await ev((v) => window.__t8.groupSlider("basic", 0, v), satEdit);
+          const lk = await ev(() => {
+            const A = window.__np3app;
+            document.getElementById("ed-to-compare").click();
+            const shown = !document.getElementById("leave-confirm").hidden;
+            const role = document.getElementById("leave-confirm").getAttribute("role");
+            const stepDuring = A.state.step;
+            document.getElementById("leave-keep").click();
+            return { shown, role, stepDuring, hidden: document.getElementById("leave-confirm").hidden,
+                     step: A.state.step, sat: A.state.control.saturation };
+          });
+          report(lk.shown && lk.role === "alertdialog" && lk.stepDuring === "edit" && lk.hidden
+                 && lk.step === "edit" && lk.sat === satEdit,
+            "8 stage 6: leaving with manual edits shows an in-page warning; Keep editing stays with the edits");
+          // Discard: back to Start, the control returns to the version, the version is untouched
+          const ld = await ev((json0) => {
+            const A = window.__np3app;
+            document.getElementById("to-start").click();
+            const shown = !document.getElementById("leave-confirm").hidden;
+            document.getElementById("leave-discard").click();
+            const v = A.state.versions.find((x) => x.id === "draft");
+            return { shown, step: A.state.step,
+                     controlIsVersion: JSON.stringify(A.state.control) === JSON.stringify(v.control),
+                     versionSame: JSON.stringify(v.control) === json0,
+                     modal: window.__t8.modal };
+          }, draftJson0);
+          report(ld.shown && ld.step === "start" && ld.controlIsVersion && ld.versionSame && ld.modal === 0,
+            "8 stage 6: Discard edits leaves, drops the manual edits, the version stays unchanged" +
+            " (no window.confirm/alert)");
+          // without edits the editor leaves immediately
+          await ev(() => document.getElementById("to-compare").click());
+          await cmpSettle();
+          await ev(() => document.getElementById("cmp-manual").click());
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`,
+            { timeout: 60000, polling: 200 });
+          const clean = await ev(() => {
+            document.getElementById("ed-to-compare").click();
+            return { step: window.__np3app.state.step,
+                     hidden: document.getElementById("leave-confirm").hidden };
+          });
+          await cmpSettle();
+          report(clean.step === "compare" && clean.hidden,
+            "8 stage 6: without manual edits the editor leaves at once (no warning)");
+
+          // a version switch rebaselines: draft_r1 -> its control, its marks, a fresh history
+          await ev(() =>
+            document.querySelector('#cmp-versions button[data-version="draft_r1"]').click());
+          await cmpSettle();
+          await ev(() => document.getElementById("cmp-manual").click());
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`,
+            { timeout: 60000, polling: 200 });
+          await settle();
+          const rb = await ev(() => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const r1 = A.state.versions.find((x) => x.id === "draft_r1");
+            const bl = A.getBaseline();
+            const r1sat = r1.control.saturation;
+            window.__t8.groupSlider("basic", 0, r1sat >= 50 ? r1sat - 10 : r1sat + 10);
+            const marked = S.marks();
+            S.row("basic", 0).querySelector("input[type=range]")
+              .dispatchEvent(new Event("dblclick", { bubbles: true }));
+            return { vid: bl.versionId,
+                     same: JSON.stringify(bl.control) === JSON.stringify(r1.control),
+                     marked, sat: A.state.control.saturation, r1sat, marks: S.marks() };
+          });
+          report(rb.vid === "draft_r1" && rb.same && rb.marked === 1 && rb.sat === rb.r1sat && rb.marks === 0,
+            `8 stage 6: a version switch rebaselines the editor (reset to draft_r1's ${rb.r1sat})`);
+          // back to Compare on the draft for the report checks below
+          await ev(() => document.getElementById("ed-to-compare").click());
+          await page.waitForFunction(`window.__np3app.state.step === "compare"`,
+            { timeout: 60000, polling: 200 });
+          await ev(() =>
+            document.querySelector('#cmp-versions button[data-version="draft"]').click());
+          await cmpSettle();
         }
       }
     }

@@ -6,12 +6,16 @@
 // of an unmodified profile (official samples store the real editor points), so the base control
 // is the result at 100%. The naming rule is as in the panel: the "-<percent>" suffix is added
 // only at strength != 100%.
+// Strength set (stage 6): exportSet(percents) downloads several NP3s at once, each an
+// independent scaled() from the base control (lib/strength-set.js), as separate Blob downloads
+// one after another; the #export-set button is wired only if the page has it.
 // Share link: the serialized NP3 bytes (a few hundred) are base64url-encoded into the ?np3=
 // query parameter, so a profile is shared by copying the URL. GitHub Pages serves the page
 // regardless of the parameter; the decode happens here, on the client.
 import { t } from "./i18n.js";
 import { deserialize, serialize } from "./np3.js";
 import { scaled } from "./strength.js";
+import { buildStrengthSet, DEFAULT_PERCENTS } from "./strength-set.js";
 
 // base64url without padding: URL-safe, and %3D escapes are avoided
 export function bytesToB64url(bytes) {
@@ -33,6 +37,8 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
   const importBtn = document.getElementById("import");
   const exportBtn = document.getElementById("export");
   const shareBtn = document.getElementById("share");
+  const setBtn = document.getElementById("export-set");   // optional (stage 6)
+  let setBusy = false;                                     // a strength-set download is running
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".np3,.NP3";
@@ -103,27 +109,67 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
     shareBtn.disabled = !ok;
     exportBtn.title = ok ? "" : t("Set a valid NP3 name (1–19 ASCII) to export");
     shareBtn.title = exportBtn.title;
+    if (setBtn) {
+      setBtn.disabled = !ok || setBusy;
+      setBtn.title = exportBtn.title;
+    }
+  }
+
+  function download(bytes, fileName) {
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   function exportNow() {
     try {
-      const c = finalControl();
-      const bytes = serialize(c);
-      const blob = new Blob([bytes], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${finalName()}.NP3`;
-      document.body.append(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setStatus(t("Exported: {name}", { name: a.download }));
+      const fileName = `${finalName()}.NP3`;
+      download(serialize(finalControl()), fileName);
+      setStatus(t("Exported: {name}", { name: fileName }));
     } catch (e) {
       setStatus(t("Export failed: {error}", { error: e.message }));
     }
   }
   exportBtn.addEventListener("click", exportNow);
+
+  // Strength set: every file from the BASE control (state.control — the profile at 100%),
+  // independent of the current strength slider. Everything is serialized first, so an error
+  // downloads nothing; then the files go out one by one with a small gap (browsers drop or
+  // merge rapid consecutive downloads). Resolves to the list of file names ([] on failure).
+  async function exportSet(percents = DEFAULT_PERCENTS, { gapMs = 250 } = {}) {
+    if (setBusy) return [];
+    let files;
+    try {
+      if (state.nameValid === false) throw new Error(t("Set a valid NP3 name (1–19 ASCII) to export"));
+      files = buildStrengthSet(state.control, percents);
+    } catch (e) {
+      setStatus(t("Strength set export failed: {error}", { error: e.message }));
+      return [];
+    }
+    setBusy = true;
+    updateExport();
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (i) await new Promise((r) => setTimeout(r, gapMs));
+        download(files[i].bytes, files[i].fileName);
+      }
+      setStatus(t("Exported strength set: {files}", { files: files.map((f) => f.fileName).join(", ") }));
+      return files.map((f) => f.fileName);
+    } catch (e) {
+      setStatus(t("Strength set export failed: {error}", { error: e.message }));
+      return [];
+    } finally {
+      setBusy = false;
+      updateExport();
+    }
+  }
+  setBtn?.addEventListener("click", () => exportSet());
 
   async function shareNow() {
     try {
@@ -140,5 +186,5 @@ export function setupTransfer({ state, panel, renderCurrent, setStatus, onReset 
   shareBtn.addEventListener("click", shareNow);
   updateExport();
 
-  return { importFile, exportNow, shareNow, importFromUrl, updateExport };
+  return { importFile, exportNow, exportSet, shareNow, importFromUrl, updateExport };
 }

@@ -214,6 +214,33 @@
   #fit { width: 100%; margin-top: 10px; padding: 7px 8px; font-weight: 600; }
   #to-compare { width: 100%; margin-top: 6px; }
   #to-start { width: 100%; margin-bottom: 10px; }
+  #ed-to-compare { width: 100%; margin: -6px 0 10px; }
+
+  /* Stage 6: changed-field marks and reset controls (web/lib/mark.js). A mark keeps its box
+     when hidden (visibility) — no layout jump; visible marks are real, focusable buttons. */
+  .ctl .top .lbl { flex: 1; }
+  button.mark { width: 8px; height: 8px; min-width: 8px; padding: 0; border: 0; border-radius: 50%;
+    background: var(--accent); visibility: hidden; align-self: center; cursor: pointer; }
+  button.mark:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+  .chg > .top > button.mark, .ce-head.chg > button.mark { visibility: visible; }
+  button.mark:disabled { opacity: .35; cursor: not-allowed; }
+  button.grp-reset { float: right; padding: 0 5px; line-height: 16px; font-size: 13px;
+    background: transparent; border: 1px solid transparent; color: var(--dim); }
+  button.grp-reset::before { content: "\21BA"; }
+  button.grp-reset:not(:disabled):hover { border-color: var(--line); color: var(--text); }
+  button.grp-reset:disabled { visibility: hidden; }
+  details.grp.chg > summary > span::after, .bl-dot.chg::after, .gr-adjust button.chg::after {
+    content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); margin-left: 5px; vertical-align: middle; }
+  .bl-dot { position: relative; }
+  .bl-dot.chg::after { position: absolute; right: -4px; top: -4px; margin: 0; }
+  .bl-chead .grp-reset, .gr-zreset .grp-reset { float: none; }
+  /* the leave warning: an in-page alertdialog (never window.confirm) */
+  #leave-confirm { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 20; max-width: 440px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+  #leave-confirm[hidden] { display: none; }
+  #leave-confirm .leave-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
 
   /* Comparison screen (stage 4 of the full flow, spec/ui.md step 2) */
   #compare, #more { display: none; }
@@ -362,6 +389,7 @@
 <aside id="files">
   <h1 data-i18n="NP3 profile editor">NP3 profile editor</h1>
   <button id="to-start" type="button" data-i18n="Back to Start">Back to Start</button>
+  <button id="ed-to-compare" type="button" hidden data-i18n="Back to Comparison">Back to Comparison</button>
   <div class="hint" data-i18n="RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.">
     RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.</div>
 
@@ -382,6 +410,12 @@
            stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       <span data-i18n="Export NP3">Export NP3</span>
     </button>
+    <button id="export-set" disabled>
+      <!-- layers, Lucide (ISC) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      <span data-i18n="Save strength set (30/50/70/100%)">Save strength set (30/50/70/100%)</span>
+    </button>
     <button id="share" disabled>
       <!-- link, Lucide (ISC) -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -394,6 +428,7 @@
   <div id="hotkeys" class="hint">
     <div data-i18n="Space — hold to view neutral (before/after)">Space — hold to view neutral (before/after)</div>
     <div data-i18n="Ctrl+Z — undo the last change">Ctrl+Z — undo the last change</div>
+    <div data-i18n="Ctrl+Shift+Z / Ctrl+Y — redo">Ctrl+Shift+Z / Ctrl+Y — redo</div>
   </div>
   <div id="known" class="hint">
     <h2 data-i18n="Known limitations">Known limitations</h2>
@@ -418,6 +453,15 @@
 </aside>
 
 <aside id="report"></aside>
+
+<div id="leave-confirm" role="alertdialog" aria-modal="false" aria-labelledby="leave-text" hidden>
+  <div id="leave-text" data-i18n="Leave the manual adjustment? Your manual edits will be discarded; the fitted version stays unchanged.">
+    Leave the manual adjustment? Your manual edits will be discarded; the fitted version stays unchanged.</div>
+  <div class="leave-btns">
+    <button id="leave-keep" type="button" data-i18n="Keep editing">Keep editing</button>
+    <button id="leave-discard" type="button" data-i18n="Discard edits">Discard edits</button>
+  </div>
+</div>
 
 <div id="nogl" hidden>
   <div>

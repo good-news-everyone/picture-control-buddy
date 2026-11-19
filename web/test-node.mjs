@@ -11,6 +11,7 @@ import { initRaw } from "./lib/raw.js";
 import { deserialize, serialize } from "./lib/np3.js";
 import { curveTable } from "./lib/curve.js";
 import { scaled } from "./lib/strength.js";
+import { level1i } from "./test-node-advice.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));   // web/
 const ROOT = path.dirname(HERE);                             // the project root
@@ -62,6 +63,8 @@ export const LEVELS = {
   "1e": level1e,
   "1f": level1f,
   "1g": level1g,
+  "1h": level1h,
+  "1i": level1i,
   "9": level9,
   "4": level4,
   "5": level5,
@@ -1069,5 +1072,120 @@ async function level5(ctx) {
     const mean = sum / d.length;
     report(mean <= t.mean && max <= t.max,
       `5 profile ${e.key}: mean ${mean.toFixed(4)} max ${max.toFixed(3)} dE2000 (tolerance ${t.mean}/${t.max})`);
+  }
+}
+
+// ---------- level 1h: strength-set export and the undo/redo history (stage 6) ----------
+// The strength set (lib/strength-set.js) vs web/golden/strength-set/index.json from
+// web/make_strength_set_golden.py (strength.scaled + np3.serialize): byte-exact members,
+// file names, the base untouched, the internal name unchanged, rejected percent lists.
+// The history (lib/history.js) runs behind a tiny window/sessionStorage shim.
+async function level1h(ctx) {
+  const { report } = ctx;
+  const { buildStrengthSet, normalizePercents, DEFAULT_PERCENTS } = await import("./lib/strength-set.js");
+  const g = JSON.parse(await readFile(path.join(HERE, "golden/strength-set/index.json"), "utf8"));
+  const b64 = (s) => new Uint8Array(Buffer.from(s, "base64"));
+  const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const FIELDS = ["name", "comment", "sharpening", "mid_sharpening", "clarity", "contrast", "highlights",
+                  "shadows", "white", "black", "saturation", "blender", "grade", "blending", "balance", "curve"];
+  const fieldDiff = (want, got) => {
+    for (const k of FIELDS)
+      if (JSON.stringify(want[k]) !== JSON.stringify(got[k])) return `field ${k} differs`;
+    return "bytes differ, fields equal";
+  };
+
+  report(JSON.stringify(normalizePercents()) === JSON.stringify(g.default)
+         && JSON.stringify(DEFAULT_PERCENTS) === JSON.stringify(g.default),
+    `1h strength set default percents ${JSON.stringify(normalizePercents())}`);
+
+  const byBase = new Map();
+  for (const c of g.cases) {
+    const base = deserialize(b64(g.bases[c.base]));
+    const before = JSON.stringify(base);
+    let got, err = null;
+    try { got = buildStrengthSet(base, c.percents); } catch (e) { err = e.message; }
+    let bad = err;
+    if (!bad && got.length !== c.members.length) bad = `${got.length} members != ${c.members.length}`;
+    for (let i = 0; !bad && i < got.length; i++) {
+      const w = c.members[i], m = got[i];
+      if (m.percent !== w.percent) bad = `member ${i}: percent ${m.percent} != ${w.percent}`;
+      else if (m.fileName !== w.fileName) bad = `${w.percent}%: file ${m.fileName} != ${w.fileName}`;
+      else if (!sameBytes(m.bytes, b64(w.bytes)))
+        bad = `${w.percent}%: ${fieldDiff(deserialize(b64(w.bytes)), deserialize(m.bytes))}`;
+      else if (deserialize(m.bytes).name !== base.name) bad = `${w.percent}%: internal name changed`;
+    }
+    if (!bad && JSON.stringify(base) !== before) bad = "base MODIFIED";
+    const e = byBase.get(c.base) || { n: 0, members: 0, bad: [] , name: base.name };
+    e.n++; e.members += c.members.length;
+    if (bad) e.bad.push(`${JSON.stringify(c.percents)}: ${bad}`);
+    byBase.set(c.base, e);
+  }
+  for (const [key, e] of byBase)
+    report(e.bad.length === 0,
+      `1h strength set ${key} (${JSON.stringify(e.name)}): ${e.n} sets, ${e.members} files`
+      + (e.bad.length ? `, ${e.bad.join("; ")}` : " byte-exact vs strength.py, names ok"));
+
+  const base0 = deserialize(b64(Object.values(g.bases)[0]));
+  const notRejected = g.rejected.filter((ps) => {
+    try { buildStrengthSet(base0, ps); return true; } catch { return false; }
+  });
+  report(notRejected.length === 0,
+    `1h strength set rejections: ${g.rejected.length} invalid percent lists`
+    + (notRejected.length ? `, accepted ${JSON.stringify(notRejected)}` : " throw"));
+
+  // ---- history: undo/redo over a counter state, in a shim ----
+  const store = new Map();
+  const listeners = [];
+  const saved = { window: globalThis.window, sessionStorage: globalThis.sessionStorage };
+  globalThis.sessionStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+  globalThis.window = { addEventListener: (type, fn) => { if (type === "keydown") listeners.push(fn); } };
+  try {
+    const { createHistory, HIST_KEY } = await import("./lib/history.js");
+    let value = 0, changes = 0;
+    const h = createHistory({ snapshot: () => ({ value }), apply: (s) => { value = s.value; },
+                              onChange: () => changes++ });
+    const key = (k, mods = {}, target = null) => {
+      let prevented = false;
+      const ev = { key: k, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...mods,
+                   target: target || { closest: () => null }, preventDefault: () => { prevented = true; } };
+      for (const fn of listeners) fn(ev);
+      return prevented;
+    };
+    const fails = [];
+    let nChecks = 0;
+    const check = (cond, msg) => { nChecks++; if (!cond) fails.push(msg); };
+    h.push(); value = 1; h.push(); value = 2; h.push();              // states 0, 1, 2
+    check(h.canUndo && !h.canRedo && h.length === 3 && h.index === 2, "after 3 pushes");
+    h.undo(); h.undo();
+    check(value === 0 && !h.canUndo && h.canRedo, `undo x2 -> ${value}`);
+    check(h.undo() === false && value === 0, "undo at the start is a no-op");
+    h.redo();
+    check(value === 1 && h.canUndo && h.canRedo, `redo -> ${value}`);
+    value = 5; h.push();                                             // cuts off the redo chain
+    check(!h.canRedo && h.length === 3 && h.redo() === false, "a new action cuts off the redo future");
+    h.undo();
+    check(value === 1, `undo after the cut -> ${value}`);
+    check(key("z", { ctrlKey: true, shiftKey: true }) && value === 5, "Ctrl+Shift+Z redoes");
+    check(key("z", { metaKey: true }) && value === 1, "Cmd+Z undoes");
+    check(key("y", { ctrlKey: true }) && value === 5, "Ctrl+Y redoes");
+    check(key("Z", { ctrlKey: true, shiftKey: true }) === true && value === 5, "Shift+Z at the end is a no-op");
+    const textField = { closest: () => ({}) };
+    check(!key("z", { ctrlKey: true }, textField) && value === 5, "Ctrl+Z in a text field is native");
+    check(!key("y", { ctrlKey: true }, textField) && value === 5, "Ctrl+Y in a text field is native");
+    check(!key("z", {}) && value === 5, "plain z is ignored");
+    const st = JSON.parse(store.get(HIST_KEY));
+    check(Array.isArray(st.stack) && st.idx === st.stack.length - 1, "stored format {stack, idx}");
+    check(changes > 0, "onChange fires");
+    // backward compatibility: an undo-only stored history loads, with a redo future if idx < end
+    store.set(HIST_KEY, JSON.stringify({ stack: [{ value: 7 }, { value: 8 }, { value: 9 }], idx: 1 }));
+    let v2 = 8;
+    const h2 = createHistory({ snapshot: () => ({ value: v2 }), apply: (s) => { v2 = s.value; } });
+    check(h2.length === 3 && h2.index === 1 && h2.canRedo && h2.redo() && v2 === 9, "an old stored history loads");
+    h2.clear();
+    check(h2.length === 0 && !h2.canUndo && !h2.canRedo, "clear");
+    report(fails.length === 0, `1h history undo/redo: ${fails.length ? fails.join("; ") : `${nChecks} checks`}`);
+  } finally {
+    globalThis.window = saved.window;
+    globalThis.sessionStorage = saved.sessionStorage;
   }
 }

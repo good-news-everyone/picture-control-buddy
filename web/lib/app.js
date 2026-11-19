@@ -35,6 +35,7 @@ import { createReport } from "./report-view.js";
 import { warpToWorking } from "./pair-prepare.js";
 import { assignFile, pruneEmpty, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion } from "./session.js";
+import { neutralControl, isDirty, fieldDeltas } from "./baseline.js";
 import { decodeTarget, editGain, editWarningCodes, setWbMapWeights, wbMultipliers,
          MIN_TARGET } from "./target.js";
 
@@ -68,6 +69,12 @@ const state = {
   reportAggregate: null,      // the aggregate report over the pairs (spec §3; stage 5A compute, 5B display)
   fitting: false,             // a fit runs in the fit Worker (progress in the status line)
   profileName: "",            // the NP3 name for the fit: 1–19 ASCII (the np3.serialize rule)
+  // --- the manual-adjustment baseline (stage 6, web/lib/baseline.js) ---
+  // { versionId, control } — a deep copy of the selected fit version's control while the
+  // editor works in the fitting flow; null in standalone editing (resets go to neutral).
+  // Resets, the changed marks and the leave warning compare against it; the version
+  // objects themselves are never mutated.
+  baseline: null,
   // --- the manual editor state (unchanged) ---
   raw: null,
   control,
@@ -131,6 +138,7 @@ function scheduleRender(live) {
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
     hist.push();         // a finished action — a snapshot for Ctrl+Z
     renderCurrent();
+    requestManualReport();
   }
 }
 
@@ -175,10 +183,21 @@ lutWorker.onerror = () => {
   renderCurrent();
 };
 
+// ---------- the baseline provider (stage 6) ----------
+// One provider for every widget: the selected fit version in the fitting flow, the neutral
+// defaults in standalone editing (spec/ui.md "Decisions" #2).
+const NEUTRAL = neutralControl();
+function getBaseline() {
+  return state.baseline ? { control: state.baseline.control, fitted: true, versionId: state.baseline.versionId }
+                        : { control: NEUTRAL, fitted: false, versionId: null };
+}
+
 // ---------- panel ----------
 let transfer = null;   // CD: transfer appears below; the name callback reaches it later
 const panel = createPanel({ scroll: $("panel-scroll"), foot: $("panel-foot") },
-  { state, onChange: scheduleRender, onNameValid: () => transfer?.updateExport() });
+  { state, onChange: scheduleRender, onNameValid: () => transfer?.updateExport(), getBaseline });
+// The specialized editors' edits also refresh the panel's group marks.
+const onEdit = (live) => { panel.updateMarks(); scheduleRender(live); };
 
 // ---------- edit history: Ctrl+Z (spec/ui-manual-mvp.md "Edit history") ----------
 // Lives in web/lib/history.js: up to 20 states in sessionStorage, no redo, RAW change / NP3
@@ -190,20 +209,37 @@ const hist = createHistory({
     state.strength = s.strength;
     panel.refresh();
     renderCurrent();
+    requestManualReport();           // an undone edit is a finished edit for the report too
   },
 });
 
 // ---------- curve editor (CD) ----------
 // histogram — the neutral luma histogram for the backdrop under the curve (only when the curve is enabled).
-const curveEditor = createCurveEditor($("curve-slot"), { state, onChange: scheduleRender, panel,
+const curveEditor = createCurveEditor($("curve-slot"), { state, onChange: onEdit, panel, getBaseline,
   histogram: () => (renderer && state.raw) ? renderer.lumaHistogram() : null });
 // ---------- Color Blender (UI-2 package): Adjust HSL/Color ----------
-const blendingView = createBlendingView($("blending-slot"), { state, onChange: scheduleRender, panel });
+const blendingView = createBlendingView($("blending-slot"), { state, onChange: onEdit, panel, getBaseline });
 // ---------- Color Grading (UI-2 package): zone x HSL/Color ----------
-const gradingView = createGradingView($("grading-slot"), { state, onChange: scheduleRender, panel });
+const gradingView = createGradingView($("grading-slot"), { state, onChange: onEdit, panel, getBaseline });
 // After an NP3 import the editors also re-read the values from the new control.
 const baseRefresh = panel.refresh;
 panel.refresh = () => { baseRefresh(); curveEditor.sync(); blendingView.sync(); gradingView.sync(); };
+
+/** Rebaselines the editor (stage 6): `version` — the selected fit version (the fitting
+ *  flow) or null (standalone, neutral). The manual control is reloaded from the version, the
+ *  edit history restarts at it (undo never crosses a baseline change) and every mark is
+ *  re-evaluated. The version object is only read (deep-copied). */
+function setBaseline(version) {
+  if (version) {
+    state.baseline = { versionId: version.id, control: JSON.parse(JSON.stringify(version.control)) };
+    Object.assign(state.control, JSON.parse(JSON.stringify(version.control)));
+  } else {
+    state.baseline = null;
+  }
+  panel.refresh();
+  hist.clear();
+  hist.push();
+}
 
 // ---------- before/after (EF) ----------
 const beforeAfter = createBeforeAfter($("ba-slot"), { state, renderCurrent });
@@ -248,9 +284,9 @@ const compareView = createCompare({ state,
   renderSide: renderCompareSide,
   onPairSelected: () => reportView.refresh(),   // the report follows the pair (stage 5B)
   onVersionSelected: (v) => {
-    // the manual editor's baseline becomes the selected version; the history is untouched
-    Object.assign(state.control, JSON.parse(JSON.stringify(v.control)));
-    panel.refresh();
+    // the manual editor's baseline becomes the selected version (stage 6): the control is
+    // reloaded, the edit history restarts, the marks follow the new baseline
+    setBaseline(v);
     requestReport();                      // the report re-runs on every version change (spec/ui.md step 2)
   },
   onStrength: (v) => {
@@ -463,7 +499,11 @@ reportWorker.onmessage = (e) => {
   if (m.type === "ready") {
     for (const r of m.reports) {
       const p = state.pairs.find((q) => String(q.id) === r.pair);
-      if (p) p.report = r;                    // the §4.3 DTO at the current version + strength
+      if (!p) continue;
+      p.report = r;                           // the §4.3 DTO at the current version + strength
+      // the fitted version's own dE — the reference of the manual fittedDelta (stage 6)
+      if (!String(m.versionId).endsWith("+manual"))
+        p.fittedDE = { versionId: m.versionId, strength: m.strength, value: r.summary.renderDE };
     }
     state.reportAggregate = m.aggregate;
     reportView.refresh();
@@ -472,11 +512,31 @@ reportWorker.onmessage = (e) => {
 };
 reportWorker.onerror = () => { /* the report is optional: rendering is unaffected */ };
 
+// Step 3.1 (stage 6): a finished manual edit re-runs the report on the manual control — the
+// "<version>+manual" report with the field deltas vs the fitted baseline and fittedDelta
+// against the fitted version's own dE at the same strength. Outside the flow — nothing.
+function requestManualReport() {
+  if (state.step === "edit" && state.baseline) requestReport();
+}
+
 async function requestReport() {
   try {
     const version = state.versions.find((v) => v.id === state.selectedVersionId);
     const usable = state.pairs.filter(compareUsable);
     if (!version || !usable.length) return;
+    // the manual control replaces the version's while the editor works on that baseline
+    const manual = state.step === "edit" && state.baseline?.versionId === version.id
+                   && isDirty(state.control, state.baseline.control);
+    const control = manual ? JSON.parse(JSON.stringify(state.control)) : version.control;
+    const versionId = manual ? `${version.id}+manual` : version.id;
+    let deltas = null, fittedRenderDE = null;
+    if (manual) {
+      deltas = fieldDeltas(state.control, state.baseline.control);
+      // the worker takes one reference dE for the task: exact for a single pair; with more
+      // pairs the delta would mix pairs, so it is left out (shown as absent)
+      const ref = usable.length === 1 ? usable[0].fittedDE : null;
+      if (ref && ref.versionId === version.id && ref.strength === state.strength) fittedRenderDE = ref.value;
+    }
     const gen = ++reportGen;                  // supersede whatever is running/fetching
     const pairs = [], transfer = [];
     for (const p of usable) {
@@ -501,8 +561,8 @@ async function requestReport() {
     reportPending = { id };
     reportWorker.postMessage({ type: "report", id,
       generation: { session: 0, pair: 0, task: gen },
-      versionId: version.id, control: version.control, strength: state.strength,
-      fittedRenderDE: null,                   // a fitted baseline exists only after a refit (stage 6/7)
+      versionId, control, strength: state.strength,
+      fittedRenderDE, deltas,                 // stage 6: set only for a manual report
       pairs, devMeta, devLut, profileMeta, profileBin }, transfer);
     reportView.setUpdating(true);             // the previous report stays, dimmed (spec/ui.md step 3.1)
   } catch (err) {
@@ -742,15 +802,52 @@ function enterEditor(pair) {
   state.step = "edit";
   syncStep();
   reportView.refresh();                // the report shows beside the editor (spec/ui.md step 3.1)
-  // entering the editor loads the selected version's control as the baseline — the version
-  // history is never touched; the manual editor stays the existing one (reset-to-fitted is
-  // stage 6)
+  // entering the editor loads the selected version's control as the immutable baseline
+  // (stage 6): resets/marks/undo work against it; without a fitted version the editor is
+  // the standalone one (the control is kept, resets go to neutral). The version history is
+  // never touched.
   const v = state.versions.find((x) => x.id === state.selectedVersionId);
-  if (v) Object.assign(state.control, JSON.parse(JSON.stringify(v.control)));
+  if (v) setBaseline(v);
+  else if (state.baseline) setBaseline(null);
   applyEditorFrame({ name: pair.raw.name, image: pair.raw.image, info: pair.raw.info, warn: pair.raw.warn });
 }
 
+// ---------- leaving the manual adjustment (stage 6, spec/ui-plan.md stage 6) ----------
+// Returning to fitting (Start / Compare) from step 3.1 with manual edits on a fitted
+// baseline warns first: the edits are discarded (the version stays unchanged; manual edits
+// never carry into a refit). The warning is an in-page alertdialog, not window.confirm —
+// non-blocking for the page and the browser tooling. Without edits, or in standalone
+// editing (nothing is discarded there), navigation is immediate.
+const leaveBox = $("leave-confirm");
+let leavePending = null;
+function guardLeave(go) {
+  if (state.step !== "edit" || !state.baseline || !isDirty(state.control, state.baseline.control))
+    return false;
+  leavePending = go;
+  leaveBox.hidden = false;
+  $("leave-keep").focus();
+  return true;
+}
+function leaveKeep() {
+  leavePending = null;
+  leaveBox.hidden = true;
+}
+function leaveDiscard() {
+  const go = leavePending;
+  leavePending = null;
+  leaveBox.hidden = true;
+  Object.assign(state.control, JSON.parse(JSON.stringify(state.baseline.control)));
+  panel.refresh();
+  hist.clear();
+  hist.push();
+  go?.();
+}
+$("leave-keep").addEventListener("click", leaveKeep);
+$("leave-discard").addEventListener("click", leaveDiscard);
+leaveBox.addEventListener("keydown", (e) => { if (e.key === "Escape") leaveKeep(); });
+
 function showStart() {
+  if (guardLeave(showStart)) return;
   state.step = "start";
   syncStep();
   start.refresh();       // the assembled session is kept across the navigation
@@ -760,6 +857,7 @@ function showStart() {
 // (the ready handler above) or, later, a refit. Leaving it keeps the prepared pairs and the
 // versions; the selected pair skips blocked ones (they cannot be compared, as they cannot fit).
 function enterCompare() {
+  if (guardLeave(enterCompare)) return;
   if (!state.versions.length) {
     setStatus(t("Fit a profile first — the Comparison step needs a version"));
     return;
@@ -784,10 +882,13 @@ function syncStep() {
   document.body.classList.toggle("step-edit", state.step === "edit");
   document.body.classList.toggle("step-compare", state.step === "compare");
   document.body.classList.toggle("step-more", state.step === "more");
+  $("ed-to-compare").hidden = !state.versions.length;   // the editor's way back to Compare
+  if (state.step !== "edit") leaveKeep();               // a pending warning never outlives the step
 }
 
 $("to-start").addEventListener("click", showStart);
 $("to-compare").addEventListener("click", enterCompare);
+$("ed-to-compare").addEventListener("click", enterCompare);
 
 // An editor-step RAW load: the standalone manual-editor behavior (the frame is replaced,
 // the profile and strength are kept). Pair assembly happens on the Start screen.
@@ -843,6 +944,6 @@ transfer.importFromUrl(); // the ?np3= share parameter, if any
 // are added alongside the existing editor keys — nothing is removed.
 window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, blendingView,
                     gradingView, transfer, beforeAfter, start, hist, compare: compareView,
-                    report: reportView,
+                    report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne };

@@ -9,6 +9,8 @@
 import { t } from "./i18n.js";
 import { identityCurve } from "./np3.js";
 import { curveTable } from "./curve.js";
+import { neutralControl, sameField, resetKeys } from "./baseline.js";
+import { markButton, setChanged } from "./mark.js";
 
 const MAX_POINTS = 20;
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -47,11 +49,15 @@ const CSS = `
 .ce-del:disabled { opacity: .35; cursor: not-allowed; }
 .ce-note { margin: 4px 0; }
 .ce-toggle { display: flex; gap: 6px; align-items: center; margin: 2px 0; user-select: none; }
+.ce-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 `;
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-export function createCurveEditor(slot, { state, onChange, panel, histogram = null }) {
+// getBaseline() — { control, fitted } (stage 6, web/lib/baseline.js): the curve tool has one
+// changed mark for the whole curve; activating it resets the curve to the baseline.
+export function createCurveEditor(slot, { state, onChange, panel, histogram = null,
+                                          getBaseline = () => ({ control: neutralControl() }) }) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.append(style);
@@ -71,6 +77,10 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   labelTxt.dataset.i18n = L.toggle;
   labelTxt.textContent = t(L.toggle);
   label.append(toggle, labelTxt);
+  const head = document.createElement("div");
+  head.className = "ce-head";
+  const mark = markButton("Custom curve", () => resetCurve());
+  head.append(label, mark);
 
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${PAD * 2 + 255} ${PAD * 2 + 255}`);
@@ -110,7 +120,7 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   limitNote.hidden = true;
   limitNote.textContent = t(L.limit);
 
-  slot.append(label, note, svg, ctl, limitNote);
+  slot.append(head, note, svg, ctl, limitNote);
 
   // ---------- editor state ----------
   let points = [];       // working copy of control.curve.points
@@ -209,6 +219,7 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   function commit(live) {
     state.control.curve = curveTable(points);
     drawPath();
+    updateMark();
     onChange(live);
   }
 
@@ -346,6 +357,17 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     onChange(false);
   });
 
+  // ---------- the changed mark / reset to the baseline (stage 6) ----------
+  function updateMark() {
+    setChanged(head, !sameField(state.control, getBaseline().control, "curve"));
+  }
+  function resetCurve() {
+    if (!resetKeys(state.control, getBaseline().control, ["curve"]).size) return;
+    panel.refresh();          // the wrapped refresh also re-syncs this editor
+    sync();
+    onChange(false);
+  }
+
   /** Re-reads the editor from state.control (after an NP3 import / Reset / a new RAW). */
   function sync() {
     const on = state.control.curve !== null;
@@ -355,8 +377,9 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     sel = -1;
     redraw();
     drawHist();
+    updateMark();
   }
 
   sync();
-  return { sync, addPoint };   // addPoint — for tests
+  return { sync, addPoint, updateMark, resetCurve };   // addPoint — for tests
 }

@@ -8,6 +8,8 @@
 // as Saturation/Luminance. Refs: spec/color-blending/hsl.png, mixer.png.
 import { t } from "./i18n.js";
 import { COLORS } from "./np3.js";
+import { neutralControl, colorKeys, changedKeys, resetKeys } from "./baseline.js";
+import { markButton, resetButton, setChanged } from "./mark.js";
 
 const GSAT = 65;   // muted saturation of the gradients (as in LR)
 const HUES = { red: 0, orange: 30, yellow: 60, green: 120, cyan: 180, blue: 240, purple: 280, magenta: 320 };
@@ -33,6 +35,7 @@ const CSS = `
 .bl-dot.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bl-cname { text-align: center; color: var(--dim); font-size: 11px; margin-bottom: 2px;
   text-transform: capitalize; }
+.bl-chead { display: flex; justify-content: center; align-items: center; gap: 6px; }
 `;
 
 function el(tag, cls, text) {
@@ -43,7 +46,8 @@ function el(tag, cls, text) {
 }
 
 /** A slider as in panels.js; returns {sync, box, input}. Double click — reset
- *  to opts.def; the numeric value is an editable input. */
+ *  to opts.base() (the baseline value, stage 6); the changed mark shows while the value
+ *  differs from it and resets it too; the numeric value is an editable input. */
 function slider(parent, label, min, max, step, get, set, opts = {}) {
   const input = document.createElement("input");
   input.type = "range";
@@ -58,28 +62,33 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
   const top = el("div", "top");
   const lbl = el("span", "lbl", t(label));
   lbl.dataset.i18n = label;
-  top.append(lbl, val);
+  const resetTo = () => {
+    if (!opts.base) return;
+    input.value = opts.base();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  top.append(lbl);
+  if (opts.base) top.append(markButton(label, resetTo));
+  top.append(val);
   const box = el("div", "ctl");
   box.append(top, input);
+  const mark = () => { if (opts.base) setChanged(box, Math.abs(get() - opts.base()) > 1e-9); };
   const paint = () => input.style.setProperty("--fill",
     `${(100 * (parseFloat(input.value) - min) / (max - min)).toFixed(1)}%`);
   const show = (v) => { val.value = String(v); };
-  const sync = () => { const v = get(); input.value = v; show(v); paint(); };
+  const sync = () => { const v = get(); input.value = v; show(v); paint(); mark(); };
   sync();
   input.addEventListener("input", () => {
     set(parseFloat(input.value));
     opts.syncPeers?.();          // the same color channel in the other mode/tab
     show(get());
     paint();
+    mark();
     opts.onLive?.();
   });
   input.addEventListener("change", () => opts.onDone?.());
-  input.addEventListener("dblclick", () => {
-    if (opts.def == null) return;
-    input.value = opts.def;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  input.addEventListener("dblclick", resetTo);
   val.addEventListener("change", () => {
     let v = parseFloat(val.value);
     if (Number.isNaN(v)) { show(get()); return; }
@@ -89,6 +98,7 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
     opts.syncPeers?.();
     show(get());
     paint();
+    mark();
     opts.onDone?.();
   });
   parent.append(box);
@@ -98,15 +108,20 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
 /**
  * slot — #blending-slot in the "Color Blender" group; state/onChange — from app.js.
  * sync() re-reads the values from state.control (after an NP3 import / Reset).
+ * getBaseline() — { control } (stage 6): resets and changed marks compare against it; a
+ * color dot carries the mark while any of its three channels differs, "Reset color" resets
+ * the selected color.
  */
-export function createBlendingView(slot, { state, onChange, panel }) {
+export function createBlendingView(slot, { state, onChange, panel,
+                                           getBaseline = () => ({ control: neutralControl() }) }) {
+  const B = () => getBaseline().control;
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.append(style);
   slot.replaceChildren();
 
   const syncs = [];
-  function syncAll() { for (const s of syncs) s(); }
+  function syncAll() { for (const s of syncs) s(); updateColorMarks(); }
 
   // --- Adjust: HSL / Color toggle group (first, ref spec/toggle) ---
   let colorMode = false;
@@ -137,7 +152,7 @@ export function createBlendingView(slot, { state, onChange, panel }) {
     for (const color of COLORS) {
       const { sync, box } = slider(sec, cap(color), -100, 100, 1,
         () => state.control.blender[color][i], (v) => { state.control.blender[color][i] = v; },
-        { track: trackFn(HUES[color]), def: 0, syncPeers: syncAll,
+        { track: trackFn(HUES[color]), base: () => B().blender[color][i], syncPeers: syncAll,
           onLive: () => onChange(true), onDone: () => onChange(false) });
       syncs.push(sync);
       rowSyncs.push(sync);
@@ -166,11 +181,14 @@ export function createBlendingView(slot, { state, onChange, panel }) {
     dots.append(b);
     dotBtns[color] = b;
   }
-  bodyColor.append(dots, cname);
+  const colorReset = resetButton("Reset color", () => resetColor(selColor));
+  const chead = el("div", "bl-chead");
+  chead.append(cname, colorReset);
+  bodyColor.append(dots, chead);
   for (let i = 0; i < 3; i++) {
     const { sync, input } = slider(bodyColor, TABS[i], -100, 100, 1,
       () => state.control.blender[selColor][i], (v) => { state.control.blender[selColor][i] = v; },
-      { track: TRACKS[i](HUES[selColor]), def: 0, syncPeers: syncAll,
+      { track: TRACKS[i](HUES[selColor]), base: () => B().blender[selColor][i], syncPeers: syncAll,
         onLive: () => onChange(true), onDone: () => onChange(false) });
     syncs.push(sync);
     colorSyncs.push(sync);
@@ -188,6 +206,21 @@ export function createBlendingView(slot, { state, onChange, panel }) {
   }
   tabBtns.forEach((b, i) => b.addEventListener("click", () => setTab(TABS[i])));
 
+  // ---------- changed marks / reset to the baseline (stage 6) ----------
+  function updateColorMarks() {
+    const diff = changedKeys(state.control, B(), COLORS.flatMap(colorKeys));
+    for (const c of COLORS) {
+      const on = colorKeys(c).some((k) => diff.has(k));
+      setChanged(dotBtns[c], on);
+      if (c === selColor) colorReset.disabled = !on;
+    }
+  }
+  function resetColor(color) {
+    if (!resetKeys(state.control, B(), colorKeys(color)).size) return;
+    syncAll();
+    onChange(false);
+  }
+
   function selectColor(color) {
     selColor = color;
     cname.textContent = cap(color);
@@ -195,6 +228,7 @@ export function createBlendingView(slot, { state, onChange, panel }) {
     // the sliders rebind through the selColor closure; the track is the gradient of the selected color
     for (let i = 0; i < 3; i++) colorInputs[i].style.setProperty("--track", TRACKS[i](HUES[color]));
     for (const s of colorSyncs) s();
+    updateColorMarks();
   }
 
   function setMode(next) {
@@ -214,5 +248,5 @@ export function createBlendingView(slot, { state, onChange, panel }) {
   function sync() { syncAll(); }
 
   sync();
-  return { sync, setMode, selectColor, setTab };
+  return { sync, setMode, selectColor, setTab, resetColor };
 }
