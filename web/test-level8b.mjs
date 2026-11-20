@@ -1,5 +1,5 @@
 // Level 8b of web/test.mjs: the full-flow / hardening level of spec/ui-plan.md stage 8 on the
-// real page web/index.html. One sequential page flow over one fit and two refits:
+// fitting wizard web/picture-control-jpg-fit.html. One sequential page flow over one fit and two refits:
 //   Start -> Fit -> Compare -> Manual (an edit, undo/redo) -> More (leave warning, discard,
 //   a second pair) -> Refit (cancel + immediate restart) -> select a version -> Save
 //   (single NP3; no strength set — spec/ui.md decision #10),
@@ -133,7 +133,7 @@ async function mainFlow({ browser, port, report, skip }) {
       netBad.push(`host ${r.url()}`);
   });
   page.on("pageerror", (e) => pageErrors.push(e.message));
-  await page.goto(`http://${localHost}/web/index.html`);
+  await page.goto(`http://${localHost}/web/picture-control-jpg-fit.html`);
   await page.waitForFunction(`window.__np3app && window.__np3app.state.step === "start"`,
     { timeout: 120000, polling: 200 });
   const ev = (fn, ...args) => page.evaluate(fn, ...args);
@@ -456,37 +456,9 @@ async function mainFlow({ browser, port, report, skip }) {
     report(noSet, "8b save: no strength-set export control on the page (spec/ui.md decision #10)");
   }
 
-  // ---------- 9. race (a): a new RAW dropped while the previous decode runs ----------
-  {
-    const firstRaw = ["test2/SKL_3000.NEF", "test2/SKL_3024.NEF", "test2/SKL_3024.dng"].find(rootFile);
-    if (!firstRaw) {
-      skip("8b race: no second RAW in _local/test2 — the decode race is skipped");
-    } else {
-      const firstName = path.basename(firstRaw);
-      const res = await ev(async (args) => {
-        const T = window.__t8b, s = window.__np3app.state;
-        const [a, b] = await Promise.all([T.fileOf(args.url, args.name), T.fileOf("/test1/DSC_5584.NEF", "DSC_5584C.NEF")]);
-        T.rawSeen = [s.raw?.name ?? null];
-        T.rawPoll = setInterval(() => {
-          const n = s.raw?.name ?? null;
-          if (n !== T.rawSeen[T.rawSeen.length - 1]) T.rawSeen.push(n);
-        }, 15);
-        T.dropDoc(a);
-        await new Promise((r) => setTimeout(r, 300));    // the first file is in the decoder by now
-        T.dropDoc(b);
-        return { gen: window.__np3app.loader.generation };
-      }, { url: `/${firstRaw}`, name: firstName });
-      await wf(`window.__np3app.state.raw?.name === "DSC_5584C.NEF" && !window.__np3app.state.renderPending`, 600000, 100);
-      await sleep(3000);                       // the first decode's (stale) completion has passed
-      const out = await ev(() => {
-        clearInterval(window.__t8b.rawPoll);
-        return { seen: window.__t8b.rawSeen, name: window.__np3app.state.raw?.name,
-                 gen: window.__np3app.loader.generation };
-      });
-      report(out.name === "DSC_5584C.NEF" && !out.seen.includes(firstName) && out.gen === res.gen,
-        `8b race: a RAW dropped while ${firstName} decodes — only the latest frame lands (${out.seen.join(" -> ")})`);
-    }
-  }
+  // ---------- 9. race (a) moved: two RAWs dropped in a row in the editor is the profile editor
+  //     page's behavior now (spec/ui-pages.md) — level 8e, criterion 9. In the wizard a RAW
+  //     becomes a card (stage 9). ----------
 
   // ---------- 10. resources ----------
   {
@@ -537,7 +509,7 @@ async function probe({ browser, port, report, skip }) {
     let page = null;
     try {
       page = await browser.newPage();
-      await page.goto(`http://127.0.0.1:${port}/web/index.html`);
+      await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html`);
       await page.waitForFunction(`window.__np3app && window.__np3app.state.step === "start"`,
         { timeout: 120000, polling: 200 });
       await page.evaluate(installHelpers);

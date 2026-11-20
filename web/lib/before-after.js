@@ -4,6 +4,7 @@
 // shows the ready Nikon neutral cache without LUT/strength; releasing returns the result.
 // The canvas size, profile and strength do not change; RAW decoding is not started.
 import { t } from "./i18n.js";
+import { onLongPress } from "./touch.js";
 
 const BEFORE = "Before — neutral";
 const AFTER = "After — NP3";
@@ -21,7 +22,11 @@ function editableTarget(target) {
  * slot — #ba-slot in the viewer area; state/renderCurrent — from app.js.
  * Returns {label, hint, update()}: the state caption and the space hint.
  */
-export function createBeforeAfter(slot, { state, renderCurrent }) {
+// hint: false hides the "Hold Space" line (touch pages). longPressTarget (plan §2.8): touching and
+// holding that element (a finger or a pen, 250 ms, no more than 10 px of movement) shows "before"
+// until the pointer is released — the touch counterpart of the Space hold. A mouse is not affected
+// (so the desktop canvas keeps its right-click menu).
+export function createBeforeAfter(slot, { state, renderCurrent, hint: showHint = true, longPressTarget = null }) {
   slot.replaceChildren();
   slot.classList.add("ba");
   const label = document.createElement("div");
@@ -32,6 +37,7 @@ export function createBeforeAfter(slot, { state, renderCurrent }) {
   hint.className = "ba-hint";
   hint.dataset.i18n = HINT;
   hint.textContent = t(HINT);
+  hint.hidden = !showHint;
   slot.append(label, hint);
 
   function show(before) {
@@ -53,6 +59,19 @@ export function createBeforeAfter(slot, { state, renderCurrent }) {
   window.addEventListener("keyup", (ev) => {
     if (ev.key === " ") show(false);
   });
+
+  if (longPressTarget) {
+    onLongPress(longPressTarget, {
+      types: ["touch", "pen"],
+      start: () => { if (state.raw) show(true); },
+      end: () => show(false),
+    });
+    // the system "save image" / text-selection menu must not open on a long press; a mouse
+    // right-click (last pointer was a mouse) keeps its menu
+    let lastType = null;
+    longPressTarget.addEventListener("pointerdown", (e) => { lastType = e.pointerType; }, true);
+    longPressTarget.addEventListener("contextmenu", (e) => { if (lastType !== "mouse") e.preventDefault(); });
+  }
 
   return {
     label,

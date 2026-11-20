@@ -12,6 +12,7 @@ import { t } from "./i18n.js";
 import { ZONES } from "./np3.js";
 import { neutralControl, zoneKeys, changedKeys, resetKeys } from "./baseline.js";
 import { markButton, resetButton, setChanged } from "./mark.js";
+import { onDoubleTap } from "./touch.js";
 
 const ZLABEL = { shadows: "Shadows", midtone: "Midtones", highlights: "Highlights" };
 // gradient and preview lightness by zone (shadows darker, highlights lighter)
@@ -70,12 +71,15 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
   }
   const val = el("input", "val");
   val.type = "number";
+  val.setAttribute("enterkeyhint", "done");
   val.min = min; val.max = max; val.step = step;
   const top = el("div", "top");
   const lbl = el("span", "lbl", t(label));
   lbl.dataset.i18n = label;
+  let lastReset = -1e9;     // a double tap may be followed by a browser dblclick: one reset only
   const resetTo = () => {
-    if (!opts.base) return;
+    if (!opts.base || performance.now() - lastReset < 350) return;
+    lastReset = performance.now();
     input.value = opts.base();
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -100,7 +104,9 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
     opts.onLive?.();
   });
   input.addEventListener("change", () => opts.onDone?.());
+  // double click (mouse) and double tap (touch): one reset, one history snapshot (see panels.js)
   input.addEventListener("dblclick", resetTo);
+  onDoubleTap(box, resetTo);
   val.addEventListener("change", () => {
     let v = parseFloat(val.value);
     if (Number.isNaN(v)) { show(get()); return; }

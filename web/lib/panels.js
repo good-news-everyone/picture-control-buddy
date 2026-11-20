@@ -12,6 +12,7 @@ import { t } from "./i18n.js";
 import { newProfile, COLORS, ZONES } from "./np3.js";
 import { neutralControl, GROUP_KEYS, ALL_KEYS, changedKeys, resetKeys } from "./baseline.js";
 import { markButton, resetButton, setChanged } from "./mark.js";
+import { onDoubleTap } from "./touch.js";
 
 const BASIC = [
   ["saturation", "Saturation"],
@@ -80,10 +81,16 @@ export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid
       input.classList.add("grad");
       input.style.setProperty("--track", opts.track);
     }
-    const val = h("input", { type: "number", class: "val", min, max, step });
+    // enterkeyhint: the on-screen keyboard shows "Done"; type=number without inputmode keeps the
+    // minus sign on the iOS keyboard (spec/ui-mobile.md "Number field")
+    const val = h("input", { type: "number", class: "val", min, max, step, enterkeyhint: "done" });
+    // a reset as one finished action; some browsers fire dblclick after a double tap too, so a
+    // second reset within 350 ms is ignored (it would push another history snapshot)
+    let lastReset = -1e9;
     const resetTo = () => {
       const d = opts.base ? opts.base() : opts.def;
-      if (d == null) return;
+      if (d == null || performance.now() - lastReset < 350) return;
+      lastReset = performance.now();
       input.value = d;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -106,8 +113,9 @@ export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid
     sync();
     input.addEventListener("input", () => apply(parseFloat(input.value), true));
     input.addEventListener("change", () => onChange(false));
-    // double click — reset to the baseline (or the fixed default)
+    // double click (mouse) and double tap (touch) — reset to the baseline (or the fixed default)
     input.addEventListener("dblclick", resetTo);
+    onDoubleTap(box, resetTo);
     // manual number input: clamp to the range, apply as a finished action
     val.addEventListener("change", () => {
       let v = parseFloat(val.value);
@@ -160,7 +168,8 @@ export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid
   const gStrength = group("Profile", "strength");
 
   // --- NP3 name (the first field) ---
-  const nameInput = h("input", { type: "text", maxlength: 19, spellcheck: "false", value: state.control.name });
+  const nameInput = h("input", { type: "text", id: "p-name", maxlength: 19, spellcheck: "false",
+    autocapitalize: "off", autocomplete: "off", autocorrect: "off", enterkeyhint: "done", value: state.control.name });
   const nameErr = h("div", { class: "bad", id: "p-name-err", hidden: "" },
     t("Name must be 1–19 ASCII characters"));
   function syncName() { nameInput.value = state.control.name; checkName(); }

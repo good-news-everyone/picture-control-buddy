@@ -1,34 +1,22 @@
-// The application: the session shell (spec/ui-plan.md §3) around the manual editor.
+// The fitting wizard (spec/ui.md steps 1 -> 2 -> 3.1 -> 3.2, spec/ui-pages.md): the entry of
+// picture-control-jpg-fit.html. The session shell (spec/ui-plan.md §3) around the editor core
+// (lib/editor-core.js): RAW-first pair cards, preparation, the fit/refit Workers, Compare, the
+// report, More frames and the versions; the editor is step 3.1 — manual adjustment of the
+// selected fitted version (reset/marks against it, the leave warning). No NP3 import here:
+// profiles enter the wizard only through a fit; Save NP3 and the share link stay (the link
+// opens the profile editor page).
 // State by contract: the session fields — step (start | compare | edit | more; "edit" is the
 // manual adjustment step 3.1 — the name predates the full flow and stays for the tests),
 // pairs: [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }] (RAW first, decision #7),
 // selectedPairId, versions: [{ id, name, control, parentId, kind, pairIds, fitVector, … }],
-// selectedVersionId, fitting, profileName (the fit's NP3 name),
-// strength, generation, status — plus the editor state, preserved unchanged:
-// { raw: {bytes,image,info,name}|null, control, strength, showNeutral, generation, status }.
-// The panel shows the base control; strength is applied only via scaled(control, strength)
-// at render time. Compare (spec/ui.md step 2) reuses the same strength — it lives in the
-// session and survives step changes.
+// selectedVersionId, fitting, profileName (the fit's NP3 name), advice, reportAggregate —
+// plus the editor state of the core. Compare (step 2) reuses the editor's strength — it lives
+// in the session and survives step changes.
 // Ownership: this file orchestrates; web/lib/session.js — pure pair/name rules,
 // web/lib/start.js — the Start screen, web/lib/compare-view.js — the Comparison screen,
-// web/lib/history.js — the Ctrl+Z edit history,
-// panels.js — the editor panel. CD brings #import/#export and #curve-slot to life, EF — #ba-slot
-// (before/after: state.showNeutral = true + renderCurrent() already shows the neutral without LUT/strength).
-import { newProfile, COLORS, ZONES } from "./np3.js";
-import { scaled } from "./strength.js";
-import { loadModel as loadNeutral } from "./neutral.js";
-import { fetchModel } from "./profile.js";
-import { fetchDetail } from "./detail.js";
-import { Renderer } from "./renderer.js";
-import { createRawLoader } from "./loader.js";
-import { t, applyI18n } from "./i18n.js";
-import { createPanel } from "./panels.js";
-import { createCurveEditor } from "./curve-editor.js";
-import { createBlendingView } from "./blending.js";
-import { createGradingView } from "./grading.js";
-import { createBeforeAfter } from "./before-after.js";
-import { setupTransfer } from "./transfer.js";
-import { createHistory } from "./history.js";
+// web/lib/report-view.js — the report, web/lib/more-view.js — More frames.
+import { t } from "./i18n.js";
+import { createEditorCore, $, rawErrorText } from "./editor-core.js";
 import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
@@ -37,217 +25,36 @@ import { viewRemap, applyRemap } from "./pair-prepare.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion } from "./session.js";
-import { neutralControl, isDirty, fieldDeltas } from "./baseline.js";
-import { decodeTarget, editGain, editWarningCodes, setWbMapWeights, wbMultipliers,
-         MIN_TARGET } from "./target.js";
+import { isDirty, fieldDeltas } from "./baseline.js";
+import { decodeTarget, editGain, editWarningCodes, wbMultipliers, MIN_TARGET } from "./target.js";
+import { scaled } from "./strength.js";
 
-const $ = (id) => document.getElementById(id);
-applyI18n();
-
-// The on-screen canvas is the WebGL2 context itself: the final pass goes into it directly,
-// without readback/putImageData (slow on 1600 px frames — see the perf analysis in the plan).
-const view = $("c");
-const gl = view.getContext("webgl2", { preserveDrawingBuffer: true, antialias: false });
-
-if (!gl || !gl.getExtension("EXT_color_buffer_float")) {
-  document.body.querySelectorAll("aside, main, #start").forEach((el) => { el.hidden = true; });
-  $("nogl").hidden = false;
-  throw new Error("WebGL2 required");
-}
-gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-view.hidden = true;   // empty state: the canvas appears with the first frame (renderCurrent)
-
-// ---------- state (contract) ----------
-const control = newProfile();
-for (const c of COLORS) control.blender[c] = [0, 0, 0];   // newProfile leaves empty dicts
-for (const z of ZONES) control.grade[z] = [0, 0, 0];
-const state = {
-  // --- session (spec/ui-plan.md §3) ---
-  step: "start",              // start | compare | edit (manual adjustment) | more (step 3.2, stage 7)
-  pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }]
-  selectedPairId: null,
-  versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
-  selectedVersionId: null,
-  advice: null,               // stage 7: computeAdvice() over the frame records (more-view.js)
-  reportAggregate: null,      // the aggregate report over the pairs (spec §3; stage 5A compute, 5B display)
-  fitting: false,             // a fit runs in the fit Worker (progress in the status line)
-  profileName: "",            // the NP3 name for the fit: 1–19 ASCII (the np3.serialize rule)
-  // --- the manual-adjustment baseline (stage 6, web/lib/baseline.js) ---
-  // { versionId, control } — a deep copy of the selected fit version's control while the
-  // editor works in the fitting flow; null in standalone editing (resets go to neutral).
-  // Resets, the changed marks and the leave warning compare against it; the version
-  // objects themselves are never mutated.
-  baseline: null,
-  // --- the manual editor state (unchanged) ---
-  raw: null,
-  control,
-  strength: 100,
-  showNeutral: false,
-  generation: 0,
-  status: "idle",
-  nameValid: true,          // CD: block export when false
-  renderPending: false,     // the LUT is built in a Worker: tests wait for a render by this flag
-};
-const statusEl = $("status");
-const startStatusEl = $("start-status");
-const moreStatusEl = $("more-status");
-function setStatus(s) {
-  state.status = s;
-  statusEl.textContent = s;
-  if (startStatusEl) startStatusEl.textContent = s;
-  if (moreStatusEl) moreStatusEl.textContent = s;
-}
-
-// RAW is decoded in a Worker (lib/loader.js), and renderer.setFrame expects {develop} in place.
-// So develop is a stub returning the already-ready frame from the latest ready event:
-// no repeated decoding on the main thread, the one-develop-per-frame invariant is kept.
-let pendingFrame = null;
-let renderer = null;
-
-// ---------- render ----------
-// The profile LUT is built in a Worker (lib/lut-worker.js) and picked up ready: until the LUT
-// arrives, the previous frame stays on the screen. The generation (state.renderPending, lutSeq) discards
-// stale results: finishing a LUT build for an older state cannot override a newer one.
-// rAF limits the request rate during continuous slider movement.
-function renderCurrent() {
-  if (!state.raw || !renderer) return;
-  if (state.showNeutral) {           // EF: "before" — the Nikon neutral without any NP3 tools
-    reveal();
-    renderer.neutralToScreen();
-    return;
-  }
-  const ctl = scaled(state.control, state.strength);
-  renderer.setProfile(ctl);
-  const key = renderer.lutCacheKey(renderer.lutN);
-  if (!renderer.hasLut(key) && !lutDead) {
-    requestLut(ctl, renderer.lutN);
-    return;                          // the previous frame stays until the LUT is ready
-  }
-  reveal();
-  if (renderer.hasFinal()) { renderer.blitFinal(); return; }   // before/after: the result without a full render
-  renderer.render({ toScreen: true });
-}
-
-function reveal() {
-  view.hidden = false;               // empty state: the canvas appears with the first frame
-  const { w, h } = renderer.frame;
-  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
-}
-
-let raf = 0;
-function scheduleRender(live) {
-  if (renderer) renderer.lutN = live ? 17 : 33;
-  if (live) {
-    if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderCurrent(); });
-  } else {
-    if (raf) { cancelAnimationFrame(raf); raf = 0; }
-    hist.push();         // a finished action — a snapshot for Ctrl+Z
-    renderCurrent();
-    requestManualReport();
-  }
-}
-
-// ---------- LUT building in a Worker (plan §5, P1) ----------
-let lutSeq = 0;            // monotonic request generation
-let lutPending = null;     // {gen, key, n} — an unapplied request
-let lutDead = false;       // the Worker is unavailable — fallback to the synchronous buildLUT in render
-const lutWorker = new Worker("lib/lut-worker.js", { type: "module" });
-
-function requestLut(ctl, n) {
-  const key = renderer.lutCacheKey(n);
-  if (renderer.hasLut(key)) return;
-  if (lutPending && lutPending.key === key) return;
-  const gen = ++lutSeq;
-  lutPending = { gen, key, n };
-  state.renderPending = true;
-  lutWorker.postMessage({ id: gen, gen, control: ctl, n });
-}
-
-lutWorker.onmessage = (e) => {
-  const { id, lut, error } = e.data;
-  const p = lutPending;
-  if (!p || p.gen !== id) return;    // stale result: the current request is still building
-  lutPending = null;
-  if (error) {
-    lutDead = true;
-    setStatus(t("LUT worker failed: {error}", { error }));
-  } else {
-    renderer.uploadLut(p.key, p.n, lut);
-  }
-  state.renderPending = false;
-  // the LUT is ready — finish drawing the current step (the compare view re-requests its
-  // render side; the editor finishes renderCurrent)
-  if (state.step === "compare" && compareView) compareView.scheduleRender();
-  else renderCurrent();
-};
-lutWorker.onerror = () => {
-  lutDead = true;
-  lutPending = null;
-  state.renderPending = false;
-  setStatus(t("LUT worker failed"));
-  renderCurrent();
-};
-
-// ---------- the baseline provider (stage 6) ----------
-// One provider for every widget: the selected fit version in the fitting flow, the neutral
-// defaults in standalone editing (spec/ui.md "Decisions" #2).
-const NEUTRAL = neutralControl();
-function getBaseline() {
-  return state.baseline ? { control: state.baseline.control, fitted: true, versionId: state.baseline.versionId }
-                        : { control: NEUTRAL, fitted: false, versionId: null };
-}
-
-// ---------- panel ----------
-let transfer = null;   // CD: transfer appears below; the name callback reaches it later
-const panel = createPanel({ scroll: $("panel-scroll"), foot: $("panel-foot") },
-  { state, onChange: scheduleRender, onNameValid: () => transfer?.updateExport(), getBaseline });
-// The specialized editors' edits also refresh the panel's group marks.
-const onEdit = (live) => { panel.updateMarks(); scheduleRender(live); };
-
-// ---------- edit history: Ctrl+Z (spec/ui-manual-mvp.md "Edit history") ----------
-// Lives in web/lib/history.js: up to 20 states in sessionStorage, no redo, RAW change / NP3
-// import resets it (clear() at those points).
-const hist = createHistory({
-  snapshot: () => JSON.parse(JSON.stringify({ control: state.control, strength: state.strength })),
-  apply: (s) => {
-    Object.assign(state.control, s.control);   // the state.control identity is preserved
-    state.strength = s.strength;
-    panel.refresh();
-    renderCurrent();
-    requestManualReport();           // an undone edit is a finished edit for the report too
+// ---------- the editor core + the session ----------
+const core = await createEditorCore({
+  extraState: {
+    step: "start",              // start | compare | edit (manual adjustment) | more (step 3.2)
+    pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }]
+    selectedPairId: null,
+    versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
+    selectedVersionId: null,
+    advice: null,               // stage 7: computeAdvice() over the frame records (more-view.js)
+    reportAggregate: null,      // the aggregate report over the pairs (spec §3)
+    fitting: false,             // a fit runs in the fit Worker (progress in the status line)
+    profileName: "",            // the NP3 name for the fit: 1–19 ASCII (the np3.serialize rule)
+  },
+  statusIds: ["start-status", "more-status"],
+  hooks: {
+    onFinishedEdit: () => requestManualReport(),
+    // the LUT is ready: the Compare screen re-requests its render side, the editor redraws
+    onLutReady: () => {
+      if (state.step === "compare" && compareView) { compareView.scheduleRender(); return true; }
+      return false;
+    },
+    onLoaderUpdate: (st) => pairLoaderUpdate(st),
   },
 });
-
-// ---------- curve editor (CD) ----------
-// histogram — the neutral luma histogram for the backdrop under the curve (only when the curve is enabled).
-const curveEditor = createCurveEditor($("curve-slot"), { state, onChange: onEdit, panel, getBaseline,
-  histogram: () => (renderer && state.raw) ? renderer.lumaHistogram() : null });
-// ---------- Color Blender (UI-2 package): Adjust HSL/Color ----------
-const blendingView = createBlendingView($("blending-slot"), { state, onChange: onEdit, panel, getBaseline });
-// ---------- Color Grading (UI-2 package): zone x HSL/Color ----------
-const gradingView = createGradingView($("grading-slot"), { state, onChange: onEdit, panel, getBaseline });
-// After an NP3 import the editors also re-read the values from the new control.
-const baseRefresh = panel.refresh;
-panel.refresh = () => { baseRefresh(); curveEditor.sync(); blendingView.sync(); gradingView.sync(); };
-
-/** Rebaselines the editor (stage 6): `version` — the selected fit version (the fitting
- *  flow) or null (standalone, neutral). The manual control is reloaded from the version, the
- *  edit history restarts at it (undo never crosses a baseline change) and every mark is
- *  re-evaluated. The version object is only read (deep-copied). */
-function setBaseline(version) {
-  if (version) {
-    state.baseline = { versionId: version.id, control: JSON.parse(JSON.stringify(version.control)) };
-    Object.assign(state.control, JSON.parse(JSON.stringify(version.control)));
-  } else {
-    state.baseline = null;
-  }
-  panel.refresh();
-  hist.clear();
-  hist.push();
-}
-
-// ---------- before/after (EF) ----------
-const beforeAfter = createBeforeAfter($("ba-slot"), { state, renderCurrent });
+const { state, setStatus, renderer, loader, panel, hist, curveEditor, blendingView, gradingView,
+        beforeAfter, transfer, renderCurrent, getBaseline, setBaseline, applyEditorFrame } = core;
 
 // ---------- the Comparison screen (stage 4, spec/ui.md step 2) ----------
 // The render side: the developed frame through the renderer (neutral + profile LUT + detail),
@@ -312,8 +119,7 @@ function compareRenderKey(pair, version, strength) {
 
 async function renderCompareSideUncached(pair, version, strength, gen) {
   if (compareFramePair !== pair || compareFramePrep !== pair.prepared || !renderer.frame) {
-    pendingFrame = gainedFrame(pair);
-    renderer.setFrame(null);              // one develop per pair — strength/version changes reuse it
+    core.setFrameImage(gainedFrame(pair));   // one develop per pair — strength/version changes reuse it
     compareFramePair = pair;
     compareFramePrep = pair.prepared;
   }
@@ -321,8 +127,8 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
   renderer.setProfile(ctl);
   renderer.lutN = 33;                     // the final LUT for the comparison
   const key = renderer.lutCacheKey(33);
-  if (!renderer.hasLut(key) && !lutDead) {
-    requestLut(ctl, 33);                  // async: the ready path re-requests the render side
+  if (!renderer.hasLut(key) && !core.lutDead) {
+    core.requestLut(ctl, 33);             // async: the ready path re-requests the render side
     return null;
   }
   const rgba = renderer.render({ toScreen: false });
@@ -935,79 +741,34 @@ function enterMore() {
   requestFrames();
 }
 
-// ---------- model and RAW loading ----------
-setStatus(t("loading models…"));
-const [dev, profile, detail] = await Promise.all([
-  loadNeutral(),          // model/dev.json + dev_lut.bin
-  fetchModel("model"),    // model/profile.json + profile.bin
-  fetchDetail(""),        // model/detail.json + detail.bin
-  fetch("model/wbmap.json").then((r) => r.json()).then((j) => setWbMapWeights(j.weights)),
-]);
-renderer = new Renderer(gl, { dev, profile, detail }, { develop: () => pendingFrame });
-
-const ERRORS = {
-  nef_high_efficiency: "NEF High Efficiency compression is not supported",
-  not_bayer: "Only Bayer-sensor files are supported",
-  decode_failed: "Failed to decode the file",
-  wasm_failed: "The RAW unpacker (WASM) failed to initialize",
-};
-
-// Applies a ready frame to the manual editor (the loader's editor path and entering the
-// editor from a pair share it — the frame is already decoded, develop is not called).
-function applyEditorFrame(st) {
-  state.generation = st.gen ?? state.generation;
-  state.raw = { bytes: null, image: st.image, info: st.info, name: st.name };
-  pendingFrame = st.image;
-  renderer.setFrame(null);                 // the frame is from the Worker (or a pair), develop is not called
-  hist.clear();                            // changing RAW resets the edit history
-  hist.push();                             // base snapshot: the current profile on the new frame
-  curveEditor.sync();                      // the backdrop histogram moves to the new frame
-  renderCurrent();
-  const i = st.info;
-  $("info").innerHTML =
-    `<dt>${t("File")}</dt><dd>${st.name}</dd>` +
-    `<dt>${t("Camera")}</dt><dd>${i.make} ${i.model}${i.dng ? ", DNG" : ""}</dd>` +
-    `<dt>${t("Frame")}</dt><dd>${st.image.w}×${st.image.h}</dd>`;
-  $("warn").hidden = !st.warn;
-  if (st.warn) $("warn").textContent = t("Camera is not Nikon Z f: development is approximate");
-  beforeAfter.update();        // before/after is available only after a successful development
-  setStatus(t("Ready"));
-}
-
-const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => {
+// ---------- pair RAW decodes (the loader events tagged { kind: "pair" }) ----------
+function pairLoaderUpdate(st) {
+  if (st.tag?.kind !== "pair") return false;
+  const p = st.tag.pair;
   if (st.type === "busy") {
     setStatus(t("unpacking {name}…", { name: st.name }));
   } else if (st.type === "error") {
-    const msg = t(ERRORS[st.code] || st.code);
-    const full = `${st.name}: ${msg}${st.detail ? " — " + st.detail : ""}`;
-    if (st.tag?.kind === "pair") {
-      // A RAW that does not decode blocks its pair (spec/ui.md checks table); the other
-      // pairs and the editor state stay untouched.
-      const p = st.tag.pair;
-      if (inSession(p) && p.rawFile && p.rawFile.name === st.name) {
-        p.raw = "error";
-        p.rawError = `${msg}${st.detail ? " — " + st.detail : ""}`;
-        p.blocked = true;
-        refreshPair(p);
-      }
+    // A RAW that does not decode blocks its pair (spec/ui.md checks table); the other
+    // pairs and the editor state stay untouched.
+    const msg = rawErrorText(st.code);
+    if (inSession(p) && p.rawFile && p.rawFile.name === st.name) {
+      p.raw = "error";
+      p.rawError = `${msg}${st.detail ? " — " + st.detail : ""}`;
+      p.blocked = true;
+      refreshPair(p);
     }
-    // We do not touch the previous frame and profile: a new file's error goes only to the status.
-    setStatus(full);
+    setStatus(`${st.name}: ${msg}${st.detail ? " — " + st.detail : ""}`);
     refreshPairsUI();
   } else if (st.type === "ready") {
-    if (st.tag?.kind === "pair") {
-      const p = st.tag.pair;
-      if (inSession(p) && p.rawFile && p.rawFile.name === st.name && p.raw === "pending") {
-        p.raw = { name: st.name, image: st.image, info: st.info, warn: st.warn };
-        refreshPair(p);
-        setStatus(t("Ready"));
-      }
-      refreshPairsUI();
-    } else {
-      applyEditorFrame(st);
+    if (inSession(p) && p.rawFile && p.rawFile.name === st.name && p.raw === "pending") {
+      p.raw = { name: st.name, image: st.image, info: st.info, warn: st.warn };
+      refreshPair(p);
+      setStatus(t("Ready"));
     }
+    refreshPairsUI();
   }
-}});
+  return true;
+}
 
 // ---------- pair assembly (spec/ui.md step 1, stage 1) ----------
 // The pairing rule lives in web/lib/session.js: same base name first, otherwise in order.
@@ -1102,8 +863,10 @@ async function addTargetFile(pair, file) {
 }
 
 // ---------- navigation: Start <-> the manual editor ----------
+// The wizard's editor is step 3.1: it always works against a fitted version (the standalone
+// editor is its own page, spec/ui-pages.md).
 function enterEditor(pair) {
-  if (!isRawReady(pair) || pair.blocked) return;
+  if (!isRawReady(pair) || pair.blocked || !state.versions.length) return;
   cancelFit();                         // navigation cancels a running fit
   state.selectedPairId = pair.id;
   state.step = "edit";
@@ -1114,8 +877,7 @@ function enterEditor(pair) {
   // the standalone one (the control is kept, resets go to neutral). The version history is
   // never touched.
   const v = state.versions.find((x) => x.id === state.selectedVersionId);
-  if (v) setBaseline(v);
-  else if (state.baseline) setBaseline(null);
+  setBaseline(v);
   applyEditorFrame({ name: pair.raw.name, image: pair.raw.image, info: pair.raw.info, warn: pair.raw.warn });
 }
 
@@ -1199,62 +961,48 @@ $("to-compare").addEventListener("click", enterCompare);
 $("ed-to-compare").addEventListener("click", enterCompare);
 $("ed-to-more").addEventListener("click", enterMore);
 
-// An editor-step RAW load: the standalone manual-editor behavior (the frame is replaced,
-// the profile and strength are kept). Pair assembly happens on the Start screen.
-function editorOpenRaw(file) {
-  return loader.open(file);
-}
-
-// ---------- files: input + drag-and-drop ----------
-const drop = $("drop");
-drop.onclick = () => $("file").click();
-$("file").onchange = (ev) => { const f = ev.target.files[0]; if (f) editorOpenRaw(f); };
-for (const ev2 of ["dragenter", "dragover"]) document.addEventListener(ev2, (e) => {
-  e.preventDefault();
-  drop.classList.add("over");
-});
-for (const ev2 of ["dragleave", "drop"]) document.addEventListener(ev2, (e) => {
-  e.preventDefault();
-  drop.classList.remove("over");
-});
-// Routing by extension: without it, an NP3 dropped onto the page went to the RAW decoder
-// and died with "Failed to decode", although the file was valid. On the Start screen NEF/DNG
-// and JPG assemble pairs; in the editor a RAW keeps the single-RAW behavior, a JPEG goes to
-// the target path. The Start-screen zones stopPropagation and handle their own drops.
+// ---------- files dropped on the page ----------
+// The Start/More zones and the pair cards handle their own drops (stopPropagation). A RAW
+// dropped elsewhere on Start/More becomes a new card; JPEGs belong to a card; there is no NP3
+// import in the wizard (spec/ui-pages.md) — the profile editor page has it.
+for (const ev2 of ["dragenter", "dragover", "dragleave"]) document.addEventListener(ev2, (e) => e.preventDefault());
 document.addEventListener("drop", (e) => {
-  const files = [...(e.dataTransfer?.files || [])];
-  for (const f of files) routeFile(f);
+  e.preventDefault();
+  for (const f of [...(e.dataTransfer?.files || [])]) routeFile(f);
 });
 
 function routeFile(f) {
   const ext = (f.name.split(".").pop() || "").toLowerCase();
-  if (ext === "np3") { transfer.importFile(f); return; }
   if (ext === "nef" || ext === "dng") {
     if (state.step === "start" || state.step === "more") addRawFile(f);
-    else editorOpenRaw(f);
+    else setStatus(t("{name}: add RAW files on the Start or More frames screen", { name: f.name }));
   } else if (ext === "jpg" || ext === "jpeg") {
     // RAW first (decision #7): a JPEG belongs to a card, not to the page
     setStatus(t("{name}: add the JPEG on its RAW's card", { name: f.name }));
+  } else if (ext === "np3") {
+    setStatus(t("{name}: NP3 profiles are opened in the profile editor, not in the fitting wizard", { name: f.name }));
   } else {
-    setStatus(t("Unsupported file: {name} — drop a NEF, DNG, JPG or NP3", { name: f.name }));
+    setStatus(t("Unsupported file: {name} — drop a NEF or DNG, or a JPG onto its card", { name: f.name }));
   }
 }
 
-// ---------- NP3 import/export (CD) ----------
-transfer = setupTransfer({ state, panel, renderCurrent, setStatus,
-  onReset: () => { hist.clear(); hist.push(); } });   // an NP3 import resets the edit history
+// a phone gets a non-blocking note: fitting is designed for a desktop (spec/ui-pages.md)
+{
+  const banner = $("phone-banner");
+  const phone = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600;
+  if (banner && phone) {
+    banner.hidden = false;
+    $("phone-banner-close")?.addEventListener("click", () => { banner.hidden = true; });
+  }
+}
 
 syncStep();
-setStatus(t("Add RAW and JPEG files to assemble pairs"));
-hist.push();              // base snapshot of the new profile for Ctrl+Z
-transfer.importFromUrl(); // the ?np3= share parameter, if any
+setStatus(t("Add RAW files to assemble pairs"));
 
-// For the end-to-end tests (EF) and the following parts: the state and entry points.
-// The session fields (step, pairs, selectedPairId, versions, selectedVersionId, profileName)
-// are added alongside the existing editor keys — nothing is removed.
+// For the end-to-end tests and the following parts: the state and entry points.
 window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, blendingView,
                     gradingView, transfer, beforeAfter, start, hist, compare: compareView,
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
-                    runFitPreparation, prepareOne,
+                    runFitPreparation, prepareOne, autoPrepare,
                     more, enterMore, runRefit, removePair, computeAdvice };

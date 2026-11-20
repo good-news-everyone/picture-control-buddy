@@ -10,6 +10,7 @@ import { t } from "./i18n.js";
 import { COLORS } from "./np3.js";
 import { neutralControl, colorKeys, changedKeys, resetKeys } from "./baseline.js";
 import { markButton, resetButton, setChanged } from "./mark.js";
+import { onDoubleTap } from "./touch.js";
 
 const GSAT = 65;   // muted saturation of the gradients (as in LR)
 const HUES = { red: 0, orange: 30, yellow: 60, green: 120, cyan: 180, blue: 240, purple: 280, magenta: 320 };
@@ -58,12 +59,15 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
   }
   const val = el("input", "val");
   val.type = "number";
+  val.setAttribute("enterkeyhint", "done");
   val.min = min; val.max = max; val.step = step;
   const top = el("div", "top");
   const lbl = el("span", "lbl", t(label));
   lbl.dataset.i18n = label;
+  let lastReset = -1e9;     // a double tap may be followed by a browser dblclick: one reset only
   const resetTo = () => {
-    if (!opts.base) return;
+    if (!opts.base || performance.now() - lastReset < 350) return;
+    lastReset = performance.now();
     input.value = opts.base();
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -88,7 +92,9 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
     opts.onLive?.();
   });
   input.addEventListener("change", () => opts.onDone?.());
+  // double click (mouse) and double tap (touch): one reset, one history snapshot (see panels.js)
   input.addEventListener("dblclick", resetTo);
+  onDoubleTap(box, resetTo);
   val.addEventListener("change", () => {
     let v = parseFloat(val.value);
     if (Number.isNaN(v)) { show(get()); return; }

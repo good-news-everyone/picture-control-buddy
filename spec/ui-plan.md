@@ -301,7 +301,9 @@ Tests (level 8 additions):
 
 ### Stage 11. Page split: wizard, editor, mobile editor, landing
 
-Spec: [ui-pages.md](ui-pages.md), [ui.md](ui.md) decision #9 (2026-11-20). Not started. Best done before stages 9–10 land in markup, or together with them, so the wizard markup is written once.
+Spec: [ui-pages.md](ui-pages.md), [ui.md](ui.md) decision #9 (2026-11-20).
+
+> **Status 2026-11-20: done** (after stages 12, 10, 9). `lib/app.js` is split: `lib/editor-core.js` (`createEditorCore` — canvas/renderer, the LUT Worker, panel, curve/blender/grading, history, before/after, the RAW loader, NP3 export/share; hooks `onFinishedEdit`, `onLutReady`, `onLoaderUpdate`; the mobile options and the `mobile`/`onStatus` hooks of the mobile branch), `lib/fit-app.js` (the wizard; the editor step needs a fitted version; no NP3 import, no standalone RAW open; NP3 and loose RAW drops on Compare/editor get a hint; the phone banner) and `lib/editor-app.js` (the editor pages; RAW by picker/zone/page drop, NP3 import, `?np3=` at start, a JPEG gets a hint; loads `mobile.js` on the mobile page). Pages: `picture-control-jpg-fit.html` (the old index.html without `#drop`/`#file`/`#import`, + `#phone-banner`), `picture-control-editor.html` (the editor column layout, `css/common.css` + its own layout CSS — the duplicate rules removed, pixel-identical screenshot), `picture-control-editor-mobile.html` (the mobile branch page without Start/Compare/More/`#to-start`), `index.html` (the landing: two links + the legacy `?np3=` forward, no heavy assets). `transfer.js`: the share link is `picture-control-editor.html?np3=` from every page (`shareLinkOf`), import optional, the mobile options (soft-disable, share-sheet export, clipboard fallback). `view-route.js` `PAGES` = the two editor pages, `canonical()` = the desktop editor page. The mobile branch (M0–M3) ported: `css/common.css` (+ the stage-6 mark rules), `css/mobile.css` (+ the curve head of stage 6, 40 px hit areas for the stage-6 marks and group resets), `mobile.js` (no Start), `touch.js`, `icons.js`, the shared-module hooks (panels/blending/grading double-tap merged with the stage-6 baseline resets, before/after long-press, the curve `chartSlot`), the Lucide license. Tests: level 8 → the wizard page (+ the wizard-page checks, the share link from step 3.1, a fresh page before the fit scenarios), new level **8e** (`test-level8e.mjs`: the editor criteria moved from level 8, the editor-page checks, the share link, the landing), new level **9m** (`test-mobile.mjs`: 9a–9d of the mobile branch on the new pages, no Start checks), 8b → the wizard page (race (a) moved to 8e criterion 9); the test server maps a directory URL to `index.html` and serves `.css`. Verified in headless Chromium.
 
 Tasks, in order:
 
@@ -322,6 +324,17 @@ Spec: [ui.md](ui.md) decision #10 (2026-11-20). Supersedes the strength-set part
 
 - Remove the "Save strength set" button and its i18n key (`index.html` / the wizard page, the editor pages, `mobile.html` if it has one), `exportSet` and its busy state in `transfer.js`, `web/lib/strength-set.js`, `web/make_strength_set_golden.py` and its golden files.
 - Tests: drop the strength-set level-1 checks and the byte-exact strength-set export of level 8b; add one check that no such control exists on any page. Single-NP3 export at a non-100% strength stays byte-exact against `strength.scaled`.
+
+### Stage 13. Compare as the hub: coverage, the pair strip, refit in place
+
+Spec: [ui.md](ui.md) decision #11 (2026-11-20). After stage 11 (it changes `fit-app.js`, `compare-view.js` and the wizard page).
+
+Tasks:
+
+- `compare-view.js`: the strip renders every pair as a tile (active = in the selected version; inactive = the rest: decoding / RAW only / preparing / prepared "Refit to include" / blocked), the × remove button, the drop button tile with the RAW picker, the whole strip as a RAW drop zone, an inactive tile as the JPEG drop/click target (the `start.js` card rules reused through `session.js` `canAttachTarget`/`pickTargetFile`), RAW thumbnails from the decoded frame, warning badges from the advice; the coverage block above Versions; the Refit / Cancel button and the fit-count line at the bottom of the side panel.
+- `fit-app.js`: `enterMore`/`#more` and the More/Start exits removed; `runRefit` stays on Compare (no step change), auto-preparation and `requestFrames` run on Compare; removing the selected pair selects the next usable one; a RAW dropped on the page on Compare goes to the strip. `more-view.js` keeps `computeAdvice` (pure) and loses its DOM part; the coverage/suggestion rendering moves to a small `coverage-view.js` used by Compare.
+- The wizard page: remove `#more`, `#cmp-more`, `#cmp-start`, `#to-compare`, `#ed-to-more`, the editor's `#to-start`; add `#cmp-coverage`, `#cmp-refit`, `#cmp-refit-count`, `#cmp-add` (the drop button) and the strip's file inputs.
+- Tests: level 8 (the stage-7 More section becomes the Compare-strip section: drop a RAW on the strip, the inactive tile, the JPEG on the tile, "Refit to include", × removal, the refit staying on Compare as `_r1`, the coverage table above Versions, no More/Start buttons), level 8b (the More flow → the strip), `web-tests.md`.
 
 ## 5. Delivery milestones
 

@@ -1,0 +1,289 @@
+/* Layout of web/mobile.html (spec/ui-mobile.md): portrait phone — top bar, viewer, one-tool
+   panel, icon tool bar; the info sheet, the Reset confirmation and the toasts; M3: the curve overlay,
+   the blender and grading sizes, the modified dots and the landscape layout (end of the file).
+   Linked after css/common.css. Rules that must beat the style elements the editors inject into
+   <head> (blending.js, grading.js, curve-editor.js) use id selectors. */
+
+html, body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: none;
+  font-size: 14px; -webkit-text-size-adjust: 100%; }
+body { display: flex; flex-direction: column; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+svg { display: block; }
+
+/* ---------- step visibility ---------- */
+#start { display: none; }
+body.step-start #start { display: block; }
+body.step-start #topbar, body.step-start #view, body.step-start #panel,
+body.step-start #toolbar, body.step-start #toasts { display: none; }
+
+/* ---------- top bar ---------- */
+#topbar { flex: none; height: calc(48px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) calc(4px + env(safe-area-inset-right)) 0 calc(4px + env(safe-area-inset-left));
+  display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
+#topbar .grp-l, #topbar .grp-r { display: flex; gap: 4px; }
+.ibtn { position: relative; width: 44px; height: 44px; padding: 0; display: grid; place-items: center;
+  background: var(--panel); border: 0; border-radius: 10px; color: var(--text); }
+.ibtn svg { width: 22px; height: 22px; }
+.ibtn:hover { border: 0; }
+.ibtn[aria-disabled="true"] { opacity: .45; }
+#add { background: none; }
+#add .plus { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: #1e1e1e; }
+#add .plus svg { width: 22px; height: 22px; }
+#info-btn .dot { position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); }
+
+/* ---------- viewer ---------- */
+#view { position: relative; flex: 1 1 0; min-height: 0; background: #000; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+#c { display: block; max-width: 100%; max-height: 100%; background: #000;
+  /* touch and hold = before/after: no panning, no system "save image" menu, no text selection */
+  touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+#c[hidden] { display: none; }
+#ba-slot { position: absolute; top: 8px; left: 8px; pointer-events: none; }
+.ba-label { display: inline-block; font-size: 12px; color: var(--text); background: rgba(0, 0, 0, .55);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+#c[hidden] ~ #ba-slot { display: none; }
+/* the curve chart over the photo (M3): a square, centered; its side is set by mobile.js (--side) */
+#curve-chart { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
+#curve-chart[hidden] { display: none; }
+#curve-chart .ce-svg { width: var(--side, 280px); height: var(--side, 280px); margin: 0; pointer-events: auto;
+  touch-action: none; background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 4px;
+  box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+#curve-chart .ce-bg { fill: transparent; stroke: rgba(255, 255, 255, .35); }
+#curve-chart .ce-id { stroke: rgba(255, 255, 255, .45); }
+#curve-chart .ce-pt { fill: #1e1e1e; stroke: var(--accent); stroke-width: 2px; }
+#curve-chart .ce-pt.sel { fill: var(--accent); }
+#empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; background: none; border: 0; border-radius: 0; color: var(--dim);
+  font-size: 15px; padding: 24px; }
+#empty svg { width: 48px; height: 48px; }
+#c:not([hidden]) ~ #empty { display: none; }
+
+/* ---------- tool panel: one group at a time, fixed height ---------- */
+#panel { flex: none; height: clamp(200px, 38dvh, 360px); display: flex; flex-direction: column;
+  background: var(--panel); border-top: 1px solid var(--line); padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+#panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 12px 12px; }
+#panel-foot { display: none; }
+details.grp { display: none; border-top: 0; padding: 0; }
+details.grp.active { display: block; }
+details.grp > summary { display: none; }
+#panel input[type="text"], #fit-name { font-size: 16px; min-height: 44px; }
+#p-name { width: 100%; margin: 2px 0; }
+
+/* ---------- slider rows (the common row of spec/ui-mobile.md; the same for Basic, Details,
+   Profile Strength, Blender and Grading) ---------- */
+/* pan-y on the row: a vertical swipe scrolls the panel, horizontal moves stay with the page (the
+   drag handler of touch.js gets them); it also rules out double-tap zoom, like `manipulation` */
+.ctl { min-height: 52px; margin: 0; padding: 4px 0; display: flex; flex-direction: column;
+  justify-content: center; touch-action: pan-y; }
+.ctl .top { align-items: center; }
+.ctl .lbl { font-size: 14px; }
+/* the number field: 16 px (a smaller font makes iOS zoom the page on focus), a finger-sized box */
+.ctl .val { width: 64px; min-height: 32px; padding: 2px 6px; font-size: 16px; border-radius: 6px; }
+.ctl .val:focus { background: #2c2c2c; }
+/* the range: a 32 px strip is the hit area, a 4 px track, a 22 px thumb. Its native touch handling
+   jumps the value on touchstart (checked in Chromium), so the input only draws: the row drives it
+   through horizontalDrag() of touch.js (a vertical swipe never changes a value, a tap does not
+   jump it) */
+input[type="range"] { height: 32px; margin: 0; touch-action: pan-y; pointer-events: none; }
+input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9px; }
+input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; }
+
+/* ---------- tool bar ---------- */
+#toolbar { flex: none; height: calc(60px + env(safe-area-inset-bottom)); display: flex;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: none;
+  background: var(--panel); border-top: 1px solid var(--line); }
+#toolbar::-webkit-scrollbar { display: none; }
+#tools { display: flex; flex: 6 0 auto; }
+.tool { position: relative; flex: 1 0 55px; min-width: 55px; height: 60px; padding: 0; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none;
+  border: 0; border-radius: 0; color: var(--dim); font-size: 11px; line-height: 1.2;
+  scroll-snap-align: center; }
+#reset-btn { flex: 1 0 55px; }
+.tool:hover { border: 0; }
+.tool svg { width: 22px; height: 22px; }
+.tool[aria-selected="true"] { color: var(--accent); }
+.tool[aria-selected="true"]::after { content: ""; position: absolute; left: 10px; right: 10px;
+  bottom: 0; height: 2px; background: var(--accent); }
+.tool .mdot { position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--accent); }
+.tool .mdot[hidden] { display: none; }
+#toolbar .divider { flex: none; width: 1px; margin: 12px 0; background: var(--line); }
+
+/* ---------- toasts ---------- */
+#toasts { position: fixed; left: 0; right: 0; z-index: 5; display: flex; flex-direction: column;
+  align-items: center; gap: 6px; padding: 0 12px; pointer-events: none;
+  bottom: calc(60px + env(safe-area-inset-bottom) + 8px); }
+.toast { pointer-events: auto; max-width: min(100%, 420px); text-align: center; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; color: var(--text);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  overflow-wrap: anywhere; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); }
+.toast.error { border-color: var(--bad); }
+
+/* ---------- dialogs ---------- */
+dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 0; }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog:not([open]) { display: none; }
+
+#sheet { position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; height: auto;
+  max-height: 85vh; max-height: 85dvh; border-width: 1px 0 0; border-radius: 12px 12px 0 0; overflow: hidden; }
+#sheet.fb { z-index: 20; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6); }   /* no showModal(): a scrim by shadow */
+.sheet-body { max-height: 85vh; max-height: 85dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+.handle { position: sticky; top: 0; z-index: 1; height: 24px; display: flex; justify-content: center;
+  align-items: center; background: var(--panel); touch-action: none; }
+.handle::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--line); }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.sheet-head h1 { margin: 0; font-size: 16px; }
+.sheet-head .ibtn { background: #2c2c2c; }
+#sheet .wide { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: center;
+  gap: 6px; margin: 4px 0; }
+#sheet .wide svg { width: 18px; height: 18px; flex: none; }
+#sheet dl { margin: 10px 0 6px; }
+#sheet .hint { margin: 8px 0; }
+#sheet .hint div { margin-top: 4px; }
+#warn, #status { overflow-wrap: anywhere; }
+#clip-box { margin: 8px 0; }
+#clip-box[hidden] { display: none; }
+#clip-link { width: 100%; min-height: 44px; font-size: 16px; }
+#source-link { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 8px;
+  color: var(--dim); text-decoration: underline; text-underline-offset: 3px; }
+#source-link svg { width: 16px; height: 16px; flex: none; }
+
+#confirm-reset { position: fixed; inset: 0; margin: auto; width: min(320px, calc(100vw - 32px));
+  height: fit-content; border-radius: 12px; }
+.confirm-body { padding: 18px 16px 16px; }
+.confirm-body h1 { font-size: 16px; margin: 0 0 8px; }
+.confirm-body p { margin: 0 0 16px; color: var(--dim); }
+.confirm-btns { display: flex; gap: 8px; }
+.confirm-btns button { flex: 1; min-height: 44px; font-size: 15px; }
+.confirm-btns .danger { color: var(--bad); }
+
+/* ---------- Start screen ---------- */
+#start { height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+body.step-start #start { display: block; }
+.start-col { max-width: 780px; margin: 0 auto; padding: 16px 16px 48px; }
+#start-details { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; }
+#start-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer;
+  color: var(--accent); font-weight: 600; }
+#start-details[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+#start-details h2:first-of-type { margin-top: 8px; }
+.zones { grid-template-columns: 1fr; }
+.zone { min-height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#pairs button, .pair-inc { min-height: 44px; }
+#pairs button { padding: 0 16px; }
+.pair-inc-box { width: 22px; height: 22px; }
+#fit { min-height: 48px; font-size: 15px; }
+
+/* the no-WebGL screen must fit 360 px */
+#nogl p { overflow-wrap: anywhere; }
+
+/* ---------- tools (M3) ---------- */
+/* the toggles and tab rows of Blender and Grading: 40 px high */
+#panel .tgl button, #panel .tabbtn { min-height: 40px; font-size: 14px; }
+#panel .tgl { margin: 2px 0; }
+#panel .tabbtn { padding: 0 10px; min-width: 44px; }
+.bl-tabs, .gr-adjust { gap: 4px; }
+
+/* Curve: the toggle row with Done, finger-sized fields, the 20-point limit goes to a toast */
+#curve-slot { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
+#curve-slot > * { flex: 0 0 100%; }
+/* the toggle sits in .ce-head with the curve's changed mark (stage 6 of the fitting flow) */
+#curve-slot > .ce-head { flex: 1 1 0; }
+#curve-slot .ce-toggle { min-height: 44px; margin: 0; font-size: 15px; }
+#curve-slot .ce-toggle input { width: 22px; height: 22px; margin: 0 4px 0 0; }
+#curve-slot > .ce-done { flex: 0 0 auto; min-height: 44px; padding: 0 14px; display: flex; align-items: center;
+  gap: 6px; font-size: 15px; }
+#curve-slot > .ce-done svg { width: 18px; height: 18px; }
+#curve-slot .ce-ctl { gap: 10px; }
+#curve-slot .ce-ctl label { font-size: 14px; }
+#curve-slot .ce-ctl input[type="number"] { width: 72px; min-height: 40px; font-size: 16px; padding: 2px 6px;
+  border-color: var(--line); color: var(--text); }
+#curve-slot .ce-del { min-height: 44px; padding: 0 4px; font-size: 14px; }
+#curve-slot .ce-limit { display: none; }
+
+/* Blender, Color mode: 8 dots, 28 px visible in a 40 px hit area, evenly spread; the selected one has a
+   2 px accent ring. The fill is the inline background of the button, clipped to the 28 px content box. */
+#blending-slot .bl-dots { justify-content: space-between; gap: 0; margin: 6px 0 2px; }
+#blending-slot .bl-dot { position: relative; flex: none; width: 40px; height: 40px; border: 6px solid transparent;
+  background-clip: content-box !important; border-radius: 50%; outline: 0; }   /* beats the inline `background` shorthand */
+#blending-slot .bl-dot.sel { outline: 0; }
+#blending-slot .bl-dot.sel::after { content: ""; position: absolute; inset: -4px; border: 2px solid var(--accent);
+  border-radius: 50%; }
+#blending-slot .bl-cname { font-size: 13px; margin: 0 0 2px; }
+
+/* Grading, Color mode: the wheel is min(200px, 55%) of the panel width; the disc does not scroll the panel */
+#grading-slot .gr-wheel { width: min(200px, 55%); margin: 6px auto 0; }
+#grading-slot .gr-disc { width: 100%; height: auto; aspect-ratio: 1; touch-action: none; cursor: default; }
+#grading-slot .gr-dot { width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+#grading-slot .gr-nums { gap: 12px; margin: 8px 0 2px; }
+#grading-slot .gr-nums label { font-size: 14px; }
+#grading-slot .gr-nums input.val { width: 72px; min-height: 40px; font-size: 16px; padding: 2px 6px; }
+
+/* ---------- landscape phone (M3): viewer | tool panel + icon tool bar ---------- */
+@media (orientation: landscape) {
+  body:not(.step-start) { display: grid; grid-template-columns: minmax(0, 1fr) min(360px, 42vw);
+    grid-template-rows: auto minmax(0, 1fr) auto; }
+  #topbar { grid-column: 1 / -1; grid-row: 1; height: calc(44px + env(safe-area-inset-top)); }
+  #view { grid-column: 1; grid-row: 2 / 4; padding-left: env(safe-area-inset-left); }
+  #panel { grid-column: 2; grid-row: 2; height: auto; min-height: 0; padding-left: 0; border-left: 1px solid var(--line); }
+  #toolbar { grid-column: 2; grid-row: 3; height: auto; display: grid; grid-template-columns: repeat(4, 1fr);
+    padding-left: 0; overflow: visible; border-left: 1px solid var(--line); }
+  #tools { display: contents; }
+  #toolbar .divider { display: none; }
+  .tool { flex: none; min-width: 0; width: auto; height: 44px; }
+  #reset-btn { flex: none; }
+  .tool .lbl { display: none; }                       /* icon only; the name stays in aria-label */
+  .tool .mdot { bottom: auto; top: 8px; left: calc(50% + 10px); margin-left: 0; }
+  .tool[aria-selected="true"]::after { left: 14px; right: 14px; }
+  #toasts { right: min(360px, 42vw); bottom: 8px; }
+  #sheet { width: min(600px, 100%); margin: 0 auto; }
+}
+
+/* ---------- Comparison / More frames (fitting flow, stages 4/7): a plain column ----------
+   The core needs the markup on this page; a designed mobile layout of these steps is an open
+   question of spec/ui-mobile.md. Placed last so it also overrides the landscape grid. */
+#compare, #more { display: none; }
+body.step-compare, body.step-more { display: block; }
+body.step-compare #topbar, body.step-compare #view, body.step-compare #panel,
+body.step-compare #toolbar, body.step-compare #toasts,
+body.step-more #topbar, body.step-more #view, body.step-more #panel,
+body.step-more #toolbar, body.step-more #toasts { display: none; }
+body.step-compare #compare, body.step-more #more { display: block; height: 100vh; height: 100dvh;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+           calc(16px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
+#cmp-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.cmp-th { position: relative; border: 2px solid var(--line); border-radius: 4px; line-height: 0; background: #000; }
+.cmp-th.selected { border-color: var(--accent); }
+.cmp-th.blocked { opacity: .55; }
+.cmp-th-badge { position: absolute; left: 0; right: 0; bottom: 0; line-height: 1.2; text-align: center;
+  font-size: 10px; color: #fff; background: rgba(160, 40, 30, .85); padding: 1px 0; }
+#cmp-bar { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+#cmp-bar button, #cmp-sidepanel button, #more button, #to-compare { min-height: 44px; width: 100%; }
+#cmp-strength-box { display: flex; align-items: center; gap: 8px; }
+#cmp-strength-box input[type="range"] { flex: 1; }
+#cmp-box { position: relative; height: 55vh; height: 55dvh; background: #000;
+  border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+#cc { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#cmp-sidepanel { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+#cmp-versions button { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+#cmp-versions button.active { border-color: var(--accent); }
+.cmp-v-badge { color: var(--dim); font-size: 11px; }
+#to-compare { margin-top: 6px; }
+#cmp-strength { pointer-events: auto; touch-action: auto; }   /* outside the tool panel: a native range */
+
+/* The changed-field marks and the group resets (stage 6 of the fitting flow, web/lib/mark.js)
+   came after M3: on the phone they keep their look (an 8 px dot, the reset glyph) but get a
+   40 px hit area; negative margins keep the rows as they were. */
+#panel button.mark { position: relative; width: 40px; height: 40px; min-width: 40px; margin: -16px -14px;
+  background: transparent; border-radius: 0; }
+#panel button.mark::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px;
+  margin: -4px 0 0 -4px; border-radius: 50%; background: var(--accent); }
+#panel button.grp-reset { min-width: 40px; min-height: 40px; margin: -11px -8px; font-size: 16px; }
+/* the curve's mark is the last item of its row: no overhang to the right */
+#panel .ce-head button.mark { margin: -16px 0 -16px -14px; }

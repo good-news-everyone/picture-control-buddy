@@ -37,7 +37,7 @@ const NODE_LEVELS = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", 
 const PAGE_LEVELS = ["2", "2a", "1a", "6", "7"];   // web/test.html sections (the 1a entry is the browser-side decoding-rejection check)
 // the canonical output order of the level reports (identical to the old sequential runner)
 const ORDER = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "9", "4", "5",
-               "2", "2a", "1ab", "6", "7", "1c", "8", "8b"];
+               "2", "2a", "1ab", "6", "7", "1c", "8", "8b", "8e", "9m"];
 const PAGE_KEY = { "1a": "1ab" };                  // the browser-side 1a checks report under their own key
 
 let failed = 0;
@@ -101,16 +101,18 @@ const nodeDone = nodeSelected.length
 
 // ---------- the browser levels: concurrent pages of one Firefox ----------
 let browserDone = Promise.resolve();
-if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8b")) {
+if (PAGE_LEVELS.some(selected) || ["1c", "8", "8b", "8e", "9m"].some(selected)) {
   const MIME = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
     ".json": "application/json", ".wasm": "application/wasm", ".png": "image/png",
     ".f32": "application/octet-stream", ".bin": "application/octet-stream",
     ".nef": "application/octet-stream", ".dng": "application/octet-stream",
+    ".css": "text/css",
   };
   const server = http.createServer(async (req, res) => {
     try {
-      const url = decodeURIComponent(new URL(req.url, "http://x").pathname);
+      let url = decodeURIComponent(new URL(req.url, "http://x").pathname);
+      if (url.endsWith("/")) url += "index.html";       // a directory URL is its index page (the landing)
       const rel = path.normalize(url).replace(/^([/\\])+/, "");
       const file = path.join(ROOT, rel);
       if (!file.startsWith(ROOT)) throw new Error("path");
@@ -256,7 +258,7 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8
     finish(key, (Date.now() - t0) / 1000);
   };
 
-  // level 8: the end-to-end UI flow on web/index.html — one sequential page flow
+  // level 8: the end-to-end UI flow of the fitting wizard (picture-control-jpg-fit.html)
   const runLevel8Task = async () => {
     const t0 = Date.now();
     try {
@@ -282,12 +284,41 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8
     finish("8b", (Date.now() - t0) / 1000);
   };
 
+  // level 8e: the profile editor page (picture-control-editor.html) and the landing
+  const runLevel8eTask = async () => {
+    const t0 = Date.now();
+    try {
+      const { runLevel8e } = await import("./test-level8e.mjs");
+      const { report, skip } = reporter("8e");
+      await runLevel8e({ browser: { newPage }, port, report, skip });
+    } catch (e) {
+      reporter("8e").report(false, `8e: ${e.stack || e.message}`);
+    }
+    finish("8e", (Date.now() - t0) / 1000);
+  };
+
+  // level 9m: the mobile levels 9a-9d on the editor pages (they need the real browser object:
+  // isolated contexts, the touchscreen)
+  const runMobileTask = async () => {
+    const t0 = Date.now();
+    try {
+      const { runMobileLevels } = await import("./test-mobile.mjs");
+      const { report, skip } = reporter("9m");
+      await runMobileLevels({ browser, port, report, skip });
+    } catch (e) {
+      reporter("9m").report(false, `9m: ${e.stack || e.message}`);
+    }
+    finish("9m", (Date.now() - t0) / 1000);
+  };
+
   // level 8 first: it is the longest, it overlaps the shader pages (its fits are
   // CPU-side page Workers, the shader levels are GPU-bound); the cap of 4 pages
   // bounds the GPU/RAM contention on this 16-core/30 GB machine
   const tasks = [];
   if (selected("8")) tasks.push(runLevel8Task);
   if (selected("8b")) tasks.push(runLevel8bTask);
+  if (selected("8e")) tasks.push(runLevel8eTask);
+  if (selected("9m")) tasks.push(runMobileTask);
   for (const l of PAGE_LEVELS) if (selected(l)) tasks.push(() => runTestPage(l));
   if (selected("1c")) tasks.push(runTargetCheck);
   browserDone = (async () => {
