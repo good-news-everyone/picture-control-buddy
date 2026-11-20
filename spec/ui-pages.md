@@ -18,7 +18,7 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 - Everything of [ui.md](ui.md): the RAW-first pair cards (decision #7), Compare (decision #8), the manual adjustment step 3.1 with the fitted baseline, the report beside it and the leave warning, More frames, refit, versions, strength, Save NP3 (no strength set — [ui.md](ui.md) decision #10).
 - Step 3.1 stays inside the wizard. It is not the profile editor page: it edits a fitted version against its targets (report, reset to the fitted version, back to refitting). There is no "Open in the editor" hand-off; a user who wants the standalone editor saves the NP3 and imports it there.
 - **No NP3 import** in the wizard: profiles enter it only through a fit. The page-level drop router accepts only RAW files (cards) and JPEGs dropped on a card.
-- **Share link** in step 3.1 is optional; if present it builds the editor link (`picture-control-editor.html?np3=…`, see "Share links"), never a wizard link — the wizard has no URL state.
+- **Share link** stays in step 3.1 (decided 2026-11-20): it copies the editor link `picture-control-editor.html?np3=…` with the current profile (see "Share links"), never a wizard link — the wizard has no URL state. The link opens the profile in the standalone editor; the pairs, versions and report are not part of it.
 - **Desktop only.** No mobile layout, no router. On a phone (the router's auto rule: `pointer: coarse` and the short screen side < 600 px) the page opens as is with a non-blocking banner: "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory." The banner can be closed; nothing is stored.
 
 ## Profile editor (`picture-control-editor.html` / `-mobile.html`)
@@ -45,7 +45,7 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 ## Landing (`index.html`)
 
-To be discussed. Until then: a minimal page with the title, two links ("Fit a profile to JPEGs" → the wizard, "Edit an NP3 profile" → the editor) and the legacy `?np3=` forward. No model download, no WASM, no workers on this page.
+Decided 2026-11-20: for now only the title and two links — "Fit a profile to JPEGs" → `picture-control-jpg-fit.html`, "Edit an NP3 profile" → `picture-control-editor.html`. Plus the invisible legacy `?np3=` forward above (no UI). No model download, no WASM, no workers on this page. A richer landing may come later.
 
 ## Code structure
 
@@ -74,5 +74,5 @@ See [ui-plan.md](ui-plan.md) stage 11. In short: split `app.js` into the editor 
 
 ## Open questions
 
-1. Landing content and design (to be discussed).
-2. Whether the wizard's step 3.1 keeps "Share link" at all, or only Save NP3.
+1. ~~Landing content~~ For now two links only (2026-11-20); a richer design later.
+2. ~~Whether the wizard's step 3.1 keeps "Share link"~~ Resolved 2026-11-20: it stays and leads to the editor.
