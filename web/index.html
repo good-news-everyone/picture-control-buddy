@@ -11,15 +11,22 @@
       location.replace("picture-control-editor.html" + location.search + location.hash);
   })();
 </script>
-<!-- Russian is shown when chosen before ("lang" in localStorage) or, with no choice yet, when the
-     browser prefers it. The page stays hidden until the module below has applied the language,
-     so a Russian visitor never sees the English text flash first. -->
+<!-- A translation (ru / de / fr) is shown when chosen before ("lang" in localStorage) or, with no
+     choice yet, when it is the browser's first known preference. The page stays hidden until the
+     module below has applied it, so the English text never flashes first. -->
 <script>
   (function () {
     var stored = null;
     try { stored = localStorage.getItem("lang"); } catch (e) { /* no storage: English */ }
-    var ru = stored ? stored === "ru" : /^ru\b/i.test(navigator.language || "");
-    if (ru) {
+    var known = ["ru", "de", "fr"], pick = stored;
+    if (!stored) {
+      var prefs = navigator.languages || [navigator.language || ""];
+      for (var i = 0; i < prefs.length && !pick; i++) {
+        var p = String(prefs[i]).slice(0, 2).toLowerCase();
+        if (p === "en" || known.indexOf(p) >= 0) pick = p;
+      }
+    }
+    if (known.indexOf(pick) >= 0) {
       document.documentElement.classList.add("i18n-pending");
       setTimeout(function () { document.documentElement.classList.remove("i18n-pending"); }, 1500);
     }
@@ -83,8 +90,6 @@ p { margin: 0; }
 .nav-links { display: flex; gap: 22px; margin-left: auto; align-items: center; }
 .nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 15px; }
 .nav-links a:hover { color: var(--ink); }
-.gh { display: inline-flex; align-items: center; gap: 7px; }
-.gh svg { width: 18px; height: 18px; }
 .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 999px; font: 600 16px var(--body);
   text-decoration: none; border: 1.5px solid transparent; cursor: pointer; transition: transform .15s, background .15s; }
 .btn:hover { transform: translateY(-1px); }
@@ -92,17 +97,28 @@ p { margin: 0; }
 .kofi { background: var(--accent); color: var(--accent-ink); }
 .nav-links a.kofi, .nav-links a.kofi:hover { color: var(--accent-ink); font-weight: 600; }
 .kofi svg { width: 18px; height: 18px; }
-.lang { display: inline-flex; border: 1.5px solid var(--line); border-radius: 999px; padding: 2px; }
-.lang button { border: 0; background: none; color: var(--muted); font: 600 13px var(--body); padding: 5px 10px; border-radius: 999px; cursor: pointer; }
-.lang button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.icon-btn { width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: transparent;
+  color: var(--ink); display: grid; place-items: center; cursor: pointer; transition: border-color .15s; }
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { border-color: var(--ink); }
+.icon-btn svg { width: 19px; height: 19px; }
+.nav-links a.icon-btn { color: var(--ink); }
+.langpick { position: relative; }
+.lang-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 168px; margin: 0; padding: 6px; list-style: none;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.lang-menu[hidden] { display: none; }
+.lang-menu button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 12px;
+  border: 0; border-radius: 9px; background: none; color: var(--ink); font: 500 15px var(--body); text-align: left; cursor: pointer; }
+.lang-menu button:hover, .lang-menu button:focus-visible { background: var(--paper); outline: none; }
+.lang-menu button[aria-checked="true"] { font-weight: 700; }
+.lang-menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent-text); }
 html.i18n-pending body { visibility: hidden; }
 @media (max-width: 820px) { .nav-links .hide-sm { display: none; } .nav-links { gap: 14px; } }
 .kofi { white-space: nowrap; }
-@media (max-width: 440px) { .logo { font-size: 0; gap: 0; } .logo svg { width: 34px; height: 34px; } .nav-links { gap: 10px; } .nav-links .kofi { padding: 8px 12px; font-size: 13px; gap: 6px; } }
+@media (max-width: 440px) { .logo { font-size: 0; gap: 0; } .logo svg { width: 34px; height: 34px; } .nav-links { gap: 10px; } .nav-links .kofi { padding: 8px 12px; font-size: 13px; gap: 6px; } .lang-menu { right: auto; left: 0; } }
 
 /* ---------- hero ---------- */
-.hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: center; padding: 40px 0 80px; }
-.hero h1 { font-size: clamp(46px, 7.2vw, 92px); line-height: .95; font-weight: 800; }
+.hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 56px; align-items: center; padding: 40px 0 80px; }
+.hero h1 { hyphens: auto; overflow-wrap: break-word; font-size: clamp(42px, 6.6vw, 92px); line-height: .95; font-weight: 800; }
 .photo-word { background-size: 320%; background-position: 4% 33%; -webkit-background-clip: text; background-clip: text; color: transparent;
   -webkit-text-fill-color: transparent; background-color: var(--accent); }
 .hero .lede { font-size: 20px; color: var(--muted); max-width: 30ch; margin-top: 24px; }
@@ -253,13 +269,19 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
       <a class="hide-sm" href="#copy" data-i18n="From your edits">From your edits</a>
       <a class="hide-sm" href="#editor" data-i18n="By hand">By hand</a>
       <a class="hide-sm" href="#faq" data-i18n="Questions">Questions</a>
-      <div class="lang" role="group" aria-label="Language" data-i18n-aria="Language">
-        <button type="button" data-lang="en" aria-pressed="true" lang="en">EN</button>
-        <button type="button" data-lang="ru" aria-pressed="false" lang="ru">RU</button>
+      <div class="langpick">
+        <button type="button" class="icon-btn" id="lang-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-menu" aria-label="Language" data-i18n-aria="Language">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></svg>
+        </button>
+        <ul class="lang-menu" id="lang-menu" role="menu" aria-labelledby="lang-btn" hidden>
+          <li role="none"><button type="button" role="menuitemradio" aria-checked="true" data-lang="en" lang="en">English</button></li>
+          <li role="none"><button type="button" role="menuitemradio" aria-checked="false" data-lang="ru" lang="ru">Русский</button></li>
+          <li role="none"><button type="button" role="menuitemradio" aria-checked="false" data-lang="de" lang="de">Deutsch</button></li>
+          <li role="none"><button type="button" role="menuitemradio" aria-checked="false" data-lang="fr" lang="fr">Français</button></li>
+        </ul>
       </div>
-      <a class="gh" href="https://github.com/good-news-everyone" aria-label="GitHub: good-news-everyone">
+      <a class="gh icon-btn" href="https://github.com/good-news-everyone" aria-label="GitHub: good-news-everyone">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span class="hide-sm">good-news-everyone</span>
       </a>
       <a class="btn btn-sm kofi" href="https://ko-fi.com/goodnewseveryone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M10 11.5c-.9-1-2.5-.6-2.5.8 0 1.2 2.5 2.7 2.5 2.7s2.5-1.5 2.5-2.7c0-1.4-1.6-1.8-2.5-.8Z" fill="currentColor" stroke="none"/></svg>
@@ -456,10 +478,15 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
 
 <script type="module">
   import { t, register, applyI18n, setLang, currentLang } from "./lib/i18n.js";
-  import RU from "./lib/i18n-landing-ru.js";
+  import DICT_RU from "./lib/i18n-landing-ru.js";
+  import DICT_DE from "./lib/i18n-landing-de.js";
+  import DICT_FR from "./lib/i18n-landing-fr.js";
 
-  // Russian exists on the landing only: the other pages register no dictionary and stay English.
-  register("ru", RU);
+  // The translations exist on the landing only: the other pages register no dictionary and stay English.
+  register("ru", DICT_RU);
+  register("de", DICT_DE);
+  register("fr", DICT_FR);
+  const LANGS = ["en", "ru", "de", "fr"];
 
   const src = (k) => `landing/${k}.jpg`;
   document.getElementById("photo-word").style.backgroundImage = `url(${src("DSC_6979-np3")})`;
@@ -527,20 +554,43 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
   });
 
   /* language: everything static goes through data-i18n*, the rest is re-rendered here */
+  const langBtn = document.getElementById("lang-btn"), langMenu = document.getElementById("lang-menu");
+  const langItems = [...langMenu.querySelectorAll("[data-lang]")];
   function refreshLang() {
     const lang = currentLang();
     document.documentElement.lang = lang;
-    document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+    langItems.forEach((b) => b.setAttribute("aria-checked", b.dataset.lang === lang));
     renderPair();
     labelCarousel();
   }
-  document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+  function openMenu(open, focusItem = false) {
+    langMenu.hidden = !open;
+    langBtn.setAttribute("aria-expanded", open);
+    if (open && focusItem) (langItems.find((b) => b.getAttribute("aria-checked") === "true") ?? langItems[0]).focus();
+  }
+  langBtn.addEventListener("click", () => openMenu(langMenu.hidden, true));
+  langItems.forEach((b) => b.addEventListener("click", () => {
     setLang(b.dataset.lang);
     refreshLang();
+    openMenu(false);
+    langBtn.focus();
   }));
+  langMenu.addEventListener("keydown", (e) => {
+    const i = langItems.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      langItems[(i + (e.key === "ArrowDown" ? 1 : langItems.length - 1)) % langItems.length].focus();
+    }
+    if (e.key === "Escape") { openMenu(false); langBtn.focus(); }
+  });
+  document.addEventListener("click", (e) => { if (!langMenu.hidden && !e.target.closest(".langpick")) openMenu(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !langMenu.hidden) { openMenu(false); langBtn.focus(); } });
+
   let stored = null;
   try { stored = localStorage.getItem("lang"); } catch (e) { /* no storage */ }
-  if (!stored && /^ru\b/i.test(navigator.language || "")) setLang("ru");
+  const preferred = stored ? null : (navigator.languages ?? [navigator.language ?? ""])
+    .map((l) => String(l).slice(0, 2).toLowerCase()).find((l) => LANGS.includes(l));
+  if (preferred && preferred !== "en") setLang(preferred);
   else applyI18n();
   refreshLang();
   sync();

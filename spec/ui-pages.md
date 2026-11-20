@@ -8,7 +8,7 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 | Page | Flow | Devices | Router |
 |---|---|---|---|
-| `web/index.html` | **Landing**: what the tools do, with real samples; leads to the wizard or the editor. English and Russian | any | forwards legacy `?np3=` links (below) |
+| `web/index.html` | **Landing**: what the tools do, with real samples; leads to the wizard or the editor. EN / RU / DE / FR | any | forwards legacy `?np3=` links (below) |
 | `web/picture-control-jpg-fit.html` | **Fitting wizard**: [ui.md](ui.md) steps 1 → 2 → 3.1 → 3.2 (Start, Compare, manual adjustment with the report, More frames), versions, NP3 export | desktop only | none |
 | `web/picture-control-editor.html` | **Profile editor, desktop**: open a RAW, import/edit/export/share an NP3 | desktop, laptop, tablet | `view-route.js` → mobile on phones |
 | `web/picture-control-editor-mobile.html` | **Profile editor, mobile**: the same editor in the [ui-mobile.md](ui-mobile.md) layout | phones | `view-route.js` → desktop elsewhere |
@@ -59,11 +59,13 @@ for photographers, not engineers: plain words, few of them.
   must be converted to DNG without JPEG XL first.
 - **Samples:** `web/landing/` (600×900 frames, editor screenshots). They come from one wizard fit
   ("SA") over 8 NEF + Lightroom JPEG pairs; the per-frame dE2000 is a constant in the page.
-- **Languages:** English and Russian, on this page only. The strings go through `lib/i18n.js`
-  (`data-i18n`, `data-i18n-aria`, `data-i18n-alt`, `t()`); the Russian dictionary is
-  `lib/i18n-landing-ru.js`, registered by the landing alone, so the app pages stay English. An
-  EN / RU switch in the header stores `lang`; with no stored choice a browser preferring Russian gets
-  Russian. The page is hidden until the language is applied (no English flash).
+- **Languages:** English, Russian, German and French, on this page only. The strings go through
+  `lib/i18n.js` (`data-i18n`, `data-i18n-aria`, `data-i18n-alt`, `t()`); the dictionaries
+  `lib/i18n-landing-{ru,de,fr}.js` (one key set) are registered by the landing alone, so the app
+  pages stay English. A globe button next to the GitHub icon opens the language menu (endonyms,
+  the current one checked); the choice is stored as `lang`. With no stored choice the browser's
+  first known preference (`navigator.languages`) wins. The page is hidden until the language is
+  applied (no English flash). Numbers follow the language (2.1 / 2,1).
 - **Weight:** no model download, no WASM, no workers, no third-party requests (system fonts only).
 - The invisible legacy `?np3=` forward above runs first, before anything renders.
 
