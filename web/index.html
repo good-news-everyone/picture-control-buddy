@@ -286,7 +286,7 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
       <a class="gh icon-btn" href="https://github.com/good-news-everyone" aria-label="GitHub: good-news-everyone">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
-      <a class="btn btn-sm kofi" href="https://ko-fi.com/goodnewseveryone">
+      <a class="btn btn-sm kofi" data-donate href="https://ko-fi.com/goodnewseveryone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M10 11.5c-.9-1-2.5-.6-2.5.8 0 1.2 2.5 2.7 2.5 2.7s2.5-1.5 2.5-2.7c0-1.4-1.6-1.8-2.5-.8Z" fill="currentColor" stroke="none"/></svg>
         <span data-i18n="Buy me a Ko-fi">Buy me a Ko-fi</span>
       </a>
@@ -465,7 +465,7 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         <div><b>github.com/good-news-everyone</b><span data-i18n="Source code, issues and ideas">Source code, issues and ideas</span></div>
       </a>
-      <a class="btn kofi" href="https://ko-fi.com/goodnewseveryone">
+      <a class="btn kofi" data-donate href="https://ko-fi.com/goodnewseveryone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M10 11.5c-.9-1-2.5-.6-2.5.8 0 1.2 2.5 2.7 2.5 2.7s2.5-1.5 2.5-2.7c0-1.4-1.6-1.8-2.5-.8Z" fill="currentColor" stroke="none"/></svg>
         <span data-i18n="Buy me a Ko-fi">Buy me a Ko-fi</span>
       </a>
@@ -490,6 +490,8 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
   register("de", DICT_DE);
   register("fr", DICT_FR);
   const LANGS = ["en", "ru", "de", "fr"];
+  // The donation link follows the language: CloudTips for Russian, Ko-fi for everyone else.
+  const DONATE = { ru: "https://pay.cloudtips.ru/p/23c5ef9e" }, DONATE_DEFAULT = "https://ko-fi.com/goodnewseveryone";
 
   const src = (k) => `landing/${k}.jpg`;
   document.getElementById("photo-word").style.backgroundImage = `url(${src("DSC_6979-np3")})`;
@@ -563,6 +565,7 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
     const lang = currentLang();
     document.documentElement.lang = lang;
     langItems.forEach((b) => b.setAttribute("aria-checked", b.dataset.lang === lang));
+    document.querySelectorAll("[data-donate]").forEach((a) => { a.href = DONATE[lang] ?? DONATE_DEFAULT; });
     renderPair();
     labelCarousel();
   }

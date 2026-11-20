@@ -103,7 +103,7 @@ export default {
   "White chimney": "Белая труба",
   "Will it match my edit exactly?": "Результат совпадёт с моей обработкой один в один?",
   "Works in your browser": "Работает в браузере",
-  "Yes, and the code is open (MIT licence). If it saves you an evening of editing, you can buy me a coffee on Ko-fi.": "Да, и код открыт (лицензия MIT). Если инструмент сэкономил тебе вечер обработки, можешь угостить меня кофе на Ko-fi.",
+  "Yes, and the code is open (MIT licence). If it saves you an evening of editing, you can buy me a coffee on Ko-fi.": "Да, и код открыт (лицензия MIT). Если инструмент сэкономил тебе вечер обработки, можешь угостить меня кофе.",
   "You have a few favourite edits from Lightroom, Snapseed or anywhere else. Give the tool the NEF and the edited JPEG side by side, and it works out a picture control that makes the camera do the same thing.": "У тебя есть любимые обработки из Lightroom, Snapseed или откуда угодно? Дай инструменту NEF и обработанный JPEG — он подберёт Picture Control, с которым камера будет делать то же самое.",
   "Your look": "Твой лук",
   "Your photos never leave your computer": "Фото не покидают твой компьютер",
