@@ -1,26 +1,29 @@
 // The fitting wizard (spec/ui.md steps 1 -> 2 -> 3.1 -> 3.2, spec/ui-pages.md): the entry of
 // picture-control-jpg-fit.html. The session shell (spec/ui-plan.md §3) around the editor core
 // (lib/editor-core.js): RAW-first pair cards, preparation, the fit/refit Workers, Compare, the
-// report, More frames and the versions; the editor is step 3.1 — manual adjustment of the
+// report, the coverage advice and the versions; the editor is step 3.1 — manual adjustment of the
 // selected fitted version (reset/marks against it, the leave warning). No NP3 import here:
 // profiles enter the wizard only through a fit; Save NP3 and the share link stay (the link
 // opens the profile editor page).
-// State by contract: the session fields — step (start | compare | edit | more; "edit" is the
+// Since stage 13 (spec/ui.md decision #11) Compare is the hub after the first fit: more pairs,
+// removal, the coverage and the refit live there; starting over is a page reload.
+// State by contract: the session fields — step (start | compare | edit; "edit" is the
 // manual adjustment step 3.1 — the name predates the full flow and stays for the tests),
 // pairs: [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }] (RAW first, decision #7),
-// selectedPairId, versions: [{ id, name, control, parentId, kind, pairIds, fitVector, … }],
-// selectedVersionId, fitting, profileName (the fit's NP3 name), advice, reportAggregate —
+// selectedPairId, versions: [the current profile { id, name, control, parentId, kind,
+// pairIds, fitVector, … }] — one entry since decision #12 (no version history in the UI; a
+// refit replaces it, the id changes: draft, r1, r2, …), selectedVersionId, fitting, profileName (the fit's NP3 name), advice, reportAggregate —
 // plus the editor state of the core. Compare (step 2) reuses the editor's strength — it lives
 // in the session and survives step changes.
 // Ownership: this file orchestrates; web/lib/session.js — pure pair/name rules,
 // web/lib/start.js — the Start screen, web/lib/compare-view.js — the Comparison screen,
-// web/lib/report-view.js — the report, web/lib/more-view.js — More frames.
+// web/lib/report-view.js — the report, web/lib/coverage-view.js — the color-coverage advice.
 import { t } from "./i18n.js";
 import { createEditorCore, $, rawErrorText } from "./editor-core.js";
 import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
-import { createMore, computeAdvice, frameOf } from "./more-view.js";
+import { computeAdvice, frameOf } from "./coverage-view.js";
 import { viewRemap, applyRemap } from "./pair-prepare.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
@@ -32,17 +35,17 @@ import { scaled } from "./strength.js";
 // ---------- the editor core + the session ----------
 const core = await createEditorCore({
   extraState: {
-    step: "start",              // start | compare | edit (manual adjustment) | more (step 3.2)
+    step: "start",              // start | compare | edit (manual adjustment, step 3.1)
     pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }]
     selectedPairId: null,
     versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
     selectedVersionId: null,
-    advice: null,               // stage 7: computeAdvice() over the frame records (more-view.js)
+    advice: null,               // computeAdvice() over the frame records (coverage-view.js)
     reportAggregate: null,      // the aggregate report over the pairs (spec §3)
     fitting: false,             // a fit runs in the fit Worker (progress in the status line)
     profileName: "",            // the NP3 name for the fit: 1–19 ASCII (the np3.serialize rule)
   },
-  statusIds: ["start-status", "more-status"],
+  statusIds: ["start-status", "cmp-status"],
   hooks: {
     onFinishedEdit: () => requestManualReport(),
     // the LUT is ready: the Compare screen re-requests its render side, the editor redraws
@@ -152,12 +155,6 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
 const compareView = createCompare({ state,
   renderSide: renderCompareSide,
   onPairSelected: () => reportView.refresh(),   // the report follows the pair (stage 5B)
-  onVersionSelected: (v) => {
-    // the manual editor's baseline becomes the selected version (stage 6): the control is
-    // reloaded, the edit history restarts, the marks follow the new baseline
-    setBaseline(v);
-    requestReport();                      // the report re-runs on every version change (spec/ui.md step 2)
-  },
   onStrength: (v) => {
     state.strength = v;                   // the session strength — kept across the steps
     panel.refresh();                      // the editor slider shows the same value
@@ -168,8 +165,16 @@ const compareView = createCompare({ state,
     const p = state.pairs.find((q) => q.id === state.selectedPairId);
     if (p) enterEditor(p);                // step 3.1 with the selected version as the baseline
   },
-  onMore: () => enterMore(),             // step 3.2 (stage 7)
-  onStart: () => showStart(),
+  // the pair strip and the refit (decision #11)
+  onAddRaws: (files) => { for (const f of files) addRawFile(f); },
+  onAddTarget: (pair, file) => addTargetFile(pair, file),
+  onRemovePair: (p) => removePair(p),
+  onRefit: () => runRefit(),
+  onCancelRefit: () => cancelFit(t("Refit cancelled — the session is unchanged")),
+  // Download NP3 right from Compare: the current profile at the current strength (the same
+  // export as the editor's, transfer.exportNow)
+  onDownload: () => transfer.exportNow(),
+  setStatus: (text, kind) => setStatus(text, kind),
 });
 
 // ---------- the report panel (stage 5B, spec/ui.md "Report") ----------
@@ -197,20 +202,9 @@ const start = createStart({ state, setStatus,
   onFit: () => runFitPreparation(),
 });
 
-// ---------- the More frames screen (stage 7, spec/ui.md step 3.2) ----------
-// The pair list is the Start component over the More screen's ids (one loading path); the
-// advice is recomputed from the cached frame records on every pair change — never a fit.
-const more = createMore({ state, setStatus,
-  onAddRaws: (files) => { for (const f of files) addRawFile(f); },
-  onAddTarget: (pair, file) => addTargetFile(pair, file),
-  onRemovePair: (p) => removePair(p),
-  onRefit: () => runRefit(),
-  onCancel: () => cancelFit(t("Refit cancelled — the session is unchanged")),
-  onBack: () => enterCompare(),
-});
 function refreshPairsUI() {
   start.refresh();
-  more?.refresh();
+  if (state.step === "compare") compareView.refreshPairs();   // the strip, the coverage, Refit
 }
 
 // ---------- pair preparation (stage 2, spec/web-schemas.md §2) ----------
@@ -301,20 +295,19 @@ fitWorker.onmessage = (e) => {
   state.fitting = false;
   const refit = task.kind === "refit";
   if (m.type === "ready" && refit) {
-    // Stage 7: the next immutable version after its parent (the version selected when the
-    // refit started); every earlier version stays as it was; the strength is kept.
+    // Decision #12: there is one current profile — the refit replaces it (the same name, a new
+    // id so the report/render caches never mix the two); the strength is kept.
     const parent = state.versions.find((v) => v.id === task.parentId) ?? state.versions[0];
-    const v = makeRefitVersion(state.versions, parent, m.result);
-    state.versions = [...state.versions, v];
-    state.selectedVersionId = v.id;
-    setBaseline(v);              // the editor's baseline follows the selection (stage 6)
+    const r = makeRefitVersion(state.versions, parent, m.result);
+    const v = { ...r, name: parent.name, control: { ...r.control, name: parent.name } };
+    adoptVersion(v, { show: false });
     setStatus(t("Refit finished: {name} ({it} iterations, cost {cost} in {sec}s)", {
       name: v.name, it: m.result.iterations.run,
       cost: m.result.cost.toFixed(2), sec: (m.ms / 1000).toFixed(1),
     }));
-    enterCompare();              // spec/ui.md step 3.2: "Then back to step 2"
+    enterCompare();              // the refit stays on Compare (decision #11)
   } else if (m.type === "ready") {
-    // The immutable draft version (spec/ui-plan.md §3); the strength is kept for display/export.
+    // The current profile (decision #12: no version history); the strength is kept.
     state.versions = [draftVersion(m.result)];
     state.selectedVersionId = "draft";
     setStatus(t("Fit finished: {name} ({it} iterations, cost {cost} in {sec}s)", {
@@ -332,6 +325,18 @@ fitWorker.onmessage = (e) => {
   }
   refreshPairsUI();
 };
+
+// Makes `v` the current profile (decision #12: one profile, no history): the editor's
+// baseline follows it (stage 6), the report re-runs and Compare re-renders. Used by the refit;
+// also the tests' entry point for "the profile changed".
+function adoptVersion(v, { show = true } = {}) {
+  state.versions = [v];
+  state.selectedVersionId = v.id;
+  setBaseline(v);
+  if (!show) return;
+  requestReport();
+  if (state.step === "compare") compareView.refresh();
+}
 
 // Cancels the running fit or refit: nothing it computed is applied (a refit leaves every
 // version and the selection as they were). `msg` — the status text (default: inputs changed).
@@ -559,6 +564,7 @@ function framesLanded(m) {
 }
 function updateAdvice() {
   state.advice = computeAdvice(state);
+  if (state.step === "compare") compareView.refreshPairs();
   refreshPairsUI();
 }
 
@@ -603,7 +609,7 @@ async function prepareOne(pair) {
 
 // Fit (stages 2–3): prepare every pair, then send the prepared pairs to the fit Worker
 // (stage 3). Since stage 9 the pairs are prepared as soon as their JPEG decodes (the same
-// chain as More frames), so Fit normally finds them ready; the loop below still prepares
+// chain as Compare uses), so Fit normally finds them ready; the loop below still prepares
 // whatever is left. A preparation superseded mid-run (the user changed a file) aborts the
 // run — the inputs no longer match what the remaining pairs would prepare against.
 async function runFitPreparation() {
@@ -636,7 +642,7 @@ async function runFitPreparation() {
 
 // ---------- auto-preparation, removal, refit (stages 7 and 9) ----------
 // Every complete pair is prepared as soon as both files are decoded — on Start (stage 9: the
-// card shows the alignment before Fit) and on More frames (the advice needs the frame record
+// card shows the alignment before Fit) and on Compare (the coverage needs the frame record
 // before any refit) — with the same checks as Fit: the size pre-check, the alignment, NCC. One serialized chain; a superseded preparation
 // just moves on to the next pair.
 let autoChain = Promise.resolve();
@@ -660,7 +666,7 @@ function autoPrepare() {
       any = true;
       if (!p.prepared && !p.prepError) break;     // superseded by a changed file: a re-drop re-queues
     }
-    if (state.step === "more") requestFrames();   // the advice records (enterMore asks too)
+    if (state.step !== "start") requestFrames();   // the advice records (Compare's coverage)
     if (any && state.versions.length) requestReport();   // renderDE of the new pairs (exclusion hints)
     updateAdvice();
   });
@@ -696,6 +702,7 @@ function removePair(p) {
     compareFramePair = null;
   }
   state.reportAggregate = null;
+  if (state.step === "compare") compareView.refresh();      // the next pair on the canvas
   if (state.versions.length) requestReport();   // the aggregate over the remaining pairs
   setStatus(msg);
   refreshPairsUI();
@@ -726,19 +733,6 @@ async function runRefit() {
     return;
   }
   await startFit(pairs, { kind: "refit", parentId: parent.id, baseName: parent.name });
-}
-
-function enterMore() {
-  if (guardLeave(enterMore)) return;
-  if (!state.versions.length) {
-    setStatus(t("Fit a profile first — the More frames step needs a version"));
-    return;
-  }
-  state.step = "more";
-  syncStep();
-  updateAdvice();
-  autoPrepare();                // the pairs not prepared yet (e.g. excluded from the first fit)
-  requestFrames();
 }
 
 // ---------- pair RAW decodes (the loader events tagged { kind: "pair" }) ----------
@@ -942,6 +936,9 @@ function enterCompare() {
   compareFramePair = null;         // the render side loads the selected pair's frame
   syncStep();
   compareView.refresh();
+  updateAdvice();                  // the coverage above Versions (decision #11)…
+  autoPrepare();                   // …over prepared pairs (anything added meanwhile prepares)
+  requestFrames();
   requestReport();                 // the report recomputes with the comparison (spec/ui.md step 2)
   reportView.refresh();            // the last good report shows while the new one computes
 }
@@ -950,20 +947,15 @@ function syncStep() {
   document.body.classList.toggle("step-start", state.step === "start");
   document.body.classList.toggle("step-edit", state.step === "edit");
   document.body.classList.toggle("step-compare", state.step === "compare");
-  document.body.classList.toggle("step-more", state.step === "more");
   $("ed-to-compare").hidden = !state.versions.length;   // the editor's way back to Compare
-  $("ed-to-more").hidden = !state.versions.length;      // …and on to More frames (stage 7)
   if (state.step !== "edit") leaveKeep();               // a pending warning never outlives the step
 }
 
-$("to-start").addEventListener("click", showStart);
-$("to-compare").addEventListener("click", enterCompare);
 $("ed-to-compare").addEventListener("click", enterCompare);
-$("ed-to-more").addEventListener("click", enterMore);
 
 // ---------- files dropped on the page ----------
-// The Start/More zones and the pair cards handle their own drops (stopPropagation). A RAW
-// dropped elsewhere on Start/More becomes a new card; JPEGs belong to a card; there is no NP3
+// The Start zone, the pair cards and the Compare strip handle their own drops (stopPropagation).
+// A RAW dropped elsewhere on Start or Compare becomes a new pair; JPEGs belong to a card; there is no NP3
 // import in the wizard (spec/ui-pages.md) — the profile editor page has it.
 for (const ev2 of ["dragenter", "dragover", "dragleave"]) document.addEventListener(ev2, (e) => e.preventDefault());
 document.addEventListener("drop", (e) => {
@@ -974,8 +966,8 @@ document.addEventListener("drop", (e) => {
 function routeFile(f) {
   const ext = (f.name.split(".").pop() || "").toLowerCase();
   if (ext === "nef" || ext === "dng") {
-    if (state.step === "start" || state.step === "more") addRawFile(f);
-    else setStatus(t("{name}: add RAW files on the Start or More frames screen", { name: f.name }));
+    if (state.step === "start" || state.step === "compare") addRawFile(f);
+    else setStatus(t("{name}: add RAW files on the Comparison screen", { name: f.name }), "error");
   } else if (ext === "jpg" || ext === "jpeg") {
     // RAW first (decision #7): a JPEG belongs to a card, not to the page
     setStatus(t("{name}: add the JPEG on its RAW's card", { name: f.name }));
@@ -1005,4 +997,4 @@ window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, 
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne, autoPrepare,
-                    more, enterMore, runRefit, removePair, computeAdvice };
+                    runRefit, removePair, computeAdvice, adoptVersion };

@@ -1,6 +1,10 @@
 // The Comparison screen (spec/ui.md step 2, spec/ui-plan.md §4 stage 4): the fitted render
-// next to the decoded target — side by side, a curtain or a hold-key swap, with a shared
-// zoom/pan; the pair strip, the strength slider and the version history; the two exits.
+// next to the decoded target — side by side or a curtain, with a shared zoom/pan; the strength
+// slider. One current profile, no version history (decision #12). Since stage 13 (spec/ui.md decision #11) it is the hub after
+// the first fit: the strip at the top is the pair list (every pair a tile: active = in the
+// selected version, dimmed otherwise; × removes a pair; the whole strip takes RAW drops, an
+// inactive tile takes its JPEG), the color coverage sits above Versions and Refit at the
+// bottom of the side panel.
 //
 // Geometry decision (the ui-plan.md §6 risk "Preview/report geometry", recorded here and in
 // the stage-4 status): the render side covers the aligned working rectangle (0..W, 0..H) —
@@ -17,7 +21,10 @@
 // developed+warped render side via the renderSide callback (generation-checked: a stale
 // result resolves null and the last good frame stays on the screen).
 import { t } from "./i18n.js";
-import { isRawReady, isTargetReady } from "./session.js";
+import { isRawReady, isTargetReady, canAttachTarget, pickTargetFile,
+         refitPairIds } from "./session.js";
+import { renderCoverage, pairHints } from "./coverage-view.js";
+import { fitCount } from "./start.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,12 +38,20 @@ export function compareUsable(p) {
     && !p.blocked && !p.prepared.blocked && !p.fitBlocked;
 }
 
-export function createCompare({ state, renderSide, onVersionSelected, onStrength,
-                                onManual, onMore, onStart, onPairSelected }) {
+/** True when the pair is in the version's fit set (the version stores pair ids as strings). */
+export function inVersion(p, v) {
+  return !!v && (v.pairIds ?? []).includes(String(p.id));
+}
+
+export function createCompare({ state, renderSide, onStrength,
+                                onManual, onPairSelected, onAddRaws, onAddTarget, onRemovePair,
+                                onRefit, onCancelRefit, onDownload, setStatus = () => {} }) {
   const canvas = $("cc");
   const ctx = canvas.getContext("2d");
   const stripEl = $("cmp-strip");
-  const versionsEl = $("cmp-versions");
+  const coverageEl = $("cmp-coverage");
+  const refitBtn = $("cmp-refit");
+  const rawPicker = $("cmp-raw-file");
   const strengthInput = $("cmp-strength");
   const strengthVal = $("cmp-strength-val");
 
@@ -338,8 +353,8 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   }
   canvas.addEventListener("dblclick", (e) => { e.preventDefault(); resetView(); });
   $("cmp-manual").addEventListener("click", () => onManual());
-  $("cmp-more").addEventListener("click", () => onMore());
-  $("cmp-start").addEventListener("click", () => onStart());
+  $("cmp-download").addEventListener("click", () => onDownload?.());
+  refitBtn.addEventListener("click", () => (state.fitting ? onCancelRefit() : onRefit()));
 
   for (const btn of document.querySelectorAll("#cmp-modes button")) {
     btn.addEventListener("click", () => {
@@ -361,63 +376,222 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
     paintStrength();                               // the label shows the live value (decision #8)
   });
 
-  // ---------- the pair strip ----------
-  function thumbnail(p) {
-    const box = document.createElement("div");
-    box.className = "cmp-th";
-    box.dataset.pairId = String(p.id);
-    const blocked = !compareUsable(p);
-    if (blocked) box.classList.add("blocked");
-    if (p.id === state.selectedPairId) box.classList.add("selected");
-    const src = targetCanvases(p.target).thumb;
-    const c = document.createElement("canvas");
-    c.width = src.width; c.height = src.height;
-    c.getContext("2d").drawImage(src, 0, 0);
-    box.append(c);
-    box.title = p.rawFile ? p.rawFile.name : (p.targetFile ? p.targetFile.name : "");
-    if (blocked) {
-      const badge = document.createElement("span");
-      badge.className = "cmp-th-badge";
-      badge.dataset.i18n = "blocked";
-      badge.textContent = t("blocked");
-      box.append(badge);
+  // ---------- the pair strip (decision #11) ----------
+  // A RAW thumbnail from the decoded linear frame: a quick display transform (the 99th
+  // percentile to white, gamma 2.2) — only a recognizable preview until the JPEG arrives.
+  const rawCache = new WeakMap();
+  function rawThumb(img) {
+    let c = rawCache.get(img);
+    if (c) return c;
+    const long = 72, sc = Math.min(1, long / Math.max(img.w, img.h));
+    const w = Math.max(1, Math.round(img.w * sc)), h = Math.max(1, Math.round(img.h * sc));
+    const px = new Float32Array(w * h * 3);
+    const lum = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(img.w - 1, Math.floor(x / sc)), sy = Math.min(img.h - 1, Math.floor(y / sc));
+        const i = (sy * img.w + sx) * 3, o = (y * w + x) * 3;
+        px[o] = img.rgb[i]; px[o + 1] = img.rgb[i + 1]; px[o + 2] = img.rgb[i + 2];
+        lum.push(Math.max(px[o], px[o + 1], px[o + 2]));
+      }
     }
+    lum.sort((u, v) => u - v);
+    const white = lum[Math.floor(lum.length * 0.99)] || 1;
+    c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const cx = c.getContext("2d"), im = cx.createImageData(w, h);
+    for (let i = 0, j = 0; i < im.data.length; i += 4, j += 3) {
+      for (let k = 0; k < 3; k++) im.data[i + k] = Math.round(255 * Math.min(1, Math.max(0, px[j + k] / white)) ** (1 / 2.2));
+      im.data[i + 3] = 255;
+    }
+    cx.putImageData(im, 0, 0);
+    rawCache.set(img, c);
+    return c;
+  }
+
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  };
+
+  // The tile state (decision #11) — a code and a caption.
+  function tileState(p, v) {
+    if (p.raw === "pending") return ["decoding", t("decoding…")];
+    if (p.raw === "error") return ["blocked", t("RAW error")];
+    if (p.target === "pending") return ["jpeg", t("decoding…")];
+    if (!isTargetReady(p)) return ["no_jpeg", t("Add JPEG")];
+    if (p.fitBlocked || p.prepError || p.prepared?.blocked) return ["blocked", t("blocked")];
+    if (p.preparing || !p.prepared) return ["preparing", t("preparing…")];
+    if (!inVersion(p, v)) return ["new", t("Refit to include")];
+    return ["active", null];
+  }
+
+  function blockedTitle(p) {
+    if (p.raw === "error") return t("RAW is unreadable — this pair cannot be used");
+    if (p.prepError) return t("Preparation failed: {error} — this pair cannot be used", { error: p.prepError });
+    if (p.prepared?.blocked?.code === "ncc_low")
+      return t("Alignment failed (NCC {ncc}) — this pair cannot be used in the fit", { ncc: p.prepared.ncc.toFixed(2) });
+    if (p.fitBlocked?.code === "target_too_small")
+      return t("The target is too small ({detail}) — give a full-size JPEG", p.fitBlocked);
+    return "";
+  }
+
+  // One JPEG for an inactive tile (the decision #7 card rules): a rejection goes to the status.
+  function takeTargets(p, files) {
+    if (!files.length) return;
+    if (!canAttachTarget(p) || p.target === "pending") {
+      setStatus(p.raw === "error" ? t("The RAW is unreadable — remove this pair")
+                                  : t("Wait until the RAW is decoded, then add its JPEG"), "error");
+      return;
+    }
+    const pick = pickTargetFile(files);
+    if (pick.error) {
+      setStatus(pick.error === "count" ? t("Drop one JPEG per card ({n} files dropped)", { n: files.length })
+                                       : t("{name} is not a JPEG — the card takes one .JPG", { name: files[0].name }), "error");
+      return;
+    }
+    onAddTarget?.(p, pick.file);
+  }
+
+  function thumbnail(p) {
+    const v = version();
+    const [code, caption] = tileState(p, v);
+    const box = el("div", "cmp-th");
+    box.dataset.pairId = String(p.id);
+    box.dataset.state = code;
+    const usable = compareUsable(p);
+    if (code !== "active") box.classList.add("inactive");
+    if (code === "blocked") box.classList.add("blocked");
+    if (p.id === state.selectedPairId && usable) box.classList.add("selected");
+    let src = null;
+    if (isTargetReady(p)) src = targetCanvases(p.target).thumb;
+    else if (isRawReady(p)) src = rawThumb(p.raw.image);
+    if (src) {
+      const c = document.createElement("canvas");
+      c.width = src.width; c.height = src.height;
+      c.getContext("2d").drawImage(src, 0, 0);
+      box.append(c);
+    } else {
+      box.append(el("div", "cmp-th-empty"));
+    }
+    box.title = [p.rawFile?.name ?? "", code === "blocked" ? blockedTitle(p) : ""].filter(Boolean).join(" — ");
+    if (caption) {
+      const cap = el("span", `cmp-th-badge ${code === "blocked" ? "bad" : ""}`.trim(), caption);
+      box.append(cap);
+    }
+    const hints = code === "blocked" ? [] : pairHints(p, state);
+    if (hints.length) {
+      const w = el("span", "cmp-th-warn", "!");
+      w.title = hints.join("\n");
+      box.append(w);
+    }
+    // × — "Remove from fit" (decision #7): the pair leaves the session
+    const rm = el("button", "cmp-th-x", "×");
+    rm.type = "button";
+    rm.title = t("Remove from fit");
+    rm.setAttribute("aria-label", t("Remove from fit"));
+    rm.addEventListener("click", (e) => { e.stopPropagation(); onRemovePair?.(p); });
+    box.append(rm);
+    // the JPEG of an inactive tile: a click opens the picker, a drop takes one file
+    if (code === "no_jpeg") {
+      const picker = el("input", "cmp-th-file");
+      picker.type = "file";
+      picker.accept = ".jpg,.JPG,.jpeg,.JPEG";
+      picker.hidden = true;
+      picker.addEventListener("change", () => { takeTargets(p, [...picker.files]); picker.value = ""; });
+      box.append(picker);
+    }
+    for (const ev of ["dragenter", "dragover"]) box.addEventListener(ev, (e) => {
+      e.preventDefault();
+      if (code === "no_jpeg") box.classList.add("over");
+    });
+    box.addEventListener("dragleave", () => box.classList.remove("over"));
+    box.addEventListener("drop", (e) => {
+      box.classList.remove("over");
+      const files = [...(e.dataTransfer?.files || [])];
+      // a JPEG dropped on a tile is that tile's; RAWs go on to the strip (a new tile)
+      if (files.some((f) => /\.(jpe?g)$/i.test(f.name))) {
+        e.preventDefault();
+        e.stopPropagation();
+        takeTargets(p, files);
+      }
+    });
     box.addEventListener("click", () => {
-      if (blocked) return;              // a blocked pair cannot be selected for compare
+      if (code === "no_jpeg") { box.querySelector(".cmp-th-file").click(); return; }
+      if (!usable) return;                  // only a prepared, unblocked pair can be compared
       state.selectedPairId = p.id;
       refresh();
-      onPairSelected?.(p);              // the report view follows the pair (stage 5B)
+      onPairSelected?.(p);                  // the report view follows the pair (stage 5B)
     });
     return box;
   }
 
-  // ---------- the version history ----------
-  function versionButton(v) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.version = v.id;
-    if (v.id === state.selectedVersionId) btn.classList.add("active");
-    const id = document.createElement("span");
-    id.className = "cmp-v-id";
-    id.textContent = v.id;
-    const badge = document.createElement("span");
-    badge.className = "cmp-v-badge";
-    const n = v.pairIds?.length ?? 0;
-    badge.textContent = `${v.kind} · ${t("{n} pair(s)", { n })}`;
-    btn.append(id, badge);
-    btn.addEventListener("click", () => {
-      if (state.selectedVersionId === v.id) return;
-      state.selectedVersionId = v.id;
-      onVersionSelected(v);      // app.js: the manual editor baseline, history untouched
-      refresh();
-    });
-    return btn;
+  // the drop button at the end of the strip: a click opens the RAW picker
+  function addTile() {
+    const b = el("button", "cmp-add");
+    b.type = "button";
+    b.id = "cmp-add";
+    b.title = t("Add RAW files (or drop them anywhere on the strip)");
+    b.append(el("span", "cmp-add-plus", "+"), el("span", "cmp-add-text", t("RAW")));
+    b.addEventListener("click", () => rawPicker.click());
+    return b;
+  }
+  rawPicker.addEventListener("change", () => { onAddRaws?.([...rawPicker.files]); rawPicker.value = ""; });
+  // the whole strip is a RAW drop zone
+  for (const ev of ["dragenter", "dragover"]) stripEl.addEventListener(ev, (e) => {
+    e.preventDefault();
+    stripEl.classList.add("over");
+  });
+  stripEl.addEventListener("dragleave", (e) => { if (!stripEl.contains(e.relatedTarget)) stripEl.classList.remove("over"); });
+  stripEl.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();                    // the page-level router must not see these files
+    stripEl.classList.remove("over");
+    const files = [...(e.dataTransfer?.files || [])];
+    const raws = files.filter((f) => /\.(nef|dng)$/i.test(f.name));
+    for (const f of files) {
+      if (raws.includes(f)) continue;
+      setStatus(/\.(jpe?g)$/i.test(f.name) ? t("{name}: drop the JPEG onto its RAW's tile", { name: f.name })
+                                           : t("Skipped {name}: the strip takes .NEF/.DNG", { name: f.name }), "error");
+    }
+    if (raws.length) onAddRaws?.(raws);
+  });
+
+  // ---------- the refit button (decision #11) ----------
+  function renderRefit() {
+    const v = version();
+    const ids = refitPairIds(state);
+    const same = v && ids.length === (v.pairIds ?? []).length
+      && ids.every((id) => (v.pairIds ?? []).includes(String(id)));
+    const preparing = state.pairs.some((p) => p.preparing || p.raw === "pending" || p.target === "pending");
+    refitBtn.dataset.pairIds = ids.join(",");
+    if (state.fitting) {
+      refitBtn.textContent = t("Cancel the refit");
+      refitBtn.disabled = false;
+      refitBtn.classList.add("running");
+    } else {
+      refitBtn.textContent = t("Refit");                 // no pair count, no caption (decision #11)
+      refitBtn.disabled = !ids.length || !state.versions.length || preparing || same;
+      refitBtn.classList.remove("running");
+    }
+    const { m, k } = fitCount(state);
+    let txt = same ? t("The profile is already fitted on these pairs") : "";
+    if (m || k) txt += (txt ? "; " : "") + t("{m} without a JPEG, {k} blocked — skipped", { m, k });
+    refitBtn.title = txt;                                // the reason it is off / skipped pairs: tooltip only
+  }
+
+  /** Re-renders the strip, the coverage and the refit button (pair changes, advice, fits). */
+  function refreshPairs() {
+    stripEl.replaceChildren(...state.pairs.map(thumbnail), addTile());
+    renderCoverage(coverageEl, state);
+    renderRefit();
   }
 
   // ---------- refresh ----------
   function refresh() {
-    stripEl.replaceChildren(...state.pairs.filter(isTargetReady).map(thumbnail));
-    versionsEl.replaceChildren(...state.versions.map(versionButton));
+    refreshPairs();
     strengthInput.value = String(state.strength);
     paintStrength();
     const p = pair();
@@ -444,7 +618,7 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
     };
   }
 
-  return { refresh, draw, scheduleRender, debug,
+  return { refresh, refreshPairs, draw, scheduleRender, debug,
            // stage 5B: the report view's overlays on the compare image
            showRegion(labels, group) {
              region = labels && group != null ? { labels, group } : null;

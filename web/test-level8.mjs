@@ -706,40 +706,58 @@ export async function runLevel8({ browser, port, report, skip }) {
         report(typeof link === "string" && new RegExp(`^http://127\\.0\\.0\\.1:${port}/web/picture-control-editor\\.html\\?np3=[A-Za-z0-9_-]+$`).test(link),
           `8 share: Copy link in the manual step builds the editor link (${(link || "").slice(0, 70)}…)`);
       }
-      await ev(() => document.getElementById("to-start").click());
-      await page.waitForFunction(`window.__np3app.state.step === "start"`,
-        { timeout: 60000, polling: 200 });
-      // a preview as pair 2's new JPEG blocks it (target_too_small); the prepared pair is refit,
-      // the blocked one stays out of the version
-      await ev(() => window.__t8.dropOnCard(2, [["/web/golden/target/jpg_plain.jpg", "SKL_3024.JPG"]]));
+      // back to Compare (the editor has no "Back to Start" since decision #11); on the strip the
+      // cross pair is removed (×) and a new pair comes in: SKL_3024 + a preview JPEG, which the
+      // pre-fit check blocks (target_too_small) — the profile stays over pair 1
+      await ev(() => document.getElementById("ed-to-compare").click());
+      await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
+      await ev(() => document.querySelector('#cmp-strip .cmp-th[data-pair-id="2"] .cmp-th-x').click());
+      await ev(async () => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([await (await fetch("/test2/SKL_3024.dng")).arrayBuffer()], "SKL_3024.dng"));
+        const inp = document.getElementById("cmp-raw-file");
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.waitForFunction(
+        "window.__np3app.state.pairs.length === 2 && !!window.__np3app.state.pairs[1].raw?.image",
+        { timeout: 600000, polling: 500 });
+      {
+        const t3 = await ev(() => {
+          const tile = document.querySelector('#cmp-strip .cmp-th[data-pair-id="3"]');
+          return { ids: window.__np3app.state.pairs.map((p) => p.id), state: tile?.dataset.state,
+                   inactive: tile?.classList.contains("inactive"), canvas: !!tile?.querySelector("canvas") };
+        });
+        report(t3.ids.join(",") === "1,3" && t3.state === "no_jpeg" && t3.inactive && t3.canvas,
+          `8 strip: × removed pair 2; a RAW through the strip picker is a new inactive tile with its RAW preview (${t3.state})`);
+      }
+      await ev(async () => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([await (await fetch("/web/golden/target/jpg_plain.jpg")).arrayBuffer()], "SKL_3024.JPG"));
+        document.querySelector('#cmp-strip .cmp-th[data-pair-id="3"]').dispatchEvent(
+          new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      });
       await page.waitForFunction(
         "window.__np3app.state.pairs[1].target && window.__np3app.state.pairs[1].target.width === 384"
-        + " && !!window.__np3app.state.pairs[1].fitBlocked && !document.getElementById('fit').disabled",
+        + " && !!window.__np3app.state.pairs[1].fitBlocked",
         { timeout: 60000, polling: 200 });
-      await ev(() => document.getElementById("fit").click());
-      await page.waitForFunction("window.__np3app.state.fitting === true", { timeout: 60000, polling: 100 });
-      await page.waitForFunction(
-        `window.__np3app.state.status.startsWith("Fit finished") && !window.__np3app.state.fitting`,
-        { timeout: 600000, polling: 500 });
       {
         const small = await ev(() => ({
           code: window.__np3app.state.pairs[1].fitBlocked?.code ?? null,
-          card: window.__t8.card(2).textContent,
+          tile: document.querySelector('#cmp-strip .cmp-th[data-pair-id="3"]').dataset.state,
+          title: document.querySelector('#cmp-strip .cmp-th[data-pair-id="3"]').title,
           pairIds: window.__np3app.state.versions[0].pairIds,
+          refit: document.getElementById("cmp-refit").disabled,
         }));
-        report(small.code === "target_too_small" && /too small/.test(small.card)
-               && small.pairIds.length === 1 && small.pairIds[0] === "1",
-          "8 fit: a preview JPEG blocks its pair (target_too_small), the aligned pair stays in the version");
+        report(small.code === "target_too_small" && small.tile === "blocked" && /too small/.test(small.title)
+               && small.pairIds.length === 1 && small.pairIds[0] === "1" && small.refit,
+          "8 strip: a preview JPEG dropped on the tile blocks the pair (target_too_small); the profile stays over pair 1, Refit has nothing new");
       }
 
 
       // --- stage 4: the Comparison screen and the version history (spec/ui-plan.md stage 4) ---
       {
-        // Fit lands on the Comparison screen (spec/ui.md scenario); the button is the explicit path
-        await ev(() => {
-          if (window.__np3app.state.step !== "compare")
-            document.getElementById("to-compare").click();
-        });
+        // the session is on the Comparison screen (the hub since decision #11)
         await page.waitForFunction(`window.__np3app.state.step === "compare"`,
           { timeout: 60000, polling: 200 });
         const cmpSettle = () => page.waitForFunction(
@@ -778,15 +796,20 @@ export async function runLevel8({ browser, port, report, skip }) {
               thumbs: [...document.querySelectorAll("#cmp-strip .cmp-th")]
                 .map((t) => ({ id: t.dataset.pairId, blocked: t.classList.contains("blocked") })),
               selected: s.selectedPairId,
-              versions: s.versions.length,
-              vbtn: document.querySelector("#cmp-versions button")?.textContent ?? "",
+              versions: s.versions.length, vid: s.selectedVersionId,
+              noVersions: !document.getElementById("cmp-versions"),
+              gone: ["cmp-more", "cmp-start", "more", "to-compare", "ed-to-more", "to-start"]
+                .filter((id) => document.getElementById(id)),
+              coverage: !!document.getElementById("cmp-coverage"),
               aligned: d.aligned, working: d.working,
             };
           });
-          report(ui.compareShown && ui.editorHidden && ui.versions === 1 && /draft/.test(ui.vbtn),
-            `8 compare: the screen shows the draft version ("${ui.vbtn.trim()}"), the editor is hidden`);
+          report(ui.compareShown && ui.editorHidden && ui.versions === 1 && ui.vid === "draft" && ui.noVersions
+                 && ui.gone.length === 0 && ui.coverage,
+            `8 compare: one current profile (${ui.vid}), no Versions list, no More/Start exits` +
+            `${ui.gone.length ? " — found " + ui.gone : ""}; the editor is hidden`);
           report(ui.thumbs.length === 2 && !ui.thumbs[0].blocked && ui.thumbs[1].blocked
-                 && ui.selected === 1,
+                 && ui.thumbs[1].id === "3" && ui.selected === 1,
             "8 compare: the pair strip with a blocked marker on the excluded pair");
           // the render side covers the working rectangle at ≥ the working resolution (not the
           // 256-px H3×W3 report grid), with the working aspect within one pixel
@@ -856,7 +879,7 @@ export async function runLevel8({ browser, port, report, skip }) {
         {
           const blk = await ev(() => {
             const s = window.__np3app.state;
-            const thumb = document.querySelector('#cmp-strip .cmp-th[data-pair-id="2"]');
+            const thumb = document.querySelector('#cmp-strip .cmp-th[data-pair-id="3"]');
             thumb.click();
             return { selected: s.selectedPairId, cls: thumb.className };
           });
@@ -864,67 +887,59 @@ export async function runLevel8({ browser, port, report, skip }) {
             "8 compare: clicking a blocked pair changes nothing");
         }
 
-        // version history: selection re-renders with the version control, the LUT cache is respected
+        // the profile replaced (a refit's effect, decision #12): re-renders with the new control,
+        // the LUT cache is respected; the old profile again reproduces the frame
         {
           await ev(() => {
             const s = window.__np3app.state;
             const draft = s.versions[0];
             const ctl = JSON.parse(JSON.stringify(draft.control));
             ctl.saturation = ctl.saturation >= 50 ? 0 : 100;   // unmistakably different
-            s.versions.push({ id: "draft_r1", name: ctl.name, control: ctl, parentId: "draft",
-                              kind: "refit", pairIds: ["1"], fitVector: draft.fitVector,
-                              cost: draft.cost, iterations: draft.iterations, seed: draft.seed,
-                              scores: draft.scores });
-            window.__np3app.compare.refresh();
+            window.__t8.draftV = draft;
+            window.__t8.r1V = { id: "r1", name: draft.name, control: ctl, parentId: "draft",
+                                kind: "refit", pairIds: ["1"], fitVector: draft.fitVector,
+                                cost: draft.cost, iterations: draft.iterations, seed: draft.seed,
+                                scores: draft.scores };
           });
           await cmpSettle();
           const draftHash = await ev(() => window.__t8.snapCC());
           const luts0 = await ev(() => window.__np3app.renderer.stats.luts);
-          await ev(() =>
-            document.querySelector('#cmp-versions button[data-version="draft_r1"]').click());
+          await ev(() => window.__np3app.adoptVersion(window.__t8.r1V));
           await cmpSettle();
           const r1 = await ev(() => {
             const s = window.__np3app.state;
-            const btn = document.querySelector('#cmp-versions button[data-version="draft_r1"]');
             return { selected: s.selectedVersionId, sat: s.control.saturation,
-                     versions: s.versions.length, luts: window.__np3app.renderer.stats.luts,
-                     badge: btn.textContent, active: btn.classList.contains("active") };
+                     versions: s.versions.length, luts: window.__np3app.renderer.stats.luts };
           });
           const r1Hash = await ev(() => window.__t8.snapCC());
-          report(r1.selected === "draft_r1" && r1.sat === 100 && r1.versions === 2,
-            `8 versions: selecting re-renders with the version control (sat ${r1.sat}),` +
-            ` the history keeps both (immutable)`);
-          report(r1.active && /refit/.test(r1.badge) && /1 pair/.test(r1.badge),
-            `8 versions: the badge shows the kind and the pair count ("${r1.badge.trim()}")`);
-          report(r1Hash !== draftHash, "8 versions: the canvas pixels change with the version");
+          report(r1.selected === "r1" && r1.sat === 100 && r1.versions === 1,
+            `8 profile: a replaced profile re-renders with its control (sat ${r1.sat}); one profile, no history`);
+          report(r1Hash !== draftHash, "8 profile: the canvas pixels change with the profile");
           report(r1.luts === luts0 + 1,
-            `8 versions: a new LUT only for a new control (${luts0} -> ${r1.luts})`);
-          await ev(() =>
-            document.querySelector('#cmp-versions button[data-version="draft"]').click());
+            `8 profile: a new LUT only for a new control (${luts0} -> ${r1.luts})`);
+          await ev(() => window.__np3app.adoptVersion(window.__t8.draftV));
           await cmpSettle();
           const back = await ev(() => window.__np3app.renderer.stats.luts);
           const draftHash2 = await ev(() => window.__t8.snapCC());
           report(back === luts0 + 1 && draftHash2 === draftHash,
-            "8 versions: back to draft hits the LUT cache and reproduces the frame");
+            "8 profile: the old profile again hits the LUT cache and reproduces the frame");
         }
 
-        // stale protection during a version switch: only the latest generation applies
+        // stale protection during a profile switch: only the latest generation applies
         {
           const g = await ev(() => {
             const A = window.__np3app;
-            const btnR1 = document.querySelector('#cmp-versions button[data-version="draft_r1"]');
-            const btnD = document.querySelector('#cmp-versions button[data-version="draft"]');
             const before = { gen: A.compare.requestedGen, applied: A.compare.appliedGen };
             const hash = window.__t8.snapCC();
-            btnR1.click();                       // the request 1...
+            A.adoptVersion(window.__t8.r1V);     // the request 1...
             const mid = { gen: A.compare.requestedGen, applied: A.compare.appliedGen,
                           pending: A.compare.pending, hash: window.__t8.snapCC() };
-            btnD.click();                        // ...is superseded by the request 2
+            A.adoptVersion(window.__t8.draftV);  // ...is superseded by the request 2
             return { before, mid, hash };
           });
           report(g.mid.gen === g.before.gen + 1 && g.mid.applied === g.before.applied
                  && g.mid.hash === g.hash && g.mid.pending === true,
-            "8 stale: a version switch keeps the previous frame while the new one computes");
+            "8 stale: a profile switch keeps the previous frame while the new one computes");
           await cmpSettle();
           const after = await ev(() => ({ gen: window.__np3app.compare.requestedGen,
                                           applied: window.__np3app.compare.appliedGen }));
@@ -964,21 +979,8 @@ export async function runLevel8({ browser, port, report, skip }) {
           await cmpSettle();
         }
 
-        // the exits: the stage-7 stub, then the manual editor, and the session across the steps
+        // the exit to the manual editor and back (no More / Start exits, decision #11)
         {
-          await ev(() => document.getElementById("cmp-more").click());
-          const more = await ev(() => ({ step: window.__np3app.state.step,
-            shown: getComputedStyle(document.getElementById("more")).display !== "none",
-            text: document.getElementById("more").textContent }));
-          const moreUi = await ev(() => ({ refit: !!document.getElementById("more-refit"),
-            cards: document.querySelectorAll("#more-pairs .pair").length,
-            pairs: window.__np3app.state.pairs.length }));
-          report(more.step === "more" && more.shown && moreUi.refit && moreUi.cards === moreUi.pairs,
-            `8 exit: Continue fitting goes to the More frames step (${moreUi.cards} pair cards, the refit bar)`);
-          await ev(() => document.getElementById("more-back").click());
-          await page.waitForFunction(`window.__np3app.state.step === "compare"`,
-            { timeout: 60000, polling: 200 });
-
           await ev(() => document.getElementById("cmp-manual").click());
           await page.waitForFunction(
             `window.__np3app.state.step === "edit" && !!window.__np3app.state.raw`,
@@ -988,29 +990,22 @@ export async function runLevel8({ browser, port, report, skip }) {
             const v = A.state.versions.find((x) => x.id === A.state.selectedVersionId);
             return { controlSame: JSON.stringify(A.state.control) === JSON.stringify(v.control),
                      strength: A.state.strength, raw: A.state.raw?.name,
-                     shown: !document.getElementById("c").hidden };
+                     shown: !document.getElementById("c").hidden,
+                     toStart: !!document.getElementById("to-start"), back: !document.getElementById("ed-to-compare").hidden };
           });
-          report(ed.controlSame && ed.strength === 100 && ed.raw === "DSC_5584.NEF" && ed.shown,
-            "8 exit: Looks good opens the editor with the selected version as the baseline," +
-            " the strength kept");
-
-          await ev(() => document.getElementById("to-start").click());
-          const st = await ev(() => ({ step: window.__np3app.state.step,
-            pairs: window.__np3app.state.pairs.length,
-            versions: window.__np3app.state.versions.length,
-            cmpEnabled: !document.getElementById("to-compare").disabled }));
-          report(st.step === "start" && st.pairs === 2 && st.versions === 2 && st.cmpEnabled,
-            "8 navigation: Back to Start keeps the pairs and the versions, Comparison is enabled");
-          await ev(() => document.getElementById("to-compare").click());
+          report(ed.controlSame && ed.strength === 100 && ed.raw === "DSC_5584.NEF" && ed.shown && !ed.toStart && ed.back,
+            "8 exit: Looks good opens the editor with the current profile as the baseline, the strength kept;" +
+            " only Back to Comparison leads out");
+          await ev(() => document.getElementById("ed-to-compare").click());
           await cmpSettle();
           const back2 = await ev(() => ({ step: window.__np3app.state.step,
             selected: window.__np3app.state.selectedVersionId,
             strength: window.__np3app.state.strength,
-            vbtns: document.querySelectorAll("#cmp-versions button").length,
+            pairs: window.__np3app.state.pairs.length,
             selectedPair: window.__np3app.state.selectedPairId }));
           report(back2.step === "compare" && back2.selected === "draft" && back2.strength === 100
-                 && back2.vbtns === 2 && back2.selectedPair === 1,
-            "8 navigation: Start -> Compare preserves the version, the strength and the pair");
+                 && back2.pairs === 2 && back2.selectedPair === 1,
+            "8 navigation: editor -> Compare preserves the profile, the strength, the pairs and the selected pair");
         }
 
         // --- stage 6: the fitted baseline in the manual editor (spec/ui-plan.md stage 6,
@@ -1245,10 +1240,10 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(lk.shown && lk.role === "alertdialog" && lk.stepDuring === "edit" && lk.hidden
                  && lk.step === "edit" && lk.sat === satEdit,
             "8 stage 6: leaving with manual edits shows an in-page warning; Keep editing stays with the edits");
-          // Discard: back to Start, the control returns to the version, the version is untouched
+          // Discard: back to Compare, the control returns to the profile, the profile is untouched
           const ld = await ev((json0) => {
             const A = window.__np3app;
-            document.getElementById("to-start").click();
+            document.getElementById("ed-to-compare").click();
             const shown = !document.getElementById("leave-confirm").hidden;
             document.getElementById("leave-discard").click();
             const v = A.state.versions.find((x) => x.id === "draft");
@@ -1257,11 +1252,10 @@ export async function runLevel8({ browser, port, report, skip }) {
                      versionSame: JSON.stringify(v.control) === json0,
                      modal: window.__t8.modal };
           }, draftJson0);
-          report(ld.shown && ld.step === "start" && ld.controlIsVersion && ld.versionSame && ld.modal === 0,
-            "8 stage 6: Discard edits leaves, drops the manual edits, the version stays unchanged" +
+          report(ld.shown && ld.step === "compare" && ld.controlIsVersion && ld.versionSame && ld.modal === 0,
+            "8 stage 6: Discard edits leaves, drops the manual edits, the profile stays unchanged" +
             " (no window.confirm/alert)");
           // without edits the editor leaves immediately
-          await ev(() => document.getElementById("to-compare").click());
           await cmpSettle();
           await ev(() => document.getElementById("cmp-manual").click());
           await page.waitForFunction(`window.__np3app.state.step === "edit"`,
@@ -1275,9 +1269,8 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(clean.step === "compare" && clean.hidden,
             "8 stage 6: without manual edits the editor leaves at once (no warning)");
 
-          // a version switch rebaselines: draft_r1 -> its control, its marks, a fresh history
-          await ev(() =>
-            document.querySelector('#cmp-versions button[data-version="draft_r1"]').click());
+          // a replaced profile rebaselines: r1 -> its control, its marks, a fresh history
+          await ev(() => window.__np3app.adoptVersion(window.__t8.r1V));
           await cmpSettle();
           await ev(() => document.getElementById("cmp-manual").click());
           await page.waitForFunction(`window.__np3app.state.step === "edit"`,
@@ -1285,7 +1278,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           await settle();
           const rb = await ev(() => {
             const A = window.__np3app, S = window.__t8.s6;
-            const r1 = A.state.versions.find((x) => x.id === "draft_r1");
+            const r1 = A.state.versions.find((x) => x.id === "r1");
             const bl = A.getBaseline();
             const r1sat = r1.control.saturation;
             window.__t8.groupSlider("basic", 0, r1sat >= 50 ? r1sat - 10 : r1sat + 10);
@@ -1296,14 +1289,13 @@ export async function runLevel8({ browser, port, report, skip }) {
                      same: JSON.stringify(bl.control) === JSON.stringify(r1.control),
                      marked, sat: A.state.control.saturation, r1sat, marks: S.marks() };
           });
-          report(rb.vid === "draft_r1" && rb.same && rb.marked === 1 && rb.sat === rb.r1sat && rb.marks === 0,
-            `8 stage 6: a version switch rebaselines the editor (reset to draft_r1's ${rb.r1sat})`);
+          report(rb.vid === "r1" && rb.same && rb.marked === 1 && rb.sat === rb.r1sat && rb.marks === 0,
+            `8 stage 6: a replaced profile rebaselines the editor (reset to r1's ${rb.r1sat})`);
           // back to Compare on the draft for the report checks below
           await ev(() => document.getElementById("ed-to-compare").click());
           await page.waitForFunction(`window.__np3app.state.step === "compare"`,
             { timeout: 60000, polling: 200 });
-          await ev(() =>
-            document.querySelector('#cmp-versions button[data-version="draft"]').click());
+          await ev(() => window.__np3app.adoptVersion(window.__t8.draftV));
           await cmpSettle();
         }
       }
@@ -1343,8 +1335,8 @@ export async function runLevel8({ browser, port, report, skip }) {
           const rows = [...document.querySelectorAll("#rep-table tbody tr")].map((tr) => ({
             group: tr.cells[0].textContent,
             share: tr.cells[1].textContent,
-            dE: tr.cells[4].textContent,
-            dhCell: tr.cells[7].textContent,
+            dE: tr.cells[3].textContent,
+            dhCell: tr.cells[6].textContent,
             swatches: tr.querySelectorAll(".rep-sw").length,
           }));
           const top = [...rep.table].sort((a, b) => b.share - a.share)[0];
@@ -1358,10 +1350,12 @@ export async function runLevel8({ browser, port, report, skip }) {
         });
         report(tb.n === tb.want && tb.rows[0].group === tb.topGroup && tb.rows[0].share === tb.topShare
                && tb.rows[0].dE === tb.topDE && tb.rows.every((r) => r.swatches === 2)
-               && tb.rows.every((r) => r.dhCell.length > 0),
-          `8 report: the table renders ${tb.n} group rows (default sort: share) with two swatches each`);
+               && tb.rows.every((r) => r.dhCell.length > 0)
+               && tb.headers.join() === "group,share,target,dE,dL,dC,dh",
+          `8 report: the table renders ${tb.n} group rows (default sort: share) with the target and` +
+          " render swatches in one cell");
         const st = await ev(() => {
-          const read = () => [...document.querySelectorAll("#rep-table tbody tr")].map((tr) => tr.cells[4].textContent);
+          const read = () => [...document.querySelectorAll("#rep-table tbody tr")].map((tr) => tr.cells[3].textContent);
           document.querySelector('#rep-table th[data-key="dE"]').click();   // a new numeric column: desc first
           const first = read();
           document.querySelector('#rep-table th[data-key="dE"]').click();   // the second click reverses
@@ -1391,11 +1385,20 @@ export async function runLevel8({ browser, port, report, skip }) {
                           "teal/water", "sky", "dark blues", "purple"];
           const top = [...rep.table].sort((a, b) => b.share - a.share)[0];
           const g = GROUPS.indexOf(top.group);
-          // the group's darkest on-screen pixel (a fixed probe count keeps it quick)
+          // the group's darkest on-screen pixel (a fixed probe count keeps it quick); only
+          // report pixels whose 8 neighbours are the same group, so the screen sample never
+          // straddles a highlighted/unhighlighted block edge whatever the display scale
           const W = A.state.pairs[0].prepared.size.w, H = A.state.pairs[0].prepared.size.h;
+          const inner = (i) => {
+            const x = i % rep.w3, y = Math.floor(i / rep.w3);
+            if (x < 1 || y < 1 || x >= rep.w3 - 1 || y >= rep.h3 - 1) return false;
+            for (let dy = -1; dy <= 1; dy++)
+              for (let dx = -1; dx <= 1; dx++) if (rep.labels[i + dy * rep.w3 + dx] !== g) return false;
+            return true;
+          };
           let idx = -1, bestSum = Infinity, checked = 0;
           for (let i = 0; i < rep.labels.length && checked < 60; i++) {
-            if (rep.labels[i] !== g) continue;
+            if (rep.labels[i] !== g || !inner(i)) continue;
             checked++;
             const pt = A.compare.debug().mapPoint(((i % rep.w3) * 3 + 1.5) / W,
                                                   (Math.floor(i / rep.w3) * 3 + 1.5) / H, "L");
@@ -1425,7 +1428,9 @@ export async function runLevel8({ browser, port, report, skip }) {
                && JSON.stringify(hl.off) === JSON.stringify(hl.before)
                && Math.abs(dist(hl.before, hl.on2) - hl.expect) <= 4
                && JSON.stringify(hl.otherOn) === JSON.stringify(hl.before),
-          "8 report: a row click highlights the region on the image (a second click or another row clears)");
+          "8 report: a row click highlights the region on the image (a second click or another row clears)" +
+          ` (on ${dist(hl.before, hl.on).toFixed(0)}/${hl.expect.toFixed(0)}, off ${dist(hl.before, hl.off)},` +
+          ` again ${dist(hl.before, hl.on2).toFixed(0)}, other ${dist(hl.before, hl.otherOn)})`);
       }
 
       // the error map: the H3×W3 grid, the dE legend, the dL/dC/dh diverging switch
@@ -1514,17 +1519,16 @@ export async function runLevel8({ browser, port, report, skip }) {
           const rows = [...document.querySelectorAll("#rep-params .rep-prow[data-path]")];
           const byPath = Object.fromEntries(rows.map((r) => [r.dataset.path, r]));
           const row = byPath["saturation"];
-          return { baseSat: rep.parameters.base.saturation, resultSat: rep.parameters.result.saturation,
-                   satBase: row?.children[1]?.textContent, satResult: row?.children[2]?.textContent,
+          return { resultSat: rep.parameters.result.saturation,
+                   cells: row?.children.length, satValue: row?.children[1]?.firstChild?.textContent,
                    nRows: rows.length, zeroRows: rows.filter((r) => r.classList.contains("zero")).length,
                    curve: !!document.querySelector("#rep-curve svg polyline"),
-                   resultHead: document.getElementById("rep-result-h")?.textContent ?? "" };
+                   noHead: !document.querySelector("#rep-params .head, #rep-result-h") };
         });
-        report(pr.satBase === String(pr.baseSat) && pr.satResult === String(pr.resultSat)
-               && pr.nRows === 6 + 3 + 24 + 11 && pr.zeroRows > 0 && pr.curve
-               && pr.resultHead.includes("100"),
-          `8 report: the parameters — two columns over ${pr.nRows} fields, zero muting (${pr.zeroRows}),` +
-          " the curve thumbnail");
+        report(pr.cells === 2 && pr.satValue === String(pr.resultSat)
+               && pr.nRows === 6 + 3 + 24 + 11 && pr.zeroRows > 0 && pr.curve && pr.noHead,
+          `8 report: the parameters — one value column (the value at the strength) over ${pr.nRows}` +
+          ` fields, zero muting (${pr.zeroRows}), the curve thumbnail`);
         // the thumbnail is square, with the neutral histogram and the identity diagonal under
         // the curve; with the curve off the square, the histogram and the diagonal stay
         const th = await ev(() => {
@@ -1570,17 +1574,40 @@ export async function runLevel8({ browser, port, report, skip }) {
                        parameters: { base, result, deltas: null } };
           A.report.refresh();
           const row = document.querySelector('#rep-params .rep-prow[data-path="saturation"]');
-          const out = { base: row.children[1].textContent, result: row.children[2].textContent,
+          const out = { base: row.children[1].title, result: row.children[1].firstChild.textContent,
                         clip: row.classList.contains("clip"),
-                        head: document.getElementById("rep-result-h").textContent,
                         summaryStrength: document.getElementById("rep-strength").textContent };
           p.report = orig;
           A.report.refresh();
           return out;
         });
-        report(cl.base === "80" && cl.result === "100" && cl.clip && cl.head.includes("150")
+        report(/: 80$/.test(cl.base) && cl.result === "100" && cl.clip
                && cl.summaryStrength === "150%",
           `8 report: at strength 150% a clipped field is highlighted (${cl.base} -> ${cl.result})`);
+      }
+
+      {
+        // spec/ui.md decision #13: the report sections are collapsible groups (open by
+        // default) and the panel never scrolls sideways
+        const sec = await ev(() => {
+          const r = document.getElementById("report");
+          const grps = [...document.querySelectorAll("#rep-body > details.grp")];
+          const out = { keys: grps.map((d) => d.dataset.sec).join(), allOpen: grps.every((d) => d.open),
+                        noH2: !document.querySelector("#rep-body h2"),
+                        overflow: r.scrollWidth - r.clientWidth };
+          const tbl = grps.find((d) => d.dataset.sec === "table");
+          tbl.querySelector("summary").click();
+          // a closed group shows only its summary line (the table's own box may keep its size
+          // under content-visibility, so measure the group)
+          out.closed = !tbl.open && tbl.getBoundingClientRect().height < 40;
+          tbl.querySelector("summary").click();
+          out.reopened = tbl.open;
+          return out;
+        });
+        report(sec.keys === "summary,table,map,params" && sec.allOpen && sec.noH2 && sec.overflow <= 0
+               && sec.closed && sec.reopened,
+          `8 report: four collapsible sections (${sec.keys}), open by default, no horizontal scroll` +
+          ` (overflow ${sec.overflow}px)`);
       }
 
       // no JSON download (spec/ui.md decision #8)
@@ -1626,7 +1653,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           out.renderDE = document.getElementById("rep-render-de").textContent;
           out.binMean = document.getElementById("rep-bin-mean").textContent;
           out.rows = document.querySelectorAll("#rep-table tbody tr").length;
-          out.mapHidden = document.getElementById("rep-map-section").hidden;
+          out.mapHidden = document.querySelector('#rep-body details[data-sec="map"]').hidden;
           document.querySelector('#rep-scope button[data-scope="pair"]').click();
           out.pairDE = document.getElementById("rep-render-de").textContent;
           out.histBack = histD();
@@ -1648,26 +1675,25 @@ export async function runLevel8({ browser, port, report, skip }) {
         report(back === want, "8 report: back to \"This pair\" — the pair's summary returns");
       }
 
-      // the report follows the version; a stale report never overwrites a newer one
+      // the report follows the profile; a stale report never overwrites a newer one
       {
-        await ev(() => document.querySelector('#cmp-versions button[data-version="draft_r1"]').click());
+        await ev(() => window.__np3app.adoptVersion(window.__t8.r1V));
         await page.waitForFunction(
-          `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "draft_r1:1"`,
+          `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "r1:1"`,
           { timeout: 120000, polling: 200 });
         const v = await ev(() => {
           const rep = window.__np3app.state.pairs[0].report;
           const row = document.querySelector('#rep-params .rep-prow[data-path="saturation"]');
-          return { sat: rep.parameters.base.saturation, cell: row?.children[1]?.textContent,
+          return { sat: rep.parameters.base.saturation, cell: row?.children[1]?.firstChild?.textContent,
                    renderDE: document.getElementById("rep-render-de").textContent,
                    wantDE: rep.summary.renderDE.toFixed(2) };
         });
         report(v.sat === 100 && v.cell === "100" && v.renderDE === v.wantDE,
-          "8 report: switching the version re-renders the parameters and the summary");
+          "8 report: a replaced profile re-renders the parameters and the summary");
         // stale protection: rapid switches end on draft — only the latest report applies
         await ev(() => {
-          const bR1 = document.querySelector('#cmp-versions button[data-version="draft_r1"]');
-          const bD = document.querySelector('#cmp-versions button[data-version="draft"]');
-          bR1.click(); bD.click(); bR1.click(); bD.click();
+          const A = window.__np3app, T = window.__t8;
+          A.adoptVersion(T.r1V); A.adoptVersion(T.draftV); A.adoptVersion(T.r1V); A.adoptVersion(T.draftV);
         });
         await page.waitForFunction(
           `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "draft:1"`,
@@ -1676,11 +1702,11 @@ export async function runLevel8({ browser, port, report, skip }) {
           const rep = window.__np3app.state.pairs[0].report;
           const draftSat = window.__np3app.state.versions.find((x) => x.id === "draft").control.saturation;
           return { id: rep.id,
-                   sat: document.querySelector('#rep-params .rep-prow[data-path="saturation"]')?.children[1]?.textContent,
+                   sat: document.querySelector('#rep-params .rep-prow[data-path="saturation"]')?.children[1]?.firstChild?.textContent,
                    draftSat: String(draftSat) };
         });
         report(st2.id === "draft:1" && st2.sat === st2.draftSat,
-          "8 report: stale protection — after rapid version switches the shown report is the latest one");
+          "8 report: stale protection — after rapid profile switches the shown report is the latest one");
       }
 
       // a strength change recomputes the report; while it computes the previous one
@@ -1718,11 +1744,11 @@ export async function runLevel8({ browser, port, report, skip }) {
           const rep = window.__np3app.state.pairs[0].report;
           return { cell: document.getElementById("rep-strength").textContent,
                    badge: document.getElementById("rep-updating").hidden,
-                   resultSat: document.querySelector('#rep-params .rep-prow[data-path="saturation"]')?.children[2]?.textContent,
+                   resultSat: document.querySelector('#rep-params .rep-prow[data-path="saturation"]')?.children[1]?.firstChild?.textContent,
                    wantSat: String(rep.parameters.result.saturation) };
         });
         report(s75.cell === "75%" && s75.badge === true && s75.resultSat === s75.wantSat,
-          "8 report: on release the final report lands (strength 75%, the result column, the badge clears)");
+          "8 report: on release the final report lands (strength 75%, the value at the strength, the badge clears)");
         await ev(() => {
           const inp = document.getElementById("cmp-strength");
           inp.value = "100";
@@ -1743,7 +1769,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           renderDE: document.getElementById("rep-render-de")?.textContent ?? "" }));
         report(ed.shown && ed.renderDE.length > 0,
           `8 report: at step 3.1 the report shows beside the editor (dE ${ed.renderDE})`);
-        await ev(() => document.getElementById("to-compare").click());
+        await ev(() => document.getElementById("ed-to-compare").click());
         await page.waitForFunction(`window.__np3app.state.step === "compare"`,
           { timeout: 60000, polling: 200 });
       }
@@ -1765,14 +1791,16 @@ export async function runLevel8({ browser, port, report, skip }) {
     await page.setViewport({ width: 800, height: 600 });
     await ev(() => window.__np3app.compare.draw());
 
-    // --- stage 7: More frames — more pairs, advice, the recommended set, refit (spec/ui.md step 3.2) ---
+    // --- stage 13: Compare is the hub (spec/ui.md decisions #11, #12) — the coverage above the
+    //     panel, the strip as the pair list (× removal, a RAW drop, the JPEG on the tile,
+    //     "Refit to include"), the refit in place replacing the one current profile ---
     // the second pair: the DSC_5584 RAW + its own export again under new names (DSC_5584B.*) —
-    // a pair known to prepare in every browser (the files of level 8 already); the advice,
-    // the selection and the refit only need a second usable pair, not a different scene
+    // a pair known to prepare in every browser; the coverage and the refit only need a second
+    // usable pair, not a different scene
     if (!rootFile("test1/DSC_5584.jpg")) {
-      skip("8 stage 7: no test1/DSC_5584.jpg — the More-step scenarios are skipped");
+      skip("8 stage 13: no test1/DSC_5584.jpg — the Compare-hub scenarios are skipped");
     } else {
-      const moreSettle = (cond, ms = 300000) => page.waitForFunction(cond, { timeout: ms, polling: 250 });
+      const hubSettle = (cond, ms = 300000) => page.waitForFunction(cond, { timeout: ms, polling: 250 });
       // the session strength 80% on Compare: the refit must keep it
       await ev(() => {
         const inp = document.getElementById("cmp-strength");
@@ -1780,152 +1808,188 @@ export async function runLevel8({ browser, port, report, skip }) {
         inp.dispatchEvent(new Event("input", { bubbles: true }));
       });
       const v0 = await ev(() => {
-        const s = window.__np3app.state;
-        return { n: s.versions.length, sel: s.selectedVersionId,
-                 selName: s.versions.find((v) => v.id === s.selectedVersionId).name,
-                 names: s.versions.map((v) => v.name),
-                 versionsJson: JSON.stringify(s.versions.map((v) => ({ id: v.id, control: v.control }))) };
+        const s = window.__np3app.state, v = s.versions[0];
+        return { id: v.id, name: v.name, n: s.versions.length, json: JSON.stringify(s.versions) };
       });
 
-      // the editor's Continue fitting with manual edits goes through the leave warning
+      // the editor with manual edits: Back to Comparison asks first; Discard drops the edits
       await ev(() => document.getElementById("cmp-manual").click());
-      await moreSettle(`window.__np3app.state.step === "edit"`, 60000);
+      await hubSettle(`window.__np3app.state.step === "edit"`, 60000);
       await ev(() => window.__t8.groupSlider("basic", 0, 37));
       const lw = await ev(() => {
-        document.getElementById("ed-to-more").click();
-        return { shown: !document.getElementById("leave-confirm").hidden,
-                 step: window.__np3app.state.step,
-                 btn: !document.getElementById("ed-to-more").hidden };
+        document.getElementById("ed-to-compare").click();
+        return { shown: !document.getElementById("leave-confirm").hidden, step: window.__np3app.state.step };
       });
-      report(lw.btn && lw.shown && lw.step === "edit",
-        "8 stage 7: Continue fitting from the editor with manual edits asks first (the leave warning)");
+      report(lw.shown && lw.step === "edit",
+        "8 stage 13: Back to Comparison with manual edits asks first (the leave warning)");
       await ev(() => document.getElementById("leave-discard").click());
-      await moreSettle(`window.__np3app.state.step === "more"`, 60000);
+      await hubSettle(`window.__np3app.state.step === "compare"`, 60000);
 
-      // the screen: the session's pairs as cards with Remove, the advice of the selected pairs
-      await moreSettle(`window.__np3app.state.advice && window.__np3app.state.advice.coverage.length === 10
-                        && window.__np3app.state.advice.pending === 0`, 120000);
-      const m0 = await ev(() => {
+      // the coverage block at the top of the side panel (where Versions used to be)
+      await hubSettle(`window.__np3app.state.advice && window.__np3app.state.advice.coverage.length === 10
+                       && window.__np3app.state.advice.pending === 0`, 180000);
+      const c0 = await ev(() => {
         const A = window.__np3app, s = A.state;
         window.__t8.prep1 = s.pairs.find((p) => p.id === 1)?.prepared ?? null;
-        return { step: s.step, shown: getComputedStyle(document.getElementById("more")).display !== "none",
-                 cards: [...document.querySelectorAll("#more-pairs .pair")].map((c) => c.dataset.pairId),
-                 removes: document.querySelectorAll("#more-pairs .pair-remove").length,
-                 rows: document.querySelectorAll("#more-advice .more-cov tr").length,
-                 advice: s.advice, ids: document.getElementById("more-refit").dataset.pairIds,
-                 verdict1: document.querySelector('#more-pairs .pair[data-pair-id="1"] .pair-verdict')?.dataset.verdict ?? null };
+        const side = document.getElementById("cmp-sidepanel");
+        return { first: side.firstElementChild.id,
+                 rows: [...document.querySelectorAll("#cmp-coverage .cov-table tr")].map((tr) => tr.dataset.group),
+                 levels: [...document.querySelectorAll("#cmp-coverage .cov-table tr")].map((tr) => tr.dataset.level),
+                 coverage: s.advice.coverage,
+                 tiles: [...document.querySelectorAll("#cmp-strip .cmp-th")].map((c) => c.dataset.pairId),
+                 xs: document.querySelectorAll("#cmp-strip .cmp-th .cmp-th-x").length,
+                 add: !!document.querySelector("#cmp-strip #cmp-add") };
       });
-      report(m0.shown && m0.cards.length >= 1 && m0.removes === m0.cards.length && m0.rows === 10
-             && m0.advice.selected.join(",") === m0.ids && m0.verdict1 !== null,
-        `8 stage 7: the More screen — ${m0.cards.length} pair cards with Remove, coverage of ${m0.rows} groups` +
-        ` over the selected pairs (${m0.ids}), pair 1 verdict "${m0.verdict1}"`);
+      report(c0.first === "cmp-coverage" && c0.rows.length === 10 && c0.levels.every((l) => ["enough", "little", "none"].includes(l)),
+        `8 stage 13: the color coverage tops the side panel (${c0.rows.length} groups: ${c0.levels.join(" ")})`);
+      report(c0.tiles.length >= 1 && c0.xs === c0.tiles.length && c0.add,
+        `8 stage 13: every tile has × and the strip ends with the drop button (${c0.tiles.length} tiles)`);
 
-      // remove a pair (the blocked preview pair): pair 1 keeps its preparation, the versions stay
+      // × removes the blocked preview pair: pair 1 keeps its preparation, the profile stays
       const victim = await ev(() => window.__np3app.state.pairs.find((p) => p.id !== 1)?.id ?? null);
       if (victim !== null) {
-        await ev((v) => document.querySelector(`#more-pairs .pair[data-pair-id="${v}"] .pair-remove`).click(), victim);
+        await ev((v) => document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${v}"] .cmp-th-x`).click(), victim);
         const rm = await ev(() => {
           const s = window.__np3app.state;
-          return { ids: s.pairs.map((p) => p.id), cards: document.querySelectorAll("#more-pairs .pair").length,
-                   kept1: s.pairs.find((p) => p.id === 1)?.prepared === window.__t8.prep1, versions: s.versions.length };
+          return { ids: s.pairs.map((p) => p.id), tiles: document.querySelectorAll("#cmp-strip .cmp-th").length,
+                   kept1: s.pairs.find((p) => p.id === 1)?.prepared === window.__t8.prep1, json: JSON.stringify(s.versions) };
         });
-        report(!rm.ids.includes(victim) && rm.cards === rm.ids.length && rm.kept1 && rm.versions === v0.n,
-          `8 stage 7: removing pair ${victim} keeps the other prepared pairs and the versions (pairs ${rm.ids})`);
+        report(!rm.ids.includes(victim) && rm.tiles === rm.ids.length && rm.kept1 && rm.json === v0.json,
+          `8 stage 13: × removes pair ${victim}; the other pair keeps its preparation, the profile is unchanged (pairs ${rm.ids})`);
       } else {
-        skip("8 stage 7: no second pair to remove");
+        skip("8 stage 13: no second pair to remove");
       }
 
-      // a new pair through the More screen (the same RAW-first loading path and checks)
-      await ev(() => window.__t8.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
-      await moreSettle(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
-                         return p && (p.raw === "error" || (p.raw && !!p.raw.image)); })()`, 600000);
+      // a RAW dropped on the strip: a new inactive tile; a JPEG dropped on the strip itself is refused
+      await ev(async () => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([await (await fetch("/test1/DSC_5584.NEF")).arrayBuffer()], "DSC_5584B.NEF"));
+        document.getElementById("cmp-strip").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      });
+      await hubSettle(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+                         return p && (p.raw === "error" || !!p.raw?.image); })()`, 600000);
       const id3 = await ev(() => window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF").id);
-      await ev((id) => window.__t8.dropOnCard(id, [["/test1/DSC_5584.jpg", "DSC_5584B.jpg"]], "more-pairs"), id3);
-      // wait for a terminal state of the new pair (analyzed, or failed — reported below)
-      await moreSettle(`(() => { const s = window.__np3app.state;
+      {
+        const t = await ev((id) => {
+          const tile = document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`);
+          return { state: tile.dataset.state, inactive: tile.classList.contains("inactive"),
+                   caption: tile.querySelector(".cmp-th-badge")?.textContent ?? "" };
+        }, id3);
+        report(t.state === "no_jpeg" && t.inactive && /Add JPEG/.test(t.caption),
+          `8 stage 13: a RAW dropped on the strip is a new inactive tile waiting for its JPEG ("${t.caption}")`);
+        await ev(async () => {
+          const dt = new DataTransfer();
+          dt.items.add(new File([await (await fetch("/test1/DSC_5584.jpg")).arrayBuffer()], "loose.jpg"));
+          document.getElementById("cmp-strip").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+        });
+        const loose = await ev((id) => ({ status: window.__np3app.state.status,
+          target: window.__np3app.state.pairs.find((p) => p.id === id).target }), id3);
+        report(loose.target === null && /onto its RAW's tile/.test(loose.status),
+          `8 stage 13: a JPEG dropped on the strip (not on a tile) is refused ("${loose.status}")`);
+      }
+      // the JPEG on the tile: prepared, analyzed, dimmed with "Refit to include"; Refit enabled
+      await ev(async (id) => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([await (await fetch("/test1/DSC_5584.jpg")).arrayBuffer()], "DSC_5584B.jpg"));
+        document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`).dispatchEvent(
+          new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      }, id3);
+      await hubSettle(`(() => { const s = window.__np3app.state;
                          const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
                          return p && (p.raw === "error" || p.prepError || p.fitBlocked || p.prepared?.blocked
                                       || (p.frame && p.prepared && s.advice.candidates.includes(p.id)
                                           && s.advice.pending === 0)); })()`, 600000);
-      const m1 = await ev(() => {
+      const m1 = await ev((id) => {
         const s = window.__np3app.state;
-        const p3 = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
-        return { id3: p3.id, target: p3.targetFile?.name, ncc: p3.prepared?.ncc ?? 0,
-                 err: p3.prepError ?? p3.rawError ?? p3.fitBlocked?.code ?? p3.prepared?.blocked?.code ?? null, versions: s.versions.length,
-                 fitting: s.fitting, selected: s.advice.selected, coverage: s.advice.coverage,
-                 card: !!document.querySelector(`#more-pairs .pair[data-pair-id="${p3.id}"] .pair-verdict`),
-                 status: s.status };
-      });
-      report(m1.target === "DSC_5584B.jpg" && m1.ncc >= 0.6 && m1.card && !m1.err,
-        `8 stage 7: a pair added on the More screen is decoded, prepared and analyzed (NCC ${m1.ncc.toFixed(3)}` +
-        `${m1.err ? ", " + m1.err : ""})`);
-      report(m1.versions === v0.n && !m1.fitting && m1.selected.includes(m1.id3)
-             && JSON.stringify(m1.coverage) !== JSON.stringify(m0.advice.coverage),
-        `8 stage 7: the advice follows the new pair without a fit (in the fit: ${m1.selected}, versions ${m1.versions})`);
+        const p3 = s.pairs.find((q) => q.id === id);
+        const tile = document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`);
+        const btn = document.getElementById("cmp-refit");
+        return { target: p3.targetFile?.name, ncc: p3.prepared?.ncc ?? 0,
+                 err: p3.prepError ?? p3.rawError ?? p3.fitBlocked?.code ?? p3.prepared?.blocked?.code ?? null,
+                 state: tile.dataset.state, inactive: tile.classList.contains("inactive"),
+                 caption: tile.querySelector(".cmp-th-badge")?.textContent ?? "",
+                 selected: s.advice.selected, coverage: s.advice.coverage,
+                 btn: btn.textContent, btnOn: !btn.disabled, ids: btn.dataset.pairIds,
+                 json: JSON.stringify(s.versions), fitting: s.fitting };
+      }, id3);
+      report(m1.target === "DSC_5584B.jpg" && m1.ncc >= 0.6 && !m1.err && m1.state === "new" && m1.inactive
+             && m1.caption === "Refit to include",
+        `8 stage 13: the JPEG on the tile completes the pair — prepared (NCC ${m1.ncc.toFixed(3)}), dimmed, "${m1.caption}"`);
+      report(m1.selected.includes(id3) && JSON.stringify(m1.coverage) !== JSON.stringify(c0.coverage)
+             && m1.json === v0.json && !m1.fitting && m1.btnOn && m1.btn === "Refit" && m1.ids === m1.selected.join(","),
+        `8 stage 13: the coverage follows the new pair without a fit; "${m1.btn}" is enabled over ${m1.ids}`);
+      // a prepared new pair can be compared: the current profile on the new frame
+      await ev((id) => document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`).click(), id3);
+      await page.waitForFunction("window.__np3app.compare && window.__np3app.compare.pending === false",
+        { timeout: 120000, polling: 50 });
+      const sel3 = await ev(() => window.__np3app.state.selectedPairId);
+      report(sel3 === id3, "8 stage 13: a prepared new pair is selectable — Compare shows the current profile on it");
 
-      // no inclusion state (decision #7): no checkboxes, no "Use the recommended selection";
-      // the recommended set is shown and the cards outside it are only marked
-      {
-        const r = await ev(() => {
-          const s = window.__np3app.state;
-          const a = s.advice;
-          const marked = [...document.querySelectorAll("#more-pairs .pair")]
-            .filter((c) => c.querySelector(".pair-not-rec")).map((c) => Number(c.dataset.pairId));
-          const want = a.candidates.filter((id) => a.recommended.length && !a.recommended.includes(id));
-          return { boxes: document.querySelectorAll("#more-pairs input[type=checkbox]").length,
-                   useRec: !!document.getElementById("more-use-rec"),
-                   rec: a.recommended, marked, want, selected: a.selected, all: s.pairs.map((p) => p.id),
-                   text: document.querySelector("#more-advice .more-rec")?.textContent ?? "",
-                   ids: document.getElementById("more-refit").dataset.pairIds };
-        });
-        report(r.boxes === 0 && !r.useRec && r.marked.join(",") === r.want.join(",")
-               && (!r.rec.length || /Recommended set/.test(r.text))
-               && r.ids === r.selected.join(","),
-          `8 stage 7: no checkboxes and no auto-selection; recommended ${r.rec.length ? r.rec : "—"},` +
-          ` "not recommended" marks on [${r.marked}]; the refit takes every usable pair (${r.ids})`);
-      }
-
-      // cancel path: a cancelled refit leaves the session unchanged
-      await ev(() => document.getElementById("more-refit").click());
-      await moreSettle(`/iteration/.test(window.__np3app.state.status)`, 300000);
-      await ev(() => document.getElementById("more-cancel").click());
+      // cancel path: a cancelled refit leaves the session unchanged, the screen stays on Compare
+      await ev(() => document.getElementById("cmp-refit").click());
+      await hubSettle(`/iteration/.test(window.__np3app.state.status)`, 300000);
+      const during = await ev(() => document.getElementById("cmp-refit").textContent);
+      await ev(() => document.getElementById("cmp-refit").click());
       const cx = await ev(() => {
         const s = window.__np3app.state;
-        return { status: s.status, fitting: s.fitting, versions: s.versions.length, sel: s.selectedVersionId,
-                 step: s.step, btn: document.getElementById("more-refit").disabled };
+        return { status: s.status, fitting: s.fitting, json: JSON.stringify(s.versions), step: s.step,
+                 btn: document.getElementById("cmp-refit").textContent };
       });
-      report(cx.status.startsWith("Refit cancelled") && !cx.fitting && cx.versions === v0.n
-             && cx.sel === v0.sel && cx.step === "more" && !cx.btn,
-        `8 stage 7: a cancelled refit leaves the session unchanged ("${cx.status}")`);
+      report(during === "Cancel the refit" && cx.status.startsWith("Refit cancelled") && !cx.fitting
+             && cx.json === v0.json && cx.step === "compare" && cx.btn === "Refit",
+        `8 stage 13: while refitting the button cancels; a cancelled refit leaves the profile unchanged ("${cx.status}")`);
 
-      // refit: exactly the displayed ids, the next _rN version, back to Compare, strength kept
-      const shown = await ev(() => document.getElementById("more-refit").dataset.pairIds);
-      await ev(() => document.getElementById("more-refit").click());
-      await moreSettle(`window.__np3app.state.status.startsWith("Refit finished")
-                        && window.__np3app.state.step === "compare"`, 900000);
-      const rf = await ev(() => {
-        const s = window.__np3app.state;
-        const v = s.versions[s.versions.length - 1];
-        return { n: s.versions.length, id: v.id, name: v.name, kind: v.kind, parentId: v.parentId,
-                 pairIds: v.pairIds, ctlName: v.control.name, sel: s.selectedVersionId, step: s.step,
-                 strength: s.strength, nParams: v.fitVector.length,
-                 versionsJson: JSON.stringify(s.versions.slice(0, -1).map((x) => ({ id: x.id, control: x.control }))),
-                 btn: !!document.querySelector(`#cmp-versions button[data-version="${v.id}"]`) };
-      });
-      report(rf.n === v0.n + 1 && rf.kind === "refit" && rf.name === `${v0.selName}_r1`
-             && rf.ctlName === rf.name && !v0.names.includes(rf.name) && rf.parentId === v0.sel && rf.nParams === 56,
-        `8 stage 7: the refit creates "${rf.name}" (id ${rf.id}, kind ${rf.kind}, parent ${rf.parentId})`);
-      report(rf.pairIds.join(",") === shown && shown.split(",").length >= 2,
-        `8 stage 7: the refit used exactly the displayed pair ids (${rf.pairIds} vs ${shown})`);
-      report(rf.sel === rf.id && rf.step === "compare" && rf.strength === 80 && rf.btn
-             && rf.versionsJson === v0.versionsJson,
-        "8 stage 7: back on Compare with the new version selected, strength 80% kept, earlier versions unchanged");
-      // the draft stays selectable and unchanged
-      await ev(() => document.querySelector('#cmp-versions button[data-version="draft"]').click());
-      const back = await ev(() => ({ sel: window.__np3app.state.selectedVersionId,
-        json: JSON.stringify(window.__np3app.state.versions.slice(0, -1).map((x) => ({ id: x.id, control: x.control }))) }));
-      report(back.sel === "draft" && back.json === v0.versionsJson,
-        "8 stage 7: the draft stays selectable after the refit, unchanged");
+      // refit: exactly the shown ids; the profile is replaced (same name, one profile), Compare stays
+      const shown = await ev(() => document.getElementById("cmp-refit").dataset.pairIds);
+      await ev(() => document.getElementById("cmp-refit").click());
+      await hubSettle(`window.__np3app.state.status.startsWith("Refit finished")
+                       && window.__np3app.state.step === "compare" && !window.__np3app.state.fitting`, 900000);
+      const rf = await ev((id) => {
+        const s = window.__np3app.state, v = s.versions[0];
+        const tile = document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`);
+        return { n: s.versions.length, id: v.id, name: v.name, kind: v.kind, ctlName: v.control.name,
+                 pairIds: v.pairIds, sel: s.selectedVersionId, step: s.step, strength: s.strength,
+                 nParams: v.fitVector.length, tile: tile.dataset.state,
+                 btn: document.getElementById("cmp-refit").disabled,
+                 note: document.getElementById("cmp-refit").title,
+                 noCaption: !document.getElementById("cmp-refit-count") };
+      }, id3);
+      report(rf.n === 1 && rf.id !== v0.id && rf.kind === "refit" && rf.name === v0.name && rf.ctlName === v0.name
+             && rf.sel === rf.id && rf.nParams === 56,
+        `8 stage 13: the refit replaces the profile — one profile (${rf.id}), the name kept ("${rf.name}")`);
+      report(rf.pairIds.join(",") === shown && shown.split(",").length >= 2 && rf.step === "compare" && rf.strength === 80,
+        `8 stage 13: the refit used exactly the shown pair ids (${rf.pairIds}); still on Compare, strength 80% kept`);
+      report(rf.tile === "active" && rf.btn && /already fitted/.test(rf.note) && rf.noCaption,
+        `8 stage 13: the new pair's tile is active now; Refit is off until the pairs change ("${rf.note}")`);
+      // the layout: Refit is a square right of the strip; Manual adjustments and Download NP3
+      // at the bottom of the side panel; Download NP3 saves the current profile at the strength
+      {
+        const lay = await ev(() => {
+          const r = (id) => document.getElementById(id).getBoundingClientRect();
+          const strip = r("cmp-strip"), refit = r("cmp-refit"), man = r("cmp-manual"), dl = r("cmp-download"),
+                side = r("cmp-sidepanel"), cov = r("cmp-coverage");
+          return { right: refit.left >= strip.right - 1, top: refit.top < r("cmp-bar").top,
+                   square: Math.abs(refit.width - refit.height) <= 1 && refit.width >= 60 && refit.width <= 110,
+                   // the side panel may scroll at a small window: the actions are its last block
+                   bottom: man.top > cov.bottom && dl.top >= man.bottom - 1
+                     && document.getElementById("cmp-sidepanel").lastElementChild.id === "cmp-actions",
+                   manText: document.getElementById("cmp-manual").textContent.trim() };
+        });
+        report(lay.right && lay.top && lay.square && lay.bottom && lay.manText === "Manual adjustments",
+          `8 stage 13: Refit is a square right of the strip; "${lay.manText}" and Download NP3 sit at the bottom of the side panel`);
+        await page.evaluate(() => {
+          window.__exp = [];
+          const orig = URL.createObjectURL.bind(URL);
+          URL.createObjectURL = (blob) => { blob.arrayBuffer().then((b) => window.__exp.push(new Uint8Array(b))); return orig(blob); };
+          document.getElementById("cmp-download").click();
+        });
+        await page.waitForFunction("window.__exp.length > 0", { timeout: 15000 });
+        const got = new Uint8Array(await page.evaluate(() => Array.from(window.__exp.at(-1))));
+        const cur = await ev(() => ({ ctl: window.__np3app.state.versions[0].control, st: window.__np3app.state.strength }));
+        const want = serialize({ ...scaled(cur.ctl, cur.st), name: cur.ctl.name });
+        report(cur.st === 80 && got.length === want.length && got.every((v, i) => v === want[i]),
+          `8 stage 13: Download NP3 on Compare saves the current profile at ${cur.st}% byte for byte`);
+      }
       await ev(() => {
         const inp = document.getElementById("cmp-strength");
         inp.value = "100";

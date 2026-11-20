@@ -68,7 +68,7 @@ On steps 2 and 3.1 there is a **profile strength** slider (see the "Profile stre
 - If there are several pairs, a strip of thumbnails on top. The report is shown for the selected pair and aggregated over all.
 - The report (see below).
 - The profile strength slider. The render and the report are recomputed on a strength change.
-- Profile version and version history: draft, then `_r1`, `_r2`... Any past version can be returned to.
+- ~~Profile version and version history: draft, then `_r1`, `_r2`... Any past version can be returned to.~~ Removed by decision #12: one current profile.
 - Two buttons:
   - **"Looks good, go to manual adjustment"** goes to step 3.1;
   - **"Continue fitting"** goes to step 3.2.
@@ -100,6 +100,8 @@ The starting values are taken from the selected profile version.
 - One can return to step 2 and continue fitting. Manual edits are not carried over in that case, a warning is needed.
 
 ## Step 3.2. More frames
+
+> Since 2026-11-20 there is no separate More frames screen: adding/removing pairs, the coverage hint and the refit live on Compare (decision #11), and there is one current profile instead of versions (decision #12). The rules below (checks, coverage, recommended set, refit from zero) still apply there.
 
 - Loading one or more new pairs with the same checks as at step 1.
 - A hint on which colors are missing: coverage of groups over the already loaded pairs (`analyze.coverage`, `analyze.suggest`). Example: "little skin and sky".
@@ -156,11 +158,15 @@ Fixed 2026-11-19 at the start of the full-flow implementation ([ui-plan.md](ui-p
 10. **No strength-set export (2026-11-20).** The "Save strength set (30/50/70/100%)" button is removed from every page (wizard step 3.1 and both editor pages). A user who wants several strengths moves the slider and saves each NP3 with "Save NP3". Decision #5 stays for the single export: it always scales from the base control. Code to remove: the button and its i18n key, `transfer.exportSet`, `web/lib/strength-set.js`, `make_strength_set_golden.py` and its golden fixture with the level-1/8/8b checks that use them; `strength.py` (CLI) is not affected.
 
 11. **Compare is the hub after the first fit (2026-11-20, user review).** Supersedes step 3.2 "More frames" as a separate screen and the "Continue fitting" / "Back to Start" buttons. Start is only the beginning: once a fit exists the session lives on Compare (and its manual step 3.1); starting over is a page reload.
-   - **Color coverage on Compare.** The coverage table of the pairs in the fit set (`analyze.coverage` / `level`: group, share, enough / little / none) sits in the side panel **above Versions**, with the "Little or none: …" line and the `suggest` lines under it. It follows every pair change without a fit (the advice records of stage 7).
+   - **Color coverage on Compare.** The coverage table of the pairs in the fit set (`analyze.coverage` / `level`: group, share, enough / little / none) sits at the top of the side panel (it was "above Versions"; the Versions list is gone, decision #12), with the "Little or none: …" line and the `suggest` lines under it. It follows every pair change without a fit (the advice records of stage 7).
    - **The thumbnail strip is the pair list.** The whole strip is a drop zone for RAW files; at its end a **drop button** tile (click = the RAW picker). A dropped RAW becomes a new tile at once, **inactive** (dimmed): decoding, then the RAW preview. An inactive tile takes its JPEG by a drop onto the tile or a click (the JPEG picker; one file — the decision #7 rules). The pair then prepares (progress on the tile); prepared, it shows the photo but stays dimmed with the caption **"Refit to include"** until a version that contains it is selected. A prepared new pair can be clicked: Compare shows the selected version on it and the report covers it (a preview of how the profile does on the new frame); RAW-only, decoding and preparing tiles are not selectable. A blocked pair keeps its reason on the tile (badge + title).
    - **× on every tile** = "Remove from fit" (decision #7: the pair leaves the session; a running refit is cancelled; versions are kept). The advice of stage 7 moves onto the tiles: the high-error hint and "not recommended" become a small warning badge with the text in the tooltip.
-   - **Refit button** at the bottom of the side panel: "Refit (n pairs)" over `refitPairIds`, with the skipped count (decision #7) under it; enabled when n ≥ 1 and the set differs from the selected version's pairs (otherwise the result would repeat it); while it runs it reads "Cancel the refit". The finished refit becomes the next `_rN` version, selected, and the screen stays on Compare.
+   - **Refit button** at the top, right of the strip — a square about the size of a thumbnail (layout change of 2026-11-20): the label is just "Refit" (no pair count) over `refitPairIds`, no caption under it (2026-11-20 review; why it is off and the skipped count of decision #7 are in its tooltip only); enabled when n ≥ 1 and the set differs from the selected version's pairs (otherwise the result would repeat it); while it runs it reads "Cancel the refit". The finished refit becomes the next `_rN` version, selected, and the screen stays on Compare.
+   - **At the bottom of the side panel:** "Manual adjustments" (was "Looks good — manual adjustment", step 3.1) and **"Download NP3"** — the current profile at the current strength, the same file as Save NP3 in the editor.
    - **Removed:** "Continue fitting" and "Back to Start" on Compare, "Continue fitting" and "Back to Start" in the editor (step 3.1 keeps "Back to Comparison"), the More frames screen (`#more`, `more-view.js` UI; the pure advice stays), the Start-screen "Comparison" button. A RAW dropped on the page outside the strip while on Compare goes to the strip.
+
+12. **No version history (2026-11-20, user review).** Supersedes decision #4 and the "Profile version and version history" item of step 2: the wizard always works with **one current profile**. There is no Versions list; a refit replaces the profile (the name stays, no `_rN` suffix; internally the id changes — `draft`, `r1`, `r2`, … — so the render/report caches never mix the two); a cancelled or failed refit leaves the current profile as it was. "Refit to include" on a tile means "not in the current profile". Step 3.1 edits the current profile; leaving it with edits still asks first (the edits are discarded, the profile stays). The report's "difference from the previous version after a refit" goes away with it.
+13. **Report panel layout (2026-11-20, user review).** (a) Every report section — Summary, Color match, Error map, NP3 parameters — is a collapsible group like the editor's groups (`details.grp`, the title in the summary line), open by default; the error-map group hides as a whole in the "All pairs" scope. (b) NP3 parameters show **one value column**: the value at the report's strength, i.e. exactly what Download NP3 writes; the "Profile / Result · N%" header row and the second column are gone (at 100% they were identical, and the strength is already in the summary). When the strength changes a value, the profile value at 100% is in the cell's tooltip; clipped values are highlighted as before; manual deltas follow the value. (c) The color-match table fits the panel width: the target and render swatches share one "Color" cell (target left, render right, each with its own tooltip), and the report panel never scrolls sideways.
 
 ## Profile strength
 
@@ -175,26 +181,28 @@ Strength sets what part of the way from the Nikon neutral to the profile to go. 
 - Strength is a multiplier on top of the profile, not an edit of its fields. At step 3.1 the sliders show the profile values at 100%, strength is applied to them at render and at save. So strength can be changed back and forth without losses, and manual edits are not reset.
 - Above 100% the profile is strengthened. Fields that hit ±100 and get clipped are highlighted, a warning next to them.
 - Fitting (steps 1 and 3.2) always runs at 100%. The chosen strength is kept after it and applied to the new version.
-- The report states the strength it is computed at. NP3 parameters are shown in two columns: profile and result with strength.
+- The report states the strength it is computed at. ~~NP3 parameters are shown in two columns: profile and result with strength.~~ NP3 parameters show one column, the value at the strength (decision #13).
 - The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions"). ~~Only the strength-set files differ: `<name>-<percent>.NP3`.~~ (strength sets removed, decision #10)
 
 ## Report
 
 It is produced after every step: after a fit, after a refit and after every change in manual adjustment. It is computed on the aligned pair over the target pixels without overexposure, as `analyze.region_sums`.
 
+Every section is a collapsible group, open by default (decision #13).
+
 **1. Summary.** The profile strength the report is computed at. The mean dE2000 of the render vs the target, of the neutral (without a profile) vs the target, and the mean over color bins (`bin_mean`). At step 3.1 the difference from the fitted version is shown next to it.
 
 **2. Color-match table.** One row per group from `analyze.GROUPS` with a share above 1% of the frame:
 
-| Group | Share | Target | Render | dE | dL | dC | dh |
-|---|---|---|---|---|---|---|---|
-| skin | 6% | ■ | ■ | 2.1 | -0.8 | +1.2 | +3 deg |
+| Group | Share | Color | dE | dL | dC | dh |
+|---|---|---|---|---|---|---|
+| skin | 6% | ■■ | 2.1 | -0.8 | +1.2 | +3 deg |
 
-"Target" and "Render" are swatches of the group's mean color. Rows can be sorted. Clicking a row highlights its region on the image.
+"Color" holds two swatches of the group's mean color: the target (left) and the render (right) — one cell so the table fits the panel (decision #13). Rows can be sorted. Clicking a row highlights its region on the image.
 
 **3. Error map.** dE2000 per pixel, overlaid on the image or next to it. A sequential scale with a legend (0, 2, 5, 10+). Overexposed and unaligned pixels are painted with a separate neutral color. There is a "dE / dL / dC / dh" switch, where dL, dC and dh have a diverging scale.
 
-**4. NP3 parameters.** All fields of the current version in the same groups as at step 3.1, with a square curve thumbnail over a histogram backdrop (decision #8). Zero fields are muted. At step 2 after a refit the difference from the previous version is shown.
+**4. NP3 parameters.** All fields of the current profile in the same groups as at step 3.1, one value column — the value at the report's strength (decision #13) — with a square curve thumbnail over a histogram backdrop (decision #8). Zero fields are muted. At step 2 after a refit the difference from the previous version is shown.
 
 ~~The report can be downloaded as a JSON file: summary, table, parameters, file names.~~ Removed by decision #8: there is no "Download report" button.
 

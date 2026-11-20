@@ -57,7 +57,19 @@ function installHelpers() {
       inp.value = String(v);
       inp.dispatchEvent(new Event("input", { bubbles: true }));
     },
-    clickVersion: (id) => document.querySelector(`#cmp-versions button[data-version="${id}"]`).click(),
+    // one current profile (decision #12): "switching" = making a profile current (the refit's effect)
+    adopt: (v) => window.__np3app.adoptVersion(v),
+    // the strip (decision #11): a RAW through the strip picker, a JPEG dropped on a tile
+    stripRaw: async (url, name) => {
+      const dt = new DataTransfer();
+      dt.items.add(await fileOf(url, name));
+      const inp = document.getElementById("cmp-raw-file");
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    tileJpeg: async (id, url, name) => dropFiles(document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"]`),
+                                                 [await fileOf(url, name)]),
+    tileX: (id) => document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${id}"] .cmp-th-x`).click(),
     snapCC: () => {
       const c = document.getElementById("cc");
       const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
@@ -288,32 +300,32 @@ async function mainFlow({ browser, port, report, skip }) {
     await ev(() => document.activeElement?.blur?.());
   }
 
-  // ---------- 4. Manual -> More: the leave warning, Discard ----------
+  // ---------- 4. Manual -> Compare: the leave warning, Discard ----------
   {
     const lw = await ev(() => {
-      document.getElementById("ed-to-more").click();
+      document.getElementById("ed-to-compare").click();
       return { shown: !document.getElementById("leave-confirm").hidden, step: window.__np3app.state.step };
     });
     await ev(() => document.getElementById("leave-discard").click());
-    await wf(`window.__np3app.state.step === "more"`, 60000);
+    await wf(`window.__np3app.state.step === "compare"`, 60000);
     const d = await ev(() => {
       const s = window.__np3app.state;
       return { same: JSON.stringify(s.control) === JSON.stringify(s.versions[0].control),
                versions: s.versions.length };
     });
     report(lw.shown && lw.step === "edit" && d.same && d.versions === 1,
-      "8b flow: Manual -> More asks first; Discard drops the edits, the version stays");
+      "8b flow: Manual -> Compare asks first; Discard drops the edits, the profile stays");
   }
 
-  // ---------- 5. More: a second pair (a renamed copy — a pair known to prepare everywhere) ----------
-  await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
-  await wf(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
-             return p && (p.raw === "error" || !!p.raw?.image); })()`, 600000, 500);
-  await ev(() => window.__t8b.dropOnCard(
+  // ---------- 5. Compare strip: a second pair (a renamed copy — a pair known to prepare everywhere) ----------
+  const nameId = (n) => `window.__np3app.state.pairs.find((q) => q.rawFile?.name === "${n}")`;
+  await ev(() => window.__t8b.stripRaw("/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
+  await wf(`(() => { const p = ${nameId("DSC_5584B.NEF")}; return p && (p.raw === "error" || !!p.raw?.image); })()`, 600000, 500);
+  await ev(() => window.__t8b.tileJpeg(
     window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF").id,
-    "/test1/DSC_5584.jpg", "DSC_5584B.jpg", "more-pairs"));
+    "/test1/DSC_5584.jpg", "DSC_5584B.jpg"));
   await wf(`(() => { const s = window.__np3app.state;
-             const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+             const p = ${nameId("DSC_5584B.NEF")};
              return p && (p.raw === "error" || p.prepError || p.prepared?.blocked
                           || (p.prepared && s.advice && s.advice.candidates.includes(p.id) && s.advice.pending === 0)); })()`,
     900000, 250);
@@ -321,117 +333,116 @@ async function mainFlow({ browser, port, report, skip }) {
     const s = window.__np3app.state;
     const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
     return { id: p.id, ncc: p.prepared?.ncc ?? 0, err: p.prepError ?? p.prepared?.blocked?.code ?? null,
-             ids: document.getElementById("more-refit").dataset.pairIds };
+             ids: document.getElementById("cmp-refit").dataset.pairIds,
+             tile: document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${p.id}"]`).dataset.state };
   });
-  report(more.ncc >= 0.6 && !more.err && more.ids.split(",").length === 2,
-    `8b flow: More adds a second pair (NCC ${more.ncc.toFixed(3)}), the refit selection is ${more.ids}`);
+  report(more.ncc >= 0.6 && !more.err && more.ids.split(",").length === 2 && more.tile === "new",
+    `8b flow: the strip adds a second pair (NCC ${more.ncc.toFixed(3)}, "Refit to include"), the refit set is ${more.ids}`);
 
-  // ---------- 5b. Remove from fit (decision #7): while decoding, a RAW-only card, during a refit ----------
+  // ---------- 5b. Remove from fit (×): while decoding, a RAW-only tile, during a refit ----------
   {
     const v0 = await ev(() => JSON.stringify(window.__np3app.state.versions));
-    // a RAW removed while it decodes: the card goes at once, the late decode lands nowhere
-    await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584E.NEF"));
+    // a RAW removed while it decodes: the tile goes at once, the late decode lands nowhere
+    await ev(() => window.__t8b.stripRaw("/test1/DSC_5584.NEF", "DSC_5584E.NEF"));
+    await wf(`!!${nameId("DSC_5584E.NEF")}`, 30000, 20);
     const e = await ev(() => {
       const s = window.__np3app.state;
       const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584E.NEF");
       const pending = p?.raw === "pending";
-      document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"] .pair-remove`).click();
-      return { pending, gone: !s.pairs.includes(p) && !document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"]`) };
+      window.__t8b.tileX(p.id);
+      return { pending, gone: !s.pairs.includes(p) && !document.querySelector(`#cmp-strip .cmp-th[data-pair-id="${p.id}"]`) };
     });
     await wf(`!window.__np3app.state.pairs.some((p) => p.raw === "pending")`, 600000, 300);
     await sleep(1000);
     const e2 = await ev(() => ({ names: window.__np3app.state.pairs.map((p) => p.rawFile.name),
                                  raw: window.__np3app.state.raw?.name ?? null }));
     report(e.pending && e.gone && !e2.names.includes("DSC_5584E.NEF") && e2.raw !== "DSC_5584E.NEF",
-      `8b remove: a RAW removed while it decodes is gone for good (pairs ${e2.names.join(", ")})`);
-    // a RAW-only card is not fitted and is counted as skipped
-    await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584D.NEF"));
-    await wf(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584D.NEF");
-               return p && !!p.raw?.image; })()`, 600000, 300);
-    const d = await ev(() => ({ ids: document.getElementById("more-refit").dataset.pairIds,
-                                txt: document.getElementById("more-refit-ids").textContent }));
+      `8b remove: a RAW removed (×) while it decodes is gone for good (pairs ${e2.names.join(", ")})`);
+    // a RAW-only tile is not fitted and is counted as skipped
+    await ev(() => window.__t8b.stripRaw("/test1/DSC_5584.NEF", "DSC_5584D.NEF"));
+    await wf(`(() => { const p = ${nameId("DSC_5584D.NEF")}; return p && !!p.raw?.image; })()`, 600000, 300);
+    const d = await ev(() => ({ ids: document.getElementById("cmp-refit").dataset.pairIds,
+                                txt: document.getElementById("cmp-refit").title }));
     report(d.ids.split(",").length === 2 && /1 without a JPEG, 0 blocked — skipped/.test(d.txt),
-      `8b remove: a RAW-only card stays out of the refit ("${d.txt}")`);
-    // removing a card during a refit cancels the refit; the versions stay
-    await ev(() => document.getElementById("more-refit").click());
+      `8b remove: a RAW-only tile stays out of the refit ("${d.txt}")`);
+    // removing a tile during a refit cancels the refit; the profile stays
+    await ev(() => document.getElementById("cmp-refit").click());
     await wf(`/iteration/.test(window.__np3app.state.status)`, 600000, 100);
     const r = await ev(() => {
       const s = window.__np3app.state;
       const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584D.NEF");
-      document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"] .pair-remove`).click();
+      window.__t8b.tileX(p.id);
       return { status: s.status, fitting: s.fitting, n: s.pairs.length };
     });
     await sleep(2000);                         // a late result of the cancelled refit would land here
     const after = await ev(() => JSON.stringify(window.__np3app.state.versions));
     report(r.status.startsWith("Refit cancelled") && !r.fitting && r.n === 2 && after === v0,
-      `8b remove: removing a card during a refit cancels it, the versions are unchanged ("${r.status}")`);
+      `8b remove: removing a tile during a refit cancels it, the profile is unchanged ("${r.status}")`);
   }
 
   // ---------- 6. race (c): cancel a refit mid-LM, start another at once ----------
   {
     const v0 = await ev(() => {
       const s = window.__np3app.state;
-      return { n: s.versions.length, sel: s.selectedVersionId,
-               selName: s.versions.find((v) => v.id === s.selectedVersionId).name,
-               json: JSON.stringify(s.versions) };
+      return { id: s.versions[0].id, name: s.versions[0].name, json: JSON.stringify(s.versions) };
     });
-    await ev(() => document.getElementById("more-refit").click());
+    await ev(() => { window.__t8b.draftV = window.__np3app.state.versions[0]; });
+    await ev(() => document.getElementById("cmp-refit").click());
     await wf(`/iteration/.test(window.__np3app.state.status)`, 600000, 100);
     const mid = await ev(() => {
-      document.getElementById("more-cancel").click();
+      document.getElementById("cmp-refit").click();       // "Cancel the refit"
       const cancelled = window.__np3app.state.status;
-      document.getElementById("more-refit").click();
+      document.getElementById("cmp-refit").click();       // "Refit" again
       return { cancelled, fitting: window.__np3app.state.fitting };
     });
-    await wf(`window.__np3app.state.status.startsWith("Refit finished") && window.__np3app.state.step === "compare"`,
-      1200000, 500);
+    await wf(`window.__np3app.state.status.startsWith("Refit finished") && window.__np3app.state.step === "compare"
+              && !window.__np3app.state.fitting`, 1200000, 500);
     await sleep(2000);                         // a late result of the cancelled run would land here
     const rf = await ev(() => {
       const s = window.__np3app.state;
-      const v = s.versions[s.versions.length - 1];
+      const v = s.versions[0];
       return { n: s.versions.length, id: v.id, name: v.name, kind: v.kind, parentId: v.parentId,
-               pairIds: v.pairIds, sel: s.selectedVersionId, step: s.step,
-               firstJson: JSON.stringify(s.versions.slice(0, -1)) };
+               pairIds: v.pairIds, sel: s.selectedVersionId, step: s.step };
     });
     report(mid.cancelled.startsWith("Refit cancelled") && mid.fitting === true,
       `8b race: cancel mid-LM then refit at once — the second refit starts ("${mid.cancelled}")`);
-    report(rf.n === v0.n + 1 && rf.name === `${v0.selName}_r1` && rf.kind === "refit" && rf.parentId === v0.sel
-           && rf.pairIds.length === 2 && rf.sel === rf.id && rf.firstJson === v0.json,
-      `8b race: exactly one new version "${rf.name}" (id ${rf.id}) over ${rf.pairIds}, no orphan, earlier versions unchanged`);
+    report(rf.n === 1 && rf.id === "r1" && rf.name === v0.name && rf.kind === "refit" && rf.parentId === v0.id
+           && rf.pairIds.length === 2 && rf.sel === rf.id,
+      `8b race: exactly one replacement profile (${rf.id}, "${rf.name}") over ${rf.pairIds}, no orphan`);
   }
 
-  // ---------- 7. race (d): version switches while the LUTs build ----------
+  // ---------- 7. race (d): profile switches while the LUTs build ----------
   {
     await cmpSettle();
-    const ids = await ev(() => window.__np3app.state.versions.map((v) => v.id));
-    const [d, r] = [ids[0], ids[ids.length - 1]];
-    // a new strength: every version needs a fresh LUT, so the switches race the builds
-    await ev((args) => {
+    await ev(() => { window.__t8b.r1V = window.__np3app.state.versions[0]; });
+    const [d, r] = ["draft", "r1"];
+    // a new strength: every profile needs a fresh LUT, so the switches race the builds
+    await ev(() => {
       const T = window.__t8b;
       T.setStrength(65);   // a multiple of the slider step (5)
-      for (const id of [args.r, args.d, args.r, args.d, args.r]) T.clickVersion(id);
-    }, { d, r });
+      for (const v of [T.r1V, T.draftV, T.r1V, T.draftV, T.r1V]) T.adopt(v);
+    });
     await cmpSettle();
     const race = await ev(() => ({ snap: window.__t8b.snapCC(), sel: window.__np3app.state.selectedVersionId }));
     const miss = await reportAt(`${r}:1`, 65);
-    report(!miss, `8b race: rapid version switches — the report of the last selected version lands (${r}@65)${miss ? " — " + miss : ""}`);
-    await ev((id) => window.__t8b.clickVersion(id), d);
+    report(!miss, `8b race: rapid profile switches — the report of the last profile lands (${r}@65)${miss ? " — " + miss : ""}`);
+    await ev(() => window.__t8b.adopt(window.__t8b.draftV));
     await cmpSettle();
     const snapD = await ev(() => window.__t8b.snapCC());
-    await ev((id) => window.__t8b.clickVersion(id), r);
+    await ev(() => window.__t8b.adopt(window.__t8b.r1V));
     await cmpSettle();
     const snapR = await ev(() => window.__t8b.snapCC());
     if (snapD === snapR) {
-      skip(`8b race: version switches during LUT builds — ${d} and ${r} render identically, nothing to tell apart`);
+      skip(`8b race: profile switches during LUT builds — ${d} and ${r} render identically, nothing to tell apart`);
     } else {
       report(race.sel === r && race.snap === snapR,
-        `8b race: rapid version switches during LUT builds — the screen shows the last selected version (${r})`);
+        `8b race: rapid profile switches during LUT builds — the screen shows the last profile (${r})`);
     }
   }
 
-  // ---------- 8. select a version -> Save (single NP3; no strength-set control) ----------
+  // ---------- 8. the draft profile current again -> Save (single NP3; no strength-set control) ----------
   {
-    await ev(() => window.__t8b.clickVersion("draft"));
+    await ev(() => window.__t8b.adopt(window.__t8b.draftV));
     await ev(() => window.__t8b.setStrength(70));
     await cmpSettle();
     await ev(() => document.getElementById("cmp-manual").click());

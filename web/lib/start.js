@@ -124,7 +124,7 @@ export function fitCountText(state) {
  */
 export const START_IDS = {
   pairs: "pairs", name: "fit-name", nameErr: "fit-name-err", fit: "fit", fitCount: "fit-count",
-  toCompare: "to-compare", rawZone: "raw-drop", rawPicker: "raw-file",
+  rawZone: "raw-drop", rawPicker: "raw-file",
 };
 
 export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit = () => {},

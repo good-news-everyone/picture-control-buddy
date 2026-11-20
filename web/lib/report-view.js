@@ -3,8 +3,10 @@
 // web/lib/report-worker.js) and the aggregate over the compared pairs
 // (state.reportAggregate) — the summary, the sortable color-match table with the
 // target/render swatches, the per-pixel error map with the sequential/diverging
-// legends and the two-column NP3 parameters view with the square curve thumbnail over the
-// neutral luma histogram (no JSON download — spec/ui.md decision #8). Pure presentation: every number comes from web/lib/analyze.js / the
+// legends and the NP3 parameters (one value column: the value at the current strength,
+// the one Download NP3 writes) with the square curve thumbnail over the neutral luma
+// histogram (no JSON download — spec/ui.md decision #8). Every section is a collapsible
+// details.grp, as the editor groups (decision #13). Pure presentation: every number comes from web/lib/analyze.js / the
 // report worker; this module owns no color science. The same component shows on the
 // Compare screen and beside the manual editor (spec/ui.md steps 2 and 3.1); a row
 // click highlights the group's pixels on the compare image through the onHighlight
@@ -173,11 +175,19 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     overlayBox);
   const paramsEl = h("div", { id: "rep-params" });
   const curveEl = h("div", { id: "rep-curve" });
+  // every section is a collapsible group, open by default (spec/ui.md decision #13)
+  const grp = (key, label, ...kids) => {
+    const d = h("details", { class: "grp rep-grp", "data-sec": key },
+      h("summary", {}, h("span", { "data-i18n": label }, t(label))), ...kids);
+    d.open = true;
+    return d;
+  };
+  const mapGrp = grp("map", "Error map", mapSection);
   const body = h("div", { id: "rep-body" }, empty,
-    h("h2", { "data-i18n": "Summary" }, t("Summary")), summaryDl,
-    h("h2", { "data-i18n": "Color match" }, t("Color match")), tableEl,
-    h("h2", { "data-i18n": "Error map" }, t("Error map")), mapSection,
-    h("h2", { "data-i18n": "NP3 parameters" }, t("NP3 parameters")), paramsEl, curveEl);
+    grp("summary", "Summary", summaryDl),
+    grp("table", "Color match", tableEl),
+    mapGrp,
+    grp("params", "NP3 parameters", paramsEl, curveEl));
 
   root.replaceChildren(head, body);
 
@@ -196,24 +206,24 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
 
   // ---------- the color-match table ----------
   const COLS = [
-    ["group", t("Group")], ["share", t("Share")], ["target", t("Target")],
-    ["render", t("Render")], ["dE", "dE"], ["dL", "dL"], ["dC", "dC"], ["dh", "dh"],
+    ["group", t("Group")], ["share", t("Share")], ["target", t("Color")], ["dE", "dE"], ["dL", "dL"], ["dC", "dC"], ["dh", "dh"],
   ];
   const colValue = {
     group: (r) => r.group,
     share: (r) => r.share,
     target: (r) => r.targetLab[0],
-    render: (r) => r.renderLab[0],
     dE: (r) => r.dE, dL: (r) => r.dL, dC: (r) => r.dC,
     dh: (r) => (r.dh == null ? -Infinity : r.dh),
   };
 
-  function swatch(lab) {
+  // the target and render swatches share one cell (target left, render right) so the
+  // table fits the panel width without a horizontal scroll
+  function swatch(lab, what) {
     const d = h("div", { class: "rep-sw" });
     const out = labToSrgb(Float64Array.from(lab));
     const c = [0, 1, 2].map((k) => Math.round(255 * Math.min(1, Math.max(0, out[k]))));
     d.style.background = `rgb(${c.join(",")})`;
-    d.title = `L ${f2(lab[0])}, a ${f2(lab[1])}, b ${f2(lab[2])}`;
+    d.title = `${t(what)}: L ${f2(lab[0])}, a ${f2(lab[1])}, b ${f2(lab[2])}`;
     return d;
   }
 
@@ -237,8 +247,7 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
       const row = h("tr", { "data-group": r.group, class: gi === hlGroup ? "sel" : "" },
         h("td", { class: "tg" }, r.group),
         h("td", {}, `${(100 * r.share).toFixed(1)}%`),
-        h("td", {}, swatch(r.targetLab)),
-        h("td", {}, swatch(r.renderLab)),
+        h("td", { class: "sw" }, swatch(r.targetLab, "Target"), swatch(r.renderLab, "Render")),
         h("td", {}, f2(r.dE)), h("td", {}, fsign(r.dL)), h("td", {}, fsign(r.dC)),
         h("td", {}, r.dh == null ? "—" : `${r.dh.toFixed(1)}°`));
       row.addEventListener("click", () => {
@@ -285,11 +294,11 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   function paintMapSection(rep, agg) {
     // the map is per-pixel: only for a single pair (in the aggregate scope it is hidden)
     if (agg || !rep?.maps) {
-      mapSection.hidden = true;
+      mapGrp.hidden = true;
       if (overlayChk.checked) { overlayChk.checked = false; onMapOverlay?.(null); }
       return;
     }
-    mapSection.hidden = false;
+    mapGrp.hidden = false;
     const p = currentPair();
     const masks = p?.prepared?.masks ?? {};
     mapCanvas.width = rep.w3;
@@ -321,23 +330,20 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     if (!rep?.parameters) return;
     const { base, result, deltas } = rep.parameters;
     const clipped = clippedPaths(base, rep.strength);
-    let first = true;
+    // one value column: the value at the report's strength — what Download NP3 writes
+    // (spec/ui.md decision #13); the profile value at 100% is in the tooltip when it differs
     for (const sec of PARAM_SECTIONS) {
-      const head = h("div", { class: "rep-prow rep-prow head" },
-        h("span", {}), h("span", {}, t("Profile")),
-        h("span", first ? { id: "rep-result-h" } : {}, t("Result · {strength}%", { strength: rep.strength })));
-      first = false;
-      const secEl = h("div", { class: "rep-sec" }, h("div", { class: "sub" }, t(sec.title)), head);
+      const secEl = h("div", { class: "rep-sec" }, h("div", { class: "sub" }, t(sec.title)));
       for (const [label, path] of sec.rows) {
         const bv = valueAt(base, path), rv = valueAt(result, path);
+        const val = h("span", { class: "val" }, String(rv));
+        if (bv !== rv) val.title = t("Profile at 100%: {value}", { value: bv });
         const row = h("div", { class: "rep-prow", "data-path": path },
-          h("span", { class: "lbl" }, t(label)),
-          h("span", { class: "val" }, String(bv)),
-          h("span", { class: "val" }, String(rv)));
-        if (bv === 0 && rv === 0) row.classList.add("zero");          // zero fields are muted
+          h("span", { class: "lbl" }, t(label)), val);
+        if (rv === 0) row.classList.add("zero");                      // zero fields are muted
         if (clipped.has(path)) row.classList.add("clip");             // clipped at this strength
         if (deltas && typeof deltas === "object" && deltas[path] != null)
-          row.children[2].append(h("span", { class: "rep-delta" }, fsign(deltas[path])));
+          val.append(h("span", { class: "rep-delta" }, fsign(deltas[path])));
         secEl.append(row);
       }
       paramsEl.append(secEl);
