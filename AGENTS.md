@@ -5,7 +5,8 @@
 Everything in this repository is written in **English**: code, comments,
 docstrings, commit messages, specs and UI strings. Write all new code and
 comments in English only — no Russian (or other non-English) text, including
-printouts and error messages.
+printouts and error messages. The one exception is UI translation dictionaries for
+`web/lib/i18n.js` (today only `web/lib/i18n-landing-ru.js`, the Russian landing).
 
 ## Project
 
@@ -27,7 +28,7 @@ WebGL) that applies and exports NP3 profiles.
 - `sweep.py` — exports/measures NX Studio response sweeps (training data prep)
 - `web/` — browser app (`lib/` JS pipeline, `raw/` Rust→WASM decoder,
   `model/` exported weights, `golden/` reference fixtures for `test.mjs`). Pages
-  (`spec/ui-pages.md`): `index.html` (landing), `picture-control-jpg-fit.html` (fitting
+  (`spec/ui-pages.md`): `index.html` (landing, English + Russian via `lib/i18n-landing-ru.js`), `picture-control-jpg-fit.html` (fitting
   wizard, `lib/fit-app.js`), `picture-control-editor.html` and
   `picture-control-editor-mobile.html` (profile editor, `lib/editor-app.js`); both entries
   build on `lib/editor-core.js`

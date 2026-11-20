@@ -11,40 +11,540 @@
       location.replace("picture-control-editor.html" + location.search + location.hash);
   })();
 </script>
+<!-- Russian is shown when chosen before ("lang" in localStorage) or, with no choice yet, when the
+     browser prefers it. The page stays hidden until the module below has applied the language,
+     so a Russian visitor never sees the English text flash first. -->
+<script>
+  (function () {
+    var stored = null;
+    try { stored = localStorage.getItem("lang"); } catch (e) { /* no storage: English */ }
+    var ru = stored ? stored === "ru" : /^ru\b/i.test(navigator.language || "");
+    if (ru) {
+      document.documentElement.classList.add("i18n-pending");
+      setTimeout(function () { document.documentElement.classList.remove("i18n-pending"); }, 1500);
+    }
+  })();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title data-i18n="NP3 picture control tools">NP3 picture control tools</title>
+<title data-i18n="Picture Control Buddy: Nikon picture controls from your edits">Picture Control Buddy: Nikon picture controls from your edits</title>
 <style>
-  /* The palette is a copy of web/bench.html: a neutral grey. No models, WASM or Workers here. */
-  :root { --bg: #1b1b1b; --panel: #232323; --line: #333; --text: #ddd; --dim: #8a8a8a; --accent: #e6e6e6; }
-  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 640px; margin: 0 auto; padding: 48px 20px; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 24px; }
-  .links { display: grid; gap: 12px; }
-  .links a { display: block; padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px;
-    background: var(--panel); color: var(--text); text-decoration: none; }
-  .links a:hover, .links a:focus-visible { border-color: #6a6a6a; }
-  .links b { display: block; font-size: 17px; margin-bottom: 2px; color: var(--accent); }
-  .links span { color: var(--dim); }
+/* The landing (spec/ui-pages.md "Landing"). No models, WASM or Workers; system fonts only.
+   Layout idea: a friendly kitchen-table tool. Photos sit like prints on a light desk,
+   one mustard accent for "do this", everything else neutral grey. Big words, few of them. */
+:root {
+  --paper: #F0F0EE;
+  --card: #FFFFFF;
+  --ink: #171717;
+  --muted: #5E5E5A;
+  --line: #D9D9D5;
+  --accent: #D6A21E;        /* mustard: fills (buttons, chips, markers) */
+  --accent-ink: #1A1A18;    /* text on a mustard fill */
+  --accent-text: #8A670C;   /* mustard as text on the light paper (AA contrast) */
+  --soft: #F4EACB;
+  --print: #FFFFFF;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 12px 32px -12px rgba(0,0,0,.2);
+  --display: "Avenir Next", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  --r: 18px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141413; --card: #1E1E1D; --ink: #EDEDEA; --muted: #A3A39D; --line: #2F2F2D;
+    --accent: #E2B23C; --accent-ink: #161614; --accent-text: #E2B23C; --soft: #3A3220; --print: #F3F1EC;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px -14px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141413; --card: #1E1E1D; --ink: #EDEDEA; --muted: #A3A39D; --line: #2F2F2D;
+  --accent: #E2B23C; --accent-ink: #161614; --accent-text: #E2B23C; --soft: #3A3220; --print: #F3F1EC;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px -14px rgba(0,0,0,.7);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 var(--body); -webkit-font-smoothing: antialiased; }
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; border-radius: 6px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.02em; }
+p { margin: 0; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+.mono { font-family: var(--mono); font-size: 13px; letter-spacing: 0; }
+
+/* ---------- nav ---------- */
+.nav { display: flex; align-items: center; gap: 24px; padding: 18px 0; }
+.logo { display: flex; align-items: center; gap: 10px; font: 700 19px var(--display); text-decoration: none; letter-spacing: -0.01em; }
+.logo svg { width: 30px; height: 30px; }
+.nav-links { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+.nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 15px; }
+.nav-links a:hover { color: var(--ink); }
+.gh { display: inline-flex; align-items: center; gap: 7px; }
+.gh svg { width: 18px; height: 18px; }
+.btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 999px; font: 600 16px var(--body);
+  text-decoration: none; border: 1.5px solid transparent; cursor: pointer; transition: transform .15s, background .15s; }
+.btn:hover { transform: translateY(-1px); }
+.btn-sm { padding: 9px 16px; font-size: 14px; }
+.kofi { background: var(--accent); color: var(--accent-ink); }
+.nav-links a.kofi, .nav-links a.kofi:hover { color: var(--accent-ink); font-weight: 600; }
+.kofi svg { width: 18px; height: 18px; }
+.lang { display: inline-flex; border: 1.5px solid var(--line); border-radius: 999px; padding: 2px; }
+.lang button { border: 0; background: none; color: var(--muted); font: 600 13px var(--body); padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+.lang button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+html.i18n-pending body { visibility: hidden; }
+@media (max-width: 820px) { .nav-links .hide-sm { display: none; } .nav-links { gap: 14px; } }
+.kofi { white-space: nowrap; }
+@media (max-width: 440px) { .logo { font-size: 0; gap: 0; } .logo svg { width: 34px; height: 34px; } .nav-links { gap: 10px; } .nav-links .kofi { padding: 8px 12px; font-size: 13px; gap: 6px; } }
+
+/* ---------- hero ---------- */
+.hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: center; padding: 40px 0 80px; }
+.hero h1 { font-size: clamp(46px, 7.2vw, 92px); line-height: .95; font-weight: 800; }
+.photo-word { background-size: 320%; background-position: 4% 33%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  -webkit-text-fill-color: transparent; background-color: var(--accent); }
+.hero .lede { font-size: 20px; color: var(--muted); max-width: 30ch; margin-top: 24px; }
+.hero .ctas { display: grid; gap: 12px; margin-top: 32px; max-width: 470px; }
+.cta { display: grid; grid-template-columns: 1fr auto; column-gap: 16px; align-items: center; padding: 16px 20px 16px 22px; border-radius: 18px;
+  text-decoration: none; border: 1.5px solid transparent; transition: transform .15s, border-color .15s; }
+.cta:hover { transform: translateY(-1px); }
+.cta b { font: 600 17px var(--body); }
+.cta span { grid-row: 2; font-size: 14.5px; opacity: .78; }
+.cta svg { grid-row: 1 / 3; grid-column: 2; width: 20px; height: 20px; }
+.cta-primary { background: var(--accent); color: var(--accent-ink); }
+.cta-ghost { border-color: var(--line); color: var(--ink); background: var(--card); }
+.cta-ghost:hover { border-color: var(--ink); }
+.trust { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 28px; color: var(--muted); font-size: 14.5px; }
+.trust span { display: inline-flex; align-items: center; gap: 7px; }
+.trust span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+.print { background: var(--print); padding: 12px 12px 46px; border-radius: 4px; box-shadow: var(--shadow); position: relative; }
+.print .cap { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; justify-content: space-between; color: #4a4f57; font: 500 14px var(--body); }
+.hero-print { max-width: 430px; justify-self: center; width: 100%; }
+.ba { position: relative; overflow: hidden; aspect-ratio: 2/3; border-radius: 2px; touch-action: none; cursor: ew-resize; user-select: none; }
+.ba img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ba .after { clip-path: inset(0 0 0 var(--pos, 50%)); }
+.ba .handle { position: absolute; top: 0; bottom: 0; left: var(--pos, 50%); width: 0; }
+.ba .handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1.5px; width: 3px; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,.35); }
+.ba .knob { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); width: 46px; height: 46px; border-radius: 50%; background: #fff;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3); display: grid; place-items: center; color: #14171C; }
+.ba input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; margin: 0; }
+.tag { position: absolute; top: 12px; padding: 5px 11px; border-radius: 999px; font: 600 13px var(--body); background: rgba(255,255,255,.92); color: #14171C; }
+.tag.l { left: 12px; } .tag.r { right: 12px; background: var(--accent); color: var(--accent-ink); }
+@media (max-width: 900px) { .hero { grid-template-columns: 1fr; gap: 48px; padding-top: 16px; } }
+
+/* ---------- section scaffolding ---------- */
+section.block { padding: 88px 0; border-top: 1px solid var(--line); }
+.kicker { display: inline-block; font: 600 14px var(--body); color: var(--accent-text); margin-bottom: 14px; }
+.block h2 { font-size: clamp(36px, 5vw, 60px); line-height: 1; font-weight: 800; max-width: 16ch; }
+.block .intro { font-size: 19px; color: var(--muted); max-width: 52ch; margin-top: 18px; }
+.fn { color: var(--accent-text); text-decoration: none; font-weight: 700; padding: 0 2px; }
+.footnote { font-size: 14px; color: var(--muted); max-width: 64ch; margin-top: 10px; }
+
+
+/* ---------- fitting ---------- */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 44px 0 48px; padding: 0; list-style: none; counter-reset: s; }
+.steps li { background: var(--card); border-radius: var(--r); padding: 24px; display: grid; gap: 8px; align-content: start; counter-increment: s; }
+.steps li::before { content: counter(s); font: 800 15px var(--display); width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; margin-bottom: 6px; }
+.steps b { font: 700 20px var(--display); letter-spacing: -0.01em; }
+.steps span { color: var(--muted); font-size: 15.5px; }
+@media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+
+.lab { background: var(--card); border-radius: 26px; padding: 28px; }
+.lab-bar { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.lab-bar p { color: var(--muted); font-size: 15px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.thumbs button { width: 46px; height: 58px; padding: 0; border-radius: 12px; overflow: hidden; border: 2.5px solid transparent; cursor: pointer; background: none; }
+.thumbs button img { width: 100%; height: 100%; object-fit: cover; }
+.thumbs button[aria-pressed="true"] { border-color: var(--accent); }
+.pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; max-width: 860px; margin: 0 auto; }
+.pair figure { min-width: 0; margin: 0; display: grid; gap: 12px; }
+.pair .frame { aspect-ratio: 2/3; border-radius: 12px; overflow: hidden; background: var(--paper); position: relative; }
+.pair .frame > img, .pair .ba img { width: 100%; height: 100%; object-fit: cover; object-position: var(--fx, 50%) 50%; }
+.pair .ba { aspect-ratio: auto; height: 100%; border-radius: 0; }
+.pair figcaption b { display: block; font: 700 18px var(--display); }
+.pair figcaption span { color: var(--muted); font-size: 14.5px; }
+.pair .arrow { color: var(--muted); font: 700 24px var(--display); }
+.pair .hl .frame { outline: 3px solid var(--accent); outline-offset: 3px; }
+.lab-note { margin-top: 22px; color: var(--muted); font-size: 14px; text-align: center; }
+@media (max-width: 720px) { .pair { grid-template-columns: 1fr; } .pair .arrow { transform: rotate(90deg); justify-self: center; } }
+
+/* ---------- screenshot carousel ---------- */
+.carousel { margin-top: 44px; position: relative; }
+.track { display: flex; gap: 20px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; padding: 4px 4px 18px; scrollbar-width: none; }
+.track::-webkit-scrollbar { display: none; }
+.slide { flex: none; scroll-snap-align: start; margin: 0; display: grid; gap: 14px; align-content: start; }
+.shot { height: 480px; aspect-ratio: var(--ar, 16/10); border-radius: 14px; overflow: hidden; background: #1b1b1b; box-shadow: var(--shadow); }
+.shot img { width: 100%; height: 100%; object-fit: cover; }
+.shot.phone-slot { aspect-ratio: auto; width: max-content; border-radius: 34px; border: 8px solid #0d0d0f; }
+.shot.phone-slot img { height: 100%; width: auto; object-fit: contain; border-radius: 26px; }
+.slide figcaption { max-width: 46ch; }
+.slide figcaption b { font: 700 19px var(--display); display: block; }
+.slide figcaption span { color: var(--muted); font-size: 15px; }
+.car-ctl { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+.car-ctl button { width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; display: grid; place-items: center; }
+.car-ctl button:hover:not(:disabled) { border-color: var(--ink); }
+.car-ctl button:disabled { opacity: .35; cursor: default; }
+.car-ctl svg { width: 20px; height: 20px; }
+.dots { display: flex; gap: 8px; margin-left: 6px; }
+.dots button { width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%; background: var(--line); cursor: pointer; }
+.dots button[aria-current="true"] { background: var(--accent); width: 26px; border-radius: 6px; }
+@media (max-width: 720px) { .shot { height: auto; width: min(82vw, 520px); } .shot.phone-slot { width: min(46vw, 220px); }
+  .shot.phone-slot img { width: 100%; height: auto; } .slide { max-width: min(82vw, 520px); } }
+
+.tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 44px; }
+.tools div { padding: 18px 0 0; border-top: 2px solid var(--ink); }
+.tools b { font: 700 18px var(--display); display: block; margin-bottom: 4px; }
+.tools span { color: var(--muted); font-size: 15px; }
+@media (max-width: 820px) { .tools { grid-template-columns: 1fr 1fr; } }
+
+/* ---------- camera steps ---------- */
+.card-path { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+.card-path div { background: var(--card); border-radius: var(--r); padding: 22px; display: grid; gap: 10px; align-content: start; }
+.card-path .mono { display: inline-block; background: var(--paper); padding: 4px 9px; border-radius: 7px; width: max-content; max-width: 100%; }
+.card-path b { font: 700 19px var(--display); }
+.card-path span { color: var(--muted); font-size: 15px; }
+@media (max-width: 820px) { .card-path { grid-template-columns: 1fr; } }
+
+/* ---------- faq ---------- */
+.faq-block { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr); gap: 32px 48px; align-items: start; }
+.faq-head { position: sticky; top: 24px; }
+.faq { display: grid; gap: 10px; }
+@media (max-width: 900px) { .faq-block { grid-template-columns: 1fr; } .faq-head { position: static; } }
+.faq details { background: var(--card); border-radius: 16px; padding: 4px 22px; }
+.faq summary { cursor: pointer; font: 700 19px var(--display); padding: 16px 0; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--accent-text); font-size: 24px; line-height: 1; }
+.faq details[open] summary::after { content: "–"; }
+.faq details p { padding: 0 0 18px; color: var(--muted); max-width: 64ch; }
+
+/* ---------- footer ---------- */
+.made { background: var(--ink); color: var(--paper); border-radius: 30px; padding: 48px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; align-items: center; margin: 24px 0 32px; }
+.made h2 { font-size: clamp(32px, 4vw, 48px); line-height: 1.02; font-weight: 800; }
+.made p { opacity: .75; margin-top: 14px; max-width: 42ch; }
+.made .acts { display: grid; gap: 12px; }
+.made .who { display: flex; align-items: center; gap: 14px; background: color-mix(in srgb, currentColor 9%, transparent); border-radius: 18px; padding: 14px 18px; text-decoration: none; }
+.made .who svg { width: 34px; height: 34px; flex: none; }
+.made .who b { display: block; font: 600 17px var(--body); }
+.made .who span { font-size: 14px; opacity: .7; }
+.made .who:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
+.made .kofi { justify-content: center; padding: 16px 22px; font-size: 17px; }
+.legal { color: var(--muted); font-size: 13px; padding: 0 0 40px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+.legal p { max-width: 80ch; }
+@media (max-width: 820px) { .made { grid-template-columns: 1fr; padding: 32px 24px; } }
+
+/* one orchestrated moment: the hero slider sweeps once on load */
+@keyframes sweep { 0% { --pos: 50%; } 35% { --pos: 18%; } 70% { --pos: 78%; } 100% { --pos: 50%; } }
+@property --pos { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+.ba.intro { animation: sweep 2.4s .5s ease-in-out 1; }
 </style>
 </head>
 <body>
-<main>
-  <h1 data-i18n="NP3 picture control tools">NP3 picture control tools</h1>
-  <nav class="links">
-    <a id="to-fit" href="picture-control-jpg-fit.html">
-      <b data-i18n="Fit a profile to JPEGs">Fit a profile to JPEGs</b>
-      <span data-i18n="RAW + JPEG pairs → an NP3 profile (desktop)">RAW + JPEG pairs → an NP3 profile (desktop)</span>
+
+<div class="wrap">
+  <header class="nav">
+    <a class="logo" href="#top" aria-label="Picture Control Buddy, home" data-i18n-aria="Picture Control Buddy, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="var(--ink)"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="var(--paper)" stroke-width="2.5"/><circle cx="16" cy="16" r="2.6" fill="var(--accent)"/><circle cx="24.5" cy="8.5" r="2.2" fill="var(--accent)"/></svg>
+      Picture Control Buddy
     </a>
-    <a id="to-editor" href="picture-control-editor.html">
-      <b data-i18n="Edit an NP3 profile">Edit an NP3 profile</b>
-      <span data-i18n="Open a RAW, import, adjust and export an NP3">Open a RAW, import, adjust and export an NP3</span>
-    </a>
-  </nav>
-</main>
+    <nav class="nav-links" aria-label="Main" data-i18n-aria="Main">
+      <a class="hide-sm" href="#copy" data-i18n="From your edits">From your edits</a>
+      <a class="hide-sm" href="#editor" data-i18n="By hand">By hand</a>
+      <a class="hide-sm" href="#faq" data-i18n="Questions">Questions</a>
+      <div class="lang" role="group" aria-label="Language" data-i18n-aria="Language">
+        <button type="button" data-lang="en" aria-pressed="true" lang="en">EN</button>
+        <button type="button" data-lang="ru" aria-pressed="false" lang="ru">RU</button>
+      </div>
+      <a class="gh" href="https://github.com/good-news-everyone" aria-label="GitHub: good-news-everyone">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span class="hide-sm">good-news-everyone</span>
+      </a>
+      <a class="btn btn-sm kofi" href="https://ko-fi.com/goodnewseveryone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M10 11.5c-.9-1-2.5-.6-2.5.8 0 1.2 2.5 2.7 2.5 2.7s2.5-1.5 2.5-2.7c0-1.4-1.6-1.8-2.5-.8Z" fill="currentColor" stroke="none"/></svg>
+        <span data-i18n="Buy me a Ko-fi">Buy me a Ko-fi</span>
+      </a>
+    </nav>
+  </header>
+
+  <main id="top">
+  <section class="hero">
+    <div>
+      <h1><span data-i18n="Your signature">Your signature</span> <span class="photo-word" id="photo-word" data-i18n="look">look</span><span data-i18n=", straight out of camera.">, straight out of camera.</span></h1>
+      <p class="lede" data-i18n="Turn the edit you love into a Nikon picture control. Shoot, and your JPEGs already look finished.">Turn the edit you love into a Nikon picture control. Shoot, and your JPEGs already look finished.</p>
+      <div class="ctas">
+        <a class="cta cta-primary" id="to-fit" href="picture-control-jpg-fit.html">
+          <b data-i18n="Make a Picture Control from my edits">Make a Picture Control from my edits</b>
+          <span data-i18n="Give it a NEF and the JPEG you edited">Give it a NEF and the JPEG you edited</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="cta cta-ghost" id="to-editor" href="picture-control-editor.html">
+          <b data-i18n="Build a Picture Control by hand">Build a Picture Control by hand</b>
+          <span data-i18n="Open a NEF, move sliders, save the file">Open a NEF, move sliders, save the file</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+      <div class="trust">
+        <span data-i18n="Free and open source">Free and open source</span>
+        <span data-i18n="Works in your browser">Works in your browser</span>
+        <span data-i18n="Your photos never leave your computer">Your photos never leave your computer</span>
+      </div>
+    </div>
+
+    <div style="position:relative; justify-self:center; width:100%; max-width:430px;">
+      <div class="print hero-print">
+        <div class="ba intro" id="hero-ba">
+          <img src="landing/DSC_6522-neutral.jpg" alt="Red car, camera neutral" data-i18n-alt="Red car, camera neutral">
+          <img class="after" src="landing/DSC_6522-np3.jpg" alt="Same frame with the picture control" data-i18n-alt="Same frame with the picture control">
+          <span class="tag l" data-i18n="Neutral">Neutral</span><span class="tag r" data-i18n="Your look">Your look</span>
+          <div class="handle"><div class="knob"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6"/></svg></div></div>
+          <input type="range" min="0" max="100" value="50" id="hero-range" aria-label="Drag to compare neutral and your look" data-i18n-aria="Drag to compare neutral and your look">
+        </div>
+        <div class="cap" style="justify-content:flex-end"><span class="mono">DSC_6522.NEF</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="copy">
+    <span class="kicker" data-i18n="From your edits">From your edits</span>
+    <h2 data-i18n="Show it a photo you edited. Get the look back for your camera.">Show it a photo you edited. Get the look back for your camera.</h2>
+    <p class="intro" data-i18n="You have a few favourite edits from Lightroom, Snapseed or anywhere else. Give the tool the NEF and the edited JPEG side by side, and it works out a picture control that makes the camera do the same thing.">You have a few favourite edits from Lightroom, Snapseed or anywhere else. Give the tool the NEF and the edited JPEG side by side, and it works out a picture control that makes the camera do the same thing.</p>
+
+    <ol class="steps">
+      <li><b data-i18n="Drop a NEF and its edited JPEG">Drop a NEF and its edited JPEG</b><span data-i18n="One pair works. Three or four different scenes work better.">One pair works. Three or four different scenes work better.</span></li>
+      <li><b data-i18n="Press “Fit”">Press “Fit”</b><span data-i18n="About a minute on a laptop. Make a tea.">About a minute on a laptop. Make a tea.</span></li>
+      <li><b data-i18n="Check, tweak, save">Check, tweak, save</b><span data-i18n="Compare with your JPEG, nudge a slider if you like, save the .NP3 file.">Compare with your JPEG, nudge a slider if you like, save the .NP3 file.</span></li>
+    </ol>
+
+    <div class="lab">
+      <div class="lab-bar">
+        <p data-i18n="Pick a frame. Drag the line on the right to check the result against the edited JPEG.">Pick a frame. Drag the line on the right to check the result against the edited JPEG.</p>
+        <div class="thumbs" role="group" aria-label="Frame" data-i18n-aria="Frame">
+          <button type="button" data-frame="DSC_8100" aria-pressed="true" aria-label="Horse in a stable" data-i18n-aria="Horse in a stable"><img src="landing/DSC_8100-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_7026" aria-pressed="false" aria-label="Scooters" data-i18n-aria="Scooters"><img src="landing/DSC_7026-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_6501" aria-pressed="false" aria-label="Boat in teal water" data-i18n-aria="Boat in teal water"><img src="landing/DSC_6501-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_6423" aria-pressed="false" aria-label="Rusty anchor" data-i18n-aria="Rusty anchor"><img src="landing/DSC_6423-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_6979" aria-pressed="false" aria-label="Green house" data-i18n-aria="Green house"><img src="landing/DSC_6979-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_8152" aria-pressed="false" aria-label="White chimney" data-i18n-aria="White chimney"><img src="landing/DSC_8152-thumb.jpg" alt=""></button>
+          <button type="button" data-frame="DSC_6015" aria-pressed="false" aria-label="Barrel of kohlrabi" data-i18n-aria="Barrel of kohlrabi"><img src="landing/DSC_6015-thumb.jpg" alt=""></button>
+        </div>
+      </div>
+      <div class="pair" id="pair">
+        <figure><div class="frame"><img id="t-source" alt="Source: the NEF developed neutral" data-i18n-alt="Source: the NEF developed neutral"></div>
+          <figcaption><b data-i18n="Source">Source</b><span data-i18n="The NEF, as the camera saw it">The NEF, as the camera saw it</span></figcaption></figure>
+        <div class="arrow" aria-hidden="true">→</div>
+        <figure class="hl"><div class="frame">
+            <div class="ba" id="pair-ba">
+              <img id="t-np3" alt="NEF with the fitted NP3" data-i18n-alt="NEF with the fitted NP3">
+              <img class="after" id="t-target" alt="Target: the edited JPEG" data-i18n-alt="Target: the edited JPEG">
+              <span class="tag l">NEF + NP3</span><span class="tag r" data-i18n="Target">Target</span>
+              <div class="handle"><div class="knob"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6"/></svg></div></div>
+              <input type="range" min="0" max="100" value="50" id="pair-range" aria-label="Drag to compare the NEF with the new picture control and the target JPEG" data-i18n-aria="Drag to compare the NEF with the new picture control and the target JPEG">
+            </div>
+          </div>
+          <figcaption><b data-i18n="NEF + NP3 vs target">NEF + NP3 vs target</b><span data-i18n="Left of the line: your camera with the new picture control. Right: the JPEG you edited.">Left of the line: your camera with the new picture control. Right: the JPEG you edited.</span></figcaption></figure>
+      </div>
+      <p class="lab-note" id="de-note"></p>
+    </div>
+  </section>
+
+  <section class="block" id="editor">
+    <span class="kicker" data-i18n="By hand">By hand</span>
+    <h2 data-i18n="Make your own picture control. Sliders, not science.">Make your own picture control. Sliders, not science.</h2>
+    <p class="intro"><span data-i18n="Open any NEF">Open any NEF</span><a class="fn" href="#fn-he" id="fn-he-ref" aria-describedby="fn-he">*</a> <span data-i18n="from your Nikon and see it the way the camera will show it. Move a slider, the photo changes. Save the file when you like it.">from your Nikon and see it the way the camera will show it. Move a slider, the photo changes. Save the file when you like it.</span></p>
+    <p class="footnote" id="fn-he" data-i18n="* High Efficiency NEFs (HE and HE★) don't open directly yet. Convert them to DNG first, without JPEG XL compression.">* High Efficiency NEFs (HE and HE★) don't open directly yet. Convert them to DNG first, without JPEG XL compression.</p>
+
+    <div class="carousel" aria-roledescription="carousel" aria-label="Editor screenshots" data-i18n-aria="Editor screenshots">
+      <div class="track" id="track" tabindex="0">
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-1-open.jpg" alt="Editor with a NEF open" data-i18n-alt="Editor with a NEF open" loading="lazy"></div>
+          <figcaption><b data-i18n="Open a NEF">Open a NEF</b><span data-i18n="Drop it in. You see it the way the camera will.">Drop it in. You see it the way the camera will.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-2-basic.jpg" alt="Basic panel" data-i18n-alt="Basic panel" loading="lazy"></div>
+          <figcaption><b data-i18n="Basic">Basic</b><span data-i18n="Saturation, contrast, highlights and shadows.">Saturation, contrast, highlights and shadows.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-3-curve.jpg" alt="Curve panel" data-i18n-alt="Curve panel" loading="lazy"></div>
+          <figcaption><b data-i18n="Curve">Curve</b><span data-i18n="Draw the tones you want, point by point.">Draw the tones you want, point by point.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-4-blender.jpg" alt="Color Blender panel" data-i18n-alt="Color Blender panel" loading="lazy"></div>
+          <figcaption><b data-i18n="Color Blender">Color Blender</b><span data-i18n="Calmer reds, greener greens, bluer skies.">Calmer reds, greener greens, bluer skies.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-5-grading.jpg" alt="Color Grading panel" data-i18n-alt="Color Grading panel" loading="lazy"></div>
+          <figcaption><b data-i18n="Color Grading">Color Grading</b><span data-i18n="Warm light, cool shadows, or the other way round.">Warm light, cool shadows, or the other way round.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot" style="--ar:16/10"><img src="landing/ed-6-share.jpg" alt="Profile ready to save and share" data-i18n-alt="Profile ready to save and share" loading="lazy"></div>
+          <figcaption><b data-i18n="Save and share">Save and share</b><span data-i18n="Save the .NP3 or copy a link for a friend.">Save the .NP3 or copy a link for a friend.</span></figcaption>
+        </figure>
+        <figure class="slide">
+          <div class="shot phone-slot" style="--ar:430/932"><img src="landing/ed-7-mobile.jpg" alt="The editor on a phone, editing the curve" data-i18n-alt="The editor on a phone, editing the curve" loading="lazy"></div>
+          <figcaption><b data-i18n="On your phone">On your phone</b><span data-i18n="The same editor, made for one hand.">The same editor, made for one hand.</span></figcaption>
+        </figure>
+      </div>
+      <div class="car-ctl">
+        <button type="button" id="car-prev" aria-label="Previous screenshot" data-i18n-aria="Previous screenshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+        <button type="button" id="car-next" aria-label="Next screenshot" data-i18n-aria="Next screenshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        <div class="dots" id="dots"></div>
+      </div>
+    </div>
+
+    <div class="tools">
+      <div><b data-i18n="Basic">Basic</b><span data-i18n="Saturation, contrast, highlights, shadows, white and black.">Saturation, contrast, highlights, shadows, white and black.</span></div>
+      <div><b data-i18n="Curve">Curve</b><span data-i18n="Draw the tones you want, point by point.">Draw the tones you want, point by point.</span></div>
+      <div><b data-i18n="Color Blender">Color Blender</b><span data-i18n="Eight colours, each with its own hue, colourfulness and brightness.">Eight colours, each with its own hue, colourfulness and brightness.</span></div>
+      <div><b data-i18n="Color Grading">Color Grading</b><span data-i18n="Tint highlights, midtones and shadows separately.">Tint highlights, midtones and shadows separately.</span></div>
+    </div>
+  </section>
+
+  <section class="block" id="camera">
+    <span class="kicker" data-i18n="Into the camera">Into the camera</span>
+    <h2 data-i18n="From file to camera in three steps.">From file to camera in three steps.</h2>
+    <div class="card-path">
+      <div><span class="mono">MY LOOK.NP3</span><b data-i18n="Save the file">Save the file</b><span data-i18n="A tiny file, about a kilobyte.">A tiny file, about a kilobyte.</span></div>
+      <div><span class="mono">NIKON / CUSTOMPC /</span><b data-i18n="Copy it to the memory card">Copy it to the memory card</b><span data-i18n="Put the card back into the camera.">Put the card back into the camera.</span></div>
+      <div><span class="mono" data-i18n="Manage Picture Control">Manage Picture Control</span><b data-i18n="Load it in the menu">Load it in the menu</b><span data-i18n="Pick it like any built-in picture control and shoot.">Pick it like any built-in picture control and shoot.</span></div>
+    </div>
+  </section>
+
+  <section class="block faq-block" id="faq">
+    <div class="faq-head">
+      <span class="kicker" data-i18n="Questions">Questions</span>
+      <h2 data-i18n="Good to know.">Good to know.</h2>
+    </div>
+    <div class="faq">
+      <details open><summary data-i18n="Which cameras does it work with?">Which cameras does it work with?</summary>
+        <p data-i18n="All EXPEED 7 cameras. The colour model was calibrated on a Nikon Z f; other bodies work, with small differences.">All EXPEED 7 cameras. The colour model was calibrated on a Nikon Z f; other bodies work, with small differences.</p></details>
+      <details><summary data-i18n="Do my photos get uploaded anywhere?">Do my photos get uploaded anywhere?</summary>
+        <p data-i18n="No. Everything runs in your browser. The site only sends you the page itself; your NEF and JPEG files stay on your computer.">No. Everything runs in your browser. The site only sends you the page itself; your NEF and JPEG files stay on your computer.</p></details>
+      <details><summary data-i18n="Is it free?">Is it free?</summary>
+        <p data-i18n="Yes, and the code is open (MIT licence). If it saves you an evening of editing, you can buy me a coffee on Ko-fi.">Yes, and the code is open (MIT licence). If it saves you an evening of editing, you can buy me a coffee on Ko-fi.</p></details>
+      <details><summary data-i18n="Will it match my edit exactly?">Will it match my edit exactly?</summary>
+        <p data-i18n="Close, not pixel-perfect. A picture control can only do what the camera can do: tones, colours and grading. Local edits, masks and retouching stay in your editor.">Close, not pixel-perfect. A picture control can only do what the camera can do: tones, colours and grading. Local edits, masks and retouching stay in your editor.</p></details>
+      <details><summary data-i18n="Is this a Nikon app?">Is this a Nikon app?</summary>
+        <p data-i18n="No. It's an independent hobby project, not affiliated with or endorsed by Nikon.">No. It's an independent hobby project, not affiliated with or endorsed by Nikon.</p></details>
+    </div>
+  </section>
+
+  <section class="made">
+    <div>
+      <h2 data-i18n="Made by one photographer, in the evenings.">Made by one photographer, in the evenings.</h2>
+      <p data-i18n="I wanted my JPEGs to look like my edits without opening a laptop after every walk. If it helps you too, a star or a coffee keeps it going.">I wanted my JPEGs to look like my edits without opening a laptop after every walk. If it helps you too, a star or a coffee keeps it going.</p>
+    </div>
+    <div class="acts">
+      <a class="who" href="https://github.com/good-news-everyone">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <div><b>github.com/good-news-everyone</b><span data-i18n="Source code, issues and ideas">Source code, issues and ideas</span></div>
+      </a>
+      <a class="btn kofi" href="https://ko-fi.com/goodnewseveryone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M10 11.5c-.9-1-2.5-.6-2.5.8 0 1.2 2.5 2.7 2.5 2.7s2.5-1.5 2.5-2.7c0-1.4-1.6-1.8-2.5-.8Z" fill="currentColor" stroke="none"/></svg>
+        <span data-i18n="Buy me a Ko-fi">Buy me a Ko-fi</span>
+      </a>
+    </div>
+  </section>
+  </main>
+
+  <footer class="legal">
+    <p data-i18n="Independent, unofficial project. Not affiliated with, endorsed by, or supported by Nikon Corporation. “Nikon”, “NP3” and “Picture Control” are trademarks of Nikon Corporation. Sample photos by the author.">Independent, unofficial project. Not affiliated with, endorsed by, or supported by Nikon Corporation. “Nikon”, “NP3” and “Picture Control” are trademarks of Nikon Corporation. Sample photos by the author.</p>
+    <p data-i18n="MIT licence">MIT licence</p>
+  </footer>
+</div>
+
 <script type="module">
-  import { applyI18n } from "./lib/i18n.js";
-  applyI18n();
+  import { t, register, applyI18n, setLang, currentLang } from "./lib/i18n.js";
+  import RU from "./lib/i18n-landing-ru.js";
+
+  // Russian exists on the landing only: the other pages register no dictionary and stay English.
+  register("ru", RU);
+
+  const src = (k) => `landing/${k}.jpg`;
+  document.getElementById("photo-word").style.backgroundImage = `url(${src("DSC_6979-np3")})`;
+
+  /* hero before/after */
+  const ba = document.getElementById("hero-ba"), hr = document.getElementById("hero-range");
+  hr.addEventListener("input", () => { ba.classList.remove("intro"); ba.style.setProperty("--pos", hr.value + "%"); });
+  ba.addEventListener("animationend", () => ba.classList.remove("intro"));
+
+  /* fitting: source -> NEF + NP3 / target curtain */
+  let frame = "DSC_8100";
+  // dE2000 from the wizard report (fit "SA" over 8 pairs of renders/sa): [with the profile, camera neutral]
+  const DE = { DSC_6015: [2.70, 8.75], DSC_6423: [2.85, 9.32], DSC_6501: [3.93, 7.40], DSC_6979: [2.81, 8.07],
+               DSC_7026: [2.59, 7.17], DSC_8100: [2.14, 7.25], DSC_8152: [2.45, 7.26] };
+  const pairBa = document.getElementById("pair-ba"), pr = document.getElementById("pair-range");
+  pr.addEventListener("input", () => pairBa.style.setProperty("--pos", pr.value + "%"));
+  const num = (v) => v.toLocaleString(currentLang(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  function renderPair() {
+    document.getElementById("t-source").src = src(`${frame}-neutral`);
+    document.getElementById("t-np3").src = src(`${frame}-np3`);
+    document.getElementById("t-target").src = src(`${frame}-target`);
+    const [after, before] = DE[frame];
+    document.getElementById("de-note").textContent = t(
+      "{frame}.NEF · difference from your edit ΔE {after} with the picture control, {before} without it. One profile fitted on all 8 frames.",
+      { frame, after: num(after), before: num(before) });
+  }
+  document.querySelectorAll("[data-frame]").forEach((b) => b.addEventListener("click", () => {
+    frame = b.dataset.frame;
+    document.querySelectorAll("[data-frame]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    renderPair();
+  }));
+
+  /* screenshot carousel */
+  const track = document.getElementById("track"), slides = [...track.children], dots = document.getElementById("dots");
+  const prev = document.getElementById("car-prev"), next = document.getElementById("car-next");
+  slides.forEach((s, i) => {
+    const d = document.createElement("button");
+    d.type = "button";
+    d.addEventListener("click", () => go(i));
+    dots.appendChild(d);
+  });
+  function labelCarousel() {
+    slides.forEach((s, i) => s.setAttribute("aria-label", t("{n} of {total}", { n: i + 1, total: slides.length })));
+    [...dots.children].forEach((d, i) => d.setAttribute("aria-label", t("Screenshot {n}", { n: i + 1 })));
+  }
+  const current = () => {
+    const x = track.scrollLeft + 4;
+    let i = 0;
+    slides.forEach((s, k) => { if (s.offsetLeft - track.offsetLeft <= x + 10) i = k; });
+    return i;
+  };
+  function go(i) { i = Math.max(0, Math.min(slides.length - 1, i)); track.scrollTo({ left: slides[i].offsetLeft - track.offsetLeft - 4 }); }
+  function sync() {
+    const i = current(), end = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
+    [...dots.children].forEach((d, k) => d.setAttribute("aria-current", k === (end ? slides.length - 1 : i)));
+    prev.disabled = track.scrollLeft <= 4;
+    next.disabled = end;
+  }
+  prev.addEventListener("click", () => go(current() - 1));
+  next.addEventListener("click", () => go(current() + 1));
+  track.addEventListener("scroll", () => requestAnimationFrame(sync));
+  track.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); go(current() + 1); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); go(current() - 1); }
+  });
+
+  /* language: everything static goes through data-i18n*, the rest is re-rendered here */
+  function refreshLang() {
+    const lang = currentLang();
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+    renderPair();
+    labelCarousel();
+  }
+  document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+    setLang(b.dataset.lang);
+    refreshLang();
+  }));
+  let stored = null;
+  try { stored = localStorage.getItem("lang"); } catch (e) { /* no storage */ }
+  if (!stored && /^ru\b/i.test(navigator.language || "")) setLang("ru");
+  else applyI18n();
+  refreshLang();
+  sync();
+  document.documentElement.classList.remove("i18n-pending");
 </script>
 </body>
 </html>

@@ -8,7 +8,7 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 | Page | Flow | Devices | Router |
 |---|---|---|---|
-| `web/index.html` | **Landing**: leads to the wizard or the editor. Content and design: to be discussed later | any | forwards legacy `?np3=` links (below) |
+| `web/index.html` | **Landing**: what the tools do, with real samples; leads to the wizard or the editor. English and Russian | any | forwards legacy `?np3=` links (below) |
 | `web/picture-control-jpg-fit.html` | **Fitting wizard**: [ui.md](ui.md) steps 1 → 2 → 3.1 → 3.2 (Start, Compare, manual adjustment with the report, More frames), versions, NP3 export | desktop only | none |
 | `web/picture-control-editor.html` | **Profile editor, desktop**: open a RAW, import/edit/export/share an NP3 | desktop, laptop, tablet | `view-route.js` → mobile on phones |
 | `web/picture-control-editor-mobile.html` | **Profile editor, mobile**: the same editor in the [ui-mobile.md](ui-mobile.md) layout | phones | `view-route.js` → desktop elsewhere |
@@ -45,7 +45,27 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 ## Landing (`index.html`)
 
-Decided 2026-11-20: for now only the title and two links — "Fit a profile to JPEGs" → `picture-control-jpg-fit.html`, "Edit an NP3 profile" → `picture-control-editor.html`. Plus the invisible legacy `?np3=` forward above (no UI). No model download, no WASM, no workers on this page. A richer landing may come later.
+Decided 2026-11-20 (supersedes the "title and two links" stage of the same day). A one-page landing
+for photographers, not engineers: plain words, few of them.
+
+- **Sections:** hero (headline, the two entry CTAs, a neutral / profile before-after curtain);
+  "From your edits" (three steps and a frame picker: the source NEF, then a curtain NEF + NP3 vs the
+  target JPEG with the frame's dE2000 from the wizard report); "By hand" (a carousel of real editor
+  screenshots, desktop and phone, and the four tool groups); "Into the camera" (save, copy to
+  `NIKON/CUSTOMPC/`, load via Manage Picture Control); FAQ; the author block (GitHub, Ko-fi); the
+  trademark notice.
+- **Entry links:** `#to-fit` → `picture-control-jpg-fit.html`, `#to-editor` → `picture-control-editor.html`.
+- **Wording:** "NEF", not "RAW"; "any NEF" carries a footnote that High Efficiency NEFs (HE / HE★)
+  must be converted to DNG without JPEG XL first.
+- **Samples:** `web/landing/` (600×900 frames, editor screenshots). They come from one wizard fit
+  ("SA") over 8 NEF + Lightroom JPEG pairs; the per-frame dE2000 is a constant in the page.
+- **Languages:** English and Russian, on this page only. The strings go through `lib/i18n.js`
+  (`data-i18n`, `data-i18n-aria`, `data-i18n-alt`, `t()`); the Russian dictionary is
+  `lib/i18n-landing-ru.js`, registered by the landing alone, so the app pages stay English. An
+  EN / RU switch in the header stores `lang`; with no stored choice a browser preferring Russian gets
+  Russian. The page is hidden until the language is applied (no English flash).
+- **Weight:** no model download, no WASM, no workers, no third-party requests (system fonts only).
+- The invisible legacy `?np3=` forward above runs first, before anything renders.
 
 ## Code structure
 
@@ -74,5 +94,5 @@ See [ui-plan.md](ui-plan.md) stage 11. In short: split `app.js` into the editor 
 
 ## Open questions
 
-1. ~~Landing content~~ For now two links only (2026-11-20); a richer design later.
+1. ~~Landing content~~ Resolved 2026-11-20: see "Landing" above.
 2. ~~Whether the wizard's step 3.1 keeps "Share link"~~ Resolved 2026-11-20: it stays and leads to the editor.

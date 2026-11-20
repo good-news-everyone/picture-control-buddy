@@ -819,18 +819,25 @@ export async function runLevel8e({ browser, port, report, skip }) {
                && (legacy.endsWith("#x") ? f.hash === "#x" : true),
           `8e landing: ${legacy.split("?")[0]}?np3= is forwarded to the editor page (${f.path}${f.hash})`);
       }
-      // the landing itself: two links, no models / WASM / Workers
+      // the landing itself: both entry links, no models / WASM / Workers, nothing from other hosts
       {
         const lp = await browser.newPage();
         const reqs = [];
-        lp.on("request", (r) => reqs.push(new URL(r.url()).pathname));
+        lp.on("request", (r) => reqs.push(new URL(r.url())));
         await lp.goto(`http://127.0.0.1:${port}/web/index.html`);
         await new Promise((r) => setTimeout(r, 800));
-        const links = await lp.evaluate(() => [...document.querySelectorAll("a")].map((a) => a.getAttribute("href")));
+        const links = await lp.evaluate(() => ({
+          fit: document.getElementById("to-fit")?.getAttribute("href"),
+          editor: document.getElementById("to-editor")?.getAttribute("href"),
+        }));
         await lp.close();
-        const heavy = reqs.filter((p) => /\/model\/|\.wasm$|worker|fit-app|editor-app|editor-core/.test(p));
-        report(links.join(",") === "picture-control-jpg-fit.html,picture-control-editor.html" && heavy.length === 0,
-          `8e landing: two links (${links.join(", ")}), no heavy assets loaded${heavy.length ? " — " + heavy.join(", ") : ""}`);
+        const heavy = reqs.map((u) => u.pathname)
+          .filter((p) => /\/model\/|\.wasm$|worker|fit-app|editor-app|editor-core/.test(p));
+        const foreign = reqs.filter((u) => u.host !== `127.0.0.1:${port}`).map((u) => u.host);
+        report(links.fit === "picture-control-jpg-fit.html" && links.editor === "picture-control-editor.html"
+               && heavy.length === 0 && foreign.length === 0,
+          `8e landing: links to the wizard and the editor (${links.fit}, ${links.editor}), no heavy assets`
+          + `, no other hosts${heavy.length || foreign.length ? " — " + [...heavy, ...foreign].join(", ") : ""}`);
       }
     }
 
