@@ -152,7 +152,10 @@ export function renderCoverage(el, state) {
     const tr = mk("tr", `lv-${c.level}`);
     tr.dataset.group = c.group;
     tr.dataset.level = c.level;
-    tr.append(mk("td", null, t(c.group)), mk("td", "num", pct(c.value)),
+    // the short group name in the narrow table ("|short", i18n.js), the full one as its tooltip
+    const name = mk("td", null, t(`${c.group}|short`));
+    name.title = t(c.group);
+    tr.append(name, mk("td", "num", pct(c.value)),
               mk("td", null, levelText(c.level)));
     tbl.append(tr);
   }

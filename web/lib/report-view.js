@@ -82,7 +82,7 @@ function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") el.className = v;
-    else if (k.startsWith("data-")) el.dataset[k.slice(5)] = v;
+    else if (k.startsWith("data-")) el.dataset[k.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase())] = v;
     else el.setAttribute(k, v);
   }
   el.append(...kids);
@@ -141,35 +141,29 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
 
   // ---------- the head: the scope switch and the updating badge ----------
   const scopeTgl = h("div", { class: "tgl", id: "rep-scope", hidden: "" },
-    h("button", { type: "button", "data-scope": "pair" }, t("This pair")),
-    h("button", { type: "button", "data-scope": "aggregate" }, t("All pairs")));
-  const updating = h("span", { id: "rep-updating", hidden: "" }, t("Updating…"));
+    h("button", { type: "button", "data-scope": "pair", "data-i18n": "This pair" }, t("This pair")),
+    h("button", { type: "button", "data-scope": "aggregate", "data-i18n": "All pairs" }, t("All pairs")));
+  const updating = h("span", { id: "rep-updating", hidden: "", "data-i18n": "Updating…" }, t("Updating…"));
   const head = h("div", { id: "rep-head" }, scopeTgl, updating);
 
   // ---------- the body ----------
-  const empty = h("div", { id: "rep-empty", hidden: "" },
+  const empty = h("div", { id: "rep-empty", hidden: "", "data-i18n": "Fit a profile to see the report." },
     t("Fit a profile to see the report."));
   // every summary line explains itself on hover (2026-11-20 review): the tip is on the
   // whole line (the term and the value)
+  // (one literal per tip: the keys of the translation dictionaries, test level 1k)
   const TIPS = {
-    strength: "The profile strength this report is computed at: 100% is the fitted profile, " +
-      "less blends it toward the Nikon neutral, more strengthens it.",
-    render: "Mean color difference (dE2000) between the RAW rendered with this profile and the " +
-      "target JPEG, over the aligned, not overexposed pixels. Lower is better: under ~2 is hard " +
-      "to see side by side.",
-    neutral: "The same difference for the RAW rendered without a profile (the Nikon neutral " +
-      "look) — the starting point. The profile should bring \"Render vs target\" well below it.",
-    bin: "dE2000 averaged over color bins (hue × chroma, greys by lightness) instead of over " +
-      "pixels: every color counts equally however small its area, so a large sky cannot hide " +
-      "errors in rare colors.",
-    delta: "How your manual adjustments changed \"Render vs target\" against the fitted " +
-      "profile: negative is better, positive is worse.",
+    strength: "The profile strength this report is computed at: 100% is the fitted profile, less blends it toward the Nikon neutral, more strengthens it.",
+    render: "Mean color difference (dE2000) between the RAW rendered with this profile and the target JPEG, over the aligned, not overexposed pixels. Lower is better: under ~2 is hard to see side by side.",
+    neutral: "The same difference for the RAW rendered without a profile (the Nikon neutral look) — the starting point. The profile should bring \"Render vs target\" well below it.",
+    bin: "dE2000 averaged over color bins (hue × chroma, greys by lightness) instead of over pixels: every color counts equally however small its area, so a large sky cannot hide errors in rare colors.",
+    delta: "How your manual adjustments changed \"Render vs target\" against the fitted profile: negative is better, positive is worse.",
   };
   const kv = (key, label, id, hidden = false) => {
     const tip = t(TIPS[key]);
-    const dt = h("dt", { title: tip, class: "tip", ...(hidden ? { id: `${id}-dt`, hidden: "" } : {}) },
-      t(label));
-    const dd = h("dd", { id, title: tip, ...(hidden ? { hidden: "" } : {}) }, "—");
+    const dt = h("dt", { title: tip, class: "tip", "data-i18n": label, "data-i18n-title": TIPS[key],
+      ...(hidden ? { id: `${id}-dt`, hidden: "" } : {}) }, t(label));
+    const dd = h("dd", { id, title: tip, "data-i18n-title": TIPS[key], ...(hidden ? { hidden: "" } : {}) }, "—");
     return [dt, dd];
   };
   const summaryDl = h("dl", { class: "rep-kv" },
@@ -185,11 +179,12 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   const legendBar = h("canvas", { id: "rep-legend-bar", width: 140, height: 8 });
   const legendTicks = h("div", { id: "rep-legend-ticks" });
   const overlayChk = h("input", { type: "checkbox", id: "rep-overlay" });
-  const overlayBox = h("label", { id: "rep-overlay-box" }, overlayChk, t("Overlay on the image"));
+  const tx = (key) => h("span", { "data-i18n": key }, t(key));     // a live-translated text node
+  const overlayBox = h("label", { id: "rep-overlay-box" }, overlayChk, tx("Overlay on the image"));
   const clipChip = h("span", { class: "rep-chip" }, h("i", { style: `background:rgb(${CLIP_RGB.join(",")})` }),
-    t("Overexposed"));
+    tx("Overexposed"));
   const invalidChip = h("span", { class: "rep-chip" }, h("i", { style: `background:rgb(${INVALID_RGB.join(",")})` }),
-    t("Unaligned"));
+    tx("Unaligned"));
   const mapSection = h("div", { id: "rep-map-section" },
     mapModes, mapCanvas,
     h("div", { class: "rep-legend rep-scale" }, legendBar, legendTicks),
@@ -207,7 +202,8 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   const mapGrp = grp("map", "Error map", mapSection);
   // a pair outside the current profile is a preview of how the profile does on it (decision
   // #11); its numbers are not the fit's — say so above them (UX review, decision #15)
-  const previewNote = h("div", { id: "rep-preview", class: "rep-note", hidden: "" },
+  const previewNote = h("div", { id: "rep-preview", class: "rep-note", hidden: "",
+    "data-i18n": "Preview: this pair is not in the profile yet — Refit to include it." },
     t("Preview: this pair is not in the profile yet — Refit to include it."));
   const body = h("div", { id: "rep-body" }, empty, previewNote,
     grp("summary", "Summary", summaryDl),
@@ -231,8 +227,9 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   };
 
   // ---------- the color-match table ----------
+  // the header labels are translated when the table renders (a language switch re-renders it)
   const COLS = [
-    ["group", t("Group")], ["share", t("Share")], ["target", t("Color")], ["dE", "dE"], ["dL", "dL"], ["dC", "dC"], ["dh", "dh"],
+    ["group", "Group"], ["share", "Share"], ["target", "Color"], ["dE", "dE"], ["dL", "dL"], ["dC", "dC"], ["dh", "dh"],
   ];
   const colValue = {
     group: (r) => r.group,
@@ -259,7 +256,7 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     for (const [key, label] of COLS) {
       const active = sort.key === key;
       tr.append(h("th", { "data-key": key, class: key === "group" || key === "share" ? "tg" : "" },
-        label + (active ? (sort.dir > 0 ? " ↑" : " ↓") : "")));
+        t(label) + (active ? (sort.dir > 0 ? " ↑" : " ↓") : "")));
     }
     thead.append(tr);
     const sorted = [...rows].sort((a, b) => {
@@ -271,7 +268,7 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     for (const r of sorted) {
       const gi = GROUPS.indexOf(r.group);
       const row = h("tr", { "data-group": r.group, class: gi === hlGroup ? "sel" : "" },
-        h("td", { class: "tg" }, r.group),
+        h("td", { class: "tg", title: t(r.group) }, t(`${r.group}|short`)),   // short name, full in the tooltip
         h("td", {}, `${(100 * r.share).toFixed(1)}%`),
         h("td", { class: "sw" }, swatch(r.targetLab, "Target"), swatch(r.renderLab, "Render")),
         h("td", {}, f2(r.dE)), h("td", {}, fsign(r.dL)), h("td", {}, fsign(r.dC)),

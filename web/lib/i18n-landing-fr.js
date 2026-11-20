@@ -73,7 +73,7 @@ export default {
   "Pick it like any built-in picture control and shoot.": "Sélectionnez-le comme n’importe quel Picture Control intégré, puis déclenchez.",
   "Picture Control Buddy, home": "Picture Control Buddy, accueil",
   "Picture Control Buddy: Nikon picture controls from your edits": "Picture Control Buddy : des Picture Control Nikon à partir de vos retouches",
-  "Press “Fit”": "Cliquez sur « Fit »",
+  "Press “Fit”": "Cliquez sur « Ajuster »",
   "Previous screenshot": "Capture précédente",
   "Profile ready to save and share": "Profil prêt à enregistrer et partager",
   "Put the card back into the camera.": "Remettez la carte dans l’appareil.",

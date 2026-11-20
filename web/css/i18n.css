@@ -1,0 +1,23 @@
+/* The language support shared by the app pages (lib/i18n.js, lib/i18n-boot.js,
+   lib/lang-select.js). Linked by the profile editor pages and the fitting wizard. */
+/* lib/i18n-boot.js: hidden until the chosen translation is applied (no English flash) */
+html.i18n-pending body { visibility: hidden; }
+/* GitHub + the language menu (lib/lang-select.js): icon buttons; the menu opens upwards,
+   .down — downwards, aligned to the right edge */
+.icon-row { display: flex; align-items: center; gap: 4px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+  padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--dim); }
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { color: var(--text); border-color: var(--line); }
+.icon-btn svg { width: 16px; height: 16px; flex: none; }
+.icon-btn svg[viewBox="0 0 16 16"] { fill: currentColor; }
+.langpick { position: relative; }
+.lang-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 150px; margin: 0;
+  padding: 4px; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45); }
+.lang-menu[hidden] { display: none; }
+.lang-menu button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 6px 10px; border: 0; background: none; text-align: left; }
+.lang-menu button:hover, .lang-menu button:focus-visible { background: #2c2c2c; outline: none; }
+.lang-menu button[aria-checked="true"] { font-weight: 600; }
+.lang-menu button[aria-checked="true"]::after { content: "✓"; }
+.lang-menu.down { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; }

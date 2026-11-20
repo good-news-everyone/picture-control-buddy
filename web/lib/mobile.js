@@ -70,6 +70,7 @@ for (const [key, icon, label] of TOOLS) {
   b.setAttribute("aria-selected", "false");
   b.tabIndex = -1;
   b.setAttribute("aria-label", t(label));     // the label text is hidden in landscape (icon-only bar)
+  b.dataset.i18nAria = label;
   b.innerHTML = `${ICONS[icon]}<span class="lbl" data-i18n="${label}">${t(label)}</span><span class="mdot" hidden></span>`;
   b.addEventListener("click", () => setTool(key));
   tools.append(b);
@@ -98,7 +99,9 @@ resetBtn.type = "button";
 resetBtn.className = "tool";
 resetBtn.id = "reset-btn";
 resetBtn.setAttribute("aria-label", t("Reset"));
-resetBtn.innerHTML = `${ICONS["rotate-ccw"]}<span class="lbl" data-i18n="Reset">${t("Reset")}</span>`;
+resetBtn.dataset.i18nAria = "Reset";
+// the label under the icon is short in every language (a context key, i18n.js); the aria-label is the full word
+resetBtn.innerHTML = `${ICONS["rotate-ccw"]}<span class="lbl" data-i18n="Reset|toolbar">${t("Reset|toolbar")}</span>`;
 toolbar.append(tools, divider, resetBtn);
 
 let tool = "basic";
@@ -273,7 +276,6 @@ sheet.addEventListener("close", () => {
 
 // ---------- version switch ----------
 const toDesktop = $("to-desktop");
-toDesktop.title = t(toDesktop.title);
 toDesktop.addEventListener("click", () => {
   let np3 = null;
   try { np3 = new URL(app.transfer.shareLink()).searchParams.get("np3"); } catch { /* invalid name: no profile */ }

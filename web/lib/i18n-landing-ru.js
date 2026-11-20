@@ -73,7 +73,7 @@ export default {
   "Pick it like any built-in picture control and shoot.": "Выбери его, как любой встроенный Picture Control, и снимай.",
   "Picture Control Buddy, home": "Picture Control Buddy, на главную",
   "Picture Control Buddy: Nikon picture controls from your edits": "Picture Control Buddy: Picture Control для Nikon по твоим обработкам",
-  "Press “Fit”": "Нажми «Fit»",
+  "Press “Fit”": "Нажми «Подобрать»",
   "Previous screenshot": "Предыдущий скриншот",
   "Profile ready to save and share": "Профиль готов: сохранить и поделиться",
   "Put the card back into the camera.": "Вставь карту обратно в камеру.",

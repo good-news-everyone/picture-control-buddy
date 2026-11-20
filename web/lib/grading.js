@@ -8,7 +8,7 @@
 // The NP3 key does not change: grade[zone] = [hue, chroma, brightness]; Chroma is shown
 // as Saturation (the wheel works with 0..100, negative values are available in HSL).
 // The Point Color tab is not implemented and not offered.
-import { t } from "./i18n.js";
+import { t, i18nSet } from "./i18n.js";
 import { ZONES } from "./np3.js";
 import { neutralControl, zoneKeys, changedKeys, resetKeys } from "./baseline.js";
 import { markButton, resetButton, setChanged } from "./mark.js";
@@ -175,7 +175,7 @@ export function createGradingView(slot, { state, onChange, panel,
 
   // --- resulting-color preview window: HSL mode only (only there are Hue/Sat) ---
   const preview = el("div", "gr-preview");
-  preview.setAttribute("aria-label", t("Color preview"));
+  i18nSet(preview, "aria", "Color preview");
 
   // --- HSL mode: preview + Hue/Saturation/Luminance of the selected zone ---
   const bodyHsl = el("div");
@@ -323,6 +323,7 @@ export function createGradingView(slot, { state, onChange, panel,
   for (const zone of ZONES) {
     const b = el("button", "tabbtn", t(ZLABEL[zone]));
     b.type = "button";
+    b.dataset.i18n = ZLABEL[zone];
     b.addEventListener("click", () => selectZone(zone));
     adjustRow.append(b);
     zoneBtns[zone] = b;
@@ -332,7 +333,7 @@ export function createGradingView(slot, { state, onChange, panel,
     const z = state.control.grade[selZone];
     const sat = Math.max(0, Math.min(100, z[1]));
     preview.style.background = hsl(z[0], sat, ZONE_L[selZone]);
-    preview.setAttribute("aria-label", `${t("Color preview")}: Hue ${z[0]}, Saturation ${sat}`);
+    i18nSet(preview, "aria", "Color preview: hue {hue}, saturation {sat}", { hue: z[0], sat });
   }
 
   // ---------- changed marks / reset to the baseline (stage 6) ----------
