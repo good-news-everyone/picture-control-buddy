@@ -2,12 +2,14 @@
 //
 //     node web/test.mjs [--only 1f,9] [--skip 8]
 //
-// The Node levels (1, 1a, 1b, 1d, 1e, 1f, 1g, 1h, 1i, 9, 4, 5) run in parallel child
+// The Node levels (1, 1a, 1b, 1d, 1e, 1f, 1g, 1h, 1i, 1j, 9, 4, 5) run in parallel child
 // processes — one process per level, each loads its own fixtures. The browser
 // levels run as concurrent pages of one headless Firefox: web/test.html runs
 // the shader levels (2, 2a, 6, 7 and the browser-side 1a checks, one page per
 // level via ?only=), web/target-check.html runs 1c, level 8 keeps its internal
-// order on its own page (the scenarios are NOT split). The exit code is
+// order on its own page (the scenarios are NOT split), level 8b (the stage-8 full flow,
+// races, resources and the stage-2 diagnostics probe; web/test-level8b.mjs) runs on
+// another page alongside it. The exit code is
 // non-zero on failure; the ok/FAIL lines print in the canonical level order.
 // Fixtures and tolerances: web/golden/ (web/make_golden.py), levels and rules: spec/web-tests.md.
 import http from "node:http";
@@ -31,11 +33,11 @@ const only = argList("--only");
 const skipSet = new Set(argList("--skip") || []);
 const selected = (l) => (!only || only.includes(l)) && !skipSet.has(l);
 
-const NODE_LEVELS = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "9", "4", "5"];
+const NODE_LEVELS = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "9", "4", "5"];
 const PAGE_LEVELS = ["2", "2a", "1a", "6", "7"];   // web/test.html sections (the 1a entry is the browser-side decoding-rejection check)
 // the canonical output order of the level reports (identical to the old sequential runner)
-const ORDER = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "9", "4", "5",
-               "2", "2a", "1ab", "6", "7", "1c", "8"];
+const ORDER = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "9", "4", "5",
+               "2", "2a", "1ab", "6", "7", "1c", "8", "8b"];
 const PAGE_KEY = { "1a": "1ab" };                  // the browser-side 1a checks report under their own key
 
 let failed = 0;
@@ -99,7 +101,7 @@ const nodeDone = nodeSelected.length
 
 // ---------- the browser levels: concurrent pages of one Firefox ----------
 let browserDone = Promise.resolve();
-if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8")) {
+if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8b")) {
   const MIME = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
     ".json": "application/json", ".wasm": "application/wasm", ".png": "image/png",
@@ -248,11 +250,25 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8")) {
     finish("8", (Date.now() - t0) / 1000);
   };
 
+  // level 8b: the stage-8 full flow (one fit, two refits), races, resources, the probe
+  const runLevel8bTask = async () => {
+    const t0 = Date.now();
+    try {
+      const { runLevel8b } = await import("./test-level8b.mjs");
+      const { report, skip } = reporter("8b");
+      await runLevel8b({ browser: { newPage }, port, report, skip });
+    } catch (e) {
+      reporter("8b").report(false, `8b: ${e.stack || e.message}`);
+    }
+    finish("8b", (Date.now() - t0) / 1000);
+  };
+
   // level 8 first: it is the longest, it overlaps the shader pages (its fits are
   // CPU-side page Workers, the shader levels are GPU-bound); the cap of 4 pages
   // bounds the GPU/RAM contention on this 16-core/30 GB machine
   const tasks = [];
   if (selected("8")) tasks.push(runLevel8Task);
+  if (selected("8b")) tasks.push(runLevel8bTask);
   for (const l of PAGE_LEVELS) if (selected(l)) tasks.push(() => runTestPage(l));
   if (selected("1c")) tasks.push(runTargetCheck);
   browserDone = (async () => {

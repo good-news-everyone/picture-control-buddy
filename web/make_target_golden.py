@@ -42,6 +42,11 @@ REF_GH = 24
 # Measured 2026-11-19 in headless Firefox: max 0.000 (Firefox and PIL agree bit-exactly on
 # these fixtures) — 0.5 is a robustness margin for IDCT differences across browser versions.
 JPEG_BROWSER_MAX = 0.5
+# The non-sRGB ICC cases are referenced to pairs.to_srgb itself (littleCMS, 8-bit output); the
+# browser converts in float through the iccToSrgbMatrix() matrix-shaper path, so the
+# reference is quantized and the float path differs by rounding: measured max 0.59 levels
+# (Adobe-like curv profile) / 0.51 (Display P3, para type 3) on real images, 1.0 is the bound.
+ICC_BROWSER_MAX = 1.0
 
 
 # --------------------------------------------------------------------------- content
@@ -170,6 +175,39 @@ def adobe_icc() -> bytes:
     return hdr + table + data
 
 
+def p3_icc() -> bytes:
+    """A minimal self-contained ICC matrix profile with Display P3 primaries (D50-adapted
+    colorants) and a 'para' function-type-3 TRC (the sRGB curve: g, a, b, c, d) — the shape of
+    the profiles phones and Lightroom "Display P3" exports embed. Exercises the parametric
+    curve path that real P3 targets take (pairs.to_srgb must convert, not pass through)."""
+    def xyz(X, Y, Z):
+        return b"XYZ " + b"\x00" * 4 + struct.pack(">iii", *[int(round(v * 65536)) for v in (X, Y, Z)])
+
+    def s15(v):
+        return struct.pack(">i", int(round(v * 65536)))
+
+    desc = b"np3-target-p3 v1.0"
+    para = (b"para" + b"\x00" * 4 + struct.pack(">HH", 3, 0)
+            + b"".join(s15(v) for v in (2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045)))
+    tags = [(b"desc", b"desc" + b"\x00" * 4 + struct.pack(">I", len(desc) + 1) + desc + b"\x00"),
+            (b"cprt", b"text" + b"\x00" * 4 + b"np3-fit synthetic test profile\x00"),
+            (b"wtpt", xyz(0.9642, 1.0, 0.82491)),
+            (b"rXYZ", xyz(0.515121, 0.241196, -0.001053)),
+            (b"gXYZ", xyz(0.291977, 0.692245, 0.041885)),
+            (b"bXYZ", xyz(0.157104, 0.066574, 0.784073)),
+            (b"rTRC", para), (b"gTRC", para), (b"bTRC", para)]
+    offset = 128 + 4 + 12 * len(tags)
+    table, data = struct.pack(">I", len(tags)), b""
+    for sig, blob in tags:
+        table += sig + struct.pack(">II", offset, len(blob))
+        data += blob
+        offset += len(blob)
+    hdr = (struct.pack(">I", offset) + b"ascp" + struct.pack(">I", 0x02100000) + b"mntr" + b"RGB " + b"XYZ "
+           + struct.pack(">6H", 2026, 11, 20, 0, 0, 0) + b"acsp" + b"APPL" + struct.pack(">I", 0))
+    hdr += b"\x00" * (128 - len(hdr))
+    return hdr + table + data
+
+
 def write_minimal_dng(path: str):
     """A tiny TIFF-structured file with DNG AsShotNeutral, enough for wbmap.multipliers."""
     data = struct.pack("<6I", 1, 2, 1, 1, 3, 5)     # neutral R=1/2, G=1/1, B=3/5
@@ -242,6 +280,7 @@ BRADFORD_INV = ((0.986993, -0.147054, 0.159963), (0.432305, 0.518360, 0.049291),
 XYZ2SRGB = ((3.2404542, -1.5371385, -0.4985314), (-0.9692660, 1.8760108, 0.0415560),
             (0.0556434, -0.2040259, 1.0572252))
 D65 = (0.95047, 1.0, 1.08883)
+D50 = (0.9642, 1.0, 0.8249)        # the ICC PCS illuminant (littleCMS cmsD50_XYZ)
 
 
 def _mul3(a, b):
@@ -298,12 +337,13 @@ def icc_matrix_reference(icc: bytes):
             return ("param", [sfix(off + 12 + 4 * i) for i in range(k)])
         raise AssertionError(f"unsupported TRC type {typ!r}")
 
-    wtpt, r, g, b = xyz("wtpt"), xyz("rXYZ"), xyz("gXYZ"), xyz("bXYZ")
+    r, g, b = xyz("rXYZ"), xyz("gXYZ"), xyz("bXYZ")
     trcs = [trc("rTRC"), trc("gTRC"), trc("bTRC")]
-    s, d = _mulv(BRADFORD, wtpt), _mulv(BRADFORD, D65)
+    # the colorants are PCS-relative (D50): adapt D50 -> D65, then XYZ -> linear sRGB
+    s, d = _mulv(BRADFORD, D50), _mulv(BRADFORD, D65)
     scale = [[d[0] / s[0], 0, 0], [0, d[1] / s[1], 0], [0, 0, d[2] / s[2]]]
     adapt = _mul3(BRADFORD_INV, _mul3(scale, BRADFORD))
-    m = _inv3(_mul3(XYZ2SRGB, _mul3(adapt, [[r[0], g[0], b[0]], [r[1], g[1], b[1]], [r[2], g[2], b[2]]])))
+    m = _mul3(XYZ2SRGB, _mul3(adapt, [[r[0], g[0], b[0]], [r[1], g[1], b[1]], [r[2], g[2], b[2]]]))
     return [v for row in m for v in row], trcs
 
 
@@ -319,46 +359,66 @@ def eval_trc_reference(trc, x: float) -> float:
         i = min(int(f), len(v) - 2)
         return v[i] + (v[i + 1] - v[i]) * (f - i)
     p = v
-    g, a, bb = p[0], p[1] if len(p) > 1 else 1, p[2] if len(p) > 2 else 0
-    if x < -bb / a:
-        return p[6] if len(p) >= 7 else (p[3] if len(p) == 4 else 0)
-    y = (a * x + bb) / (p[3] * x + p[4]) if len(p) >= 5 else a * x + bb
-    out = max(y, 0) ** g
+    g = p[0]
+    if len(p) == 1:
+        return x ** g if x >= 0 else 0
+    a, bb = p[1], p[2]
+
+    def pw(t):
+        return max(t, 0) ** g
+    if len(p) == 3:
+        return pw(a * x + bb) if x >= -bb / a else 0
     if len(p) == 4:
-        return out + p[3]
-    if len(p) == 7:
-        return out + p[5]
-    return out
+        return pw(a * x + bb) + p[3] if x >= -bb / a else p[3]
+    if len(p) == 5:
+        return pw(a * x + bb) if x >= p[4] else p[3] * x
+    return pw(a * x + bb) + p[5] if x >= p[4] else p[3] * x + p[6]
+
+
+def srgb_encode_reference(v: float) -> float:
+    """Mirror of srgbEncode."""
+    if not v > 0:
+        return 0.0
+    if v >= 1:
+        return 1.0
+    return 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
 
 
 # --------------------------------------------------------------------------- pixel reference grid
 
 def reference_grid(name: str, path: str, icc: bytes | None, profile_desc: str | None) -> dict:
     """The pixel reference for the browser decodeTarget (JPEG targets only — TIFF stays in the
-    Python CLI): PIL decode, ICC-normalized with the JS matrix mirror when the profile is not
-    sRGB by description. Stored as a float32 grid sidecar <case>.ref.f32 plus its grid
-    coordinates."""
+    Python CLI). No ICC or an sRGB description: the PIL decode as-is. A non-sRGB ICC: the
+    Python source of truth itself, pairs.to_srgb (littleCMS) — not a mirror of the JS math —
+    plus a <case>.stored.f32 sidecar with the undecoded-profile (stored) pixels at the same
+    grid points, so a Node level can run the JS ICC path on them without a JPEG decoder.
+    Stored as a float32 grid sidecar <case>.ref.f32 plus its grid coordinates."""
     im = Image.open(path)
     im.load()
-    raw = np.asarray(im, dtype=np.uint8)
-    rgb = raw.astype(np.float64) / 255
-    used_matrix = False
-    if icc and "sRGB" not in (profile_desc or ""):
-        m, trcs = icc_matrix_reference(icc)
-        assert m, "LUT-based ICC in a fixture — the browser matrix path cannot be tested"
-        flat = rgb.reshape(-1, 3)
-        for ch in range(3):
-            flat[:, ch] = [eval_trc_reference(trcs[ch], float(v)) for v in flat[:, ch]]
-        rgb = (flat.reshape(-1, 3) @ np.array(m, dtype=np.float64).reshape(3, 3).T).reshape(rgb.shape)
-        used_matrix = True
+    stored = np.asarray(im, dtype=np.uint8).astype(np.float64) / 255
+    converted = icc and "sRGB" not in (profile_desc or "")
+    rgb = (np.asarray(pairs.to_srgb(Image.open(path)), dtype=np.uint8).astype(np.float64) / 255
+           if converted else stored)
     h, w = rgb.shape[:2]
     xs = np.unique(np.linspace(0, w - 1, min(REF_GW, w)).astype(int))
     ys = np.unique(np.linspace(0, h - 1, min(REF_GH, h)).astype(int))
-    grid = rgb[np.ix_(ys, xs)].astype("<f4")
-    grid.tofile(os.path.join(OUT, name + ".ref.f32"))
-    return {"file": name + ".ref.f32", "gridW": [int(v) for v in xs], "gridH": [int(v) for v in ys],
-            "source": "icc-matrix" if used_matrix else "raw",
-            "browserMaxLevels": JPEG_BROWSER_MAX}
+    rgb[np.ix_(ys, xs)].astype("<f4").tofile(os.path.join(OUT, name + ".ref.f32"))
+    ref = {"file": name + ".ref.f32", "gridW": [int(v) for v in xs], "gridH": [int(v) for v in ys],
+           "source": "pairs.to_srgb" if converted else "raw",
+           "browserMaxLevels": ICC_BROWSER_MAX if converted else JPEG_BROWSER_MAX}
+    if converted:
+        stored[np.ix_(ys, xs)].astype("<f4").tofile(os.path.join(OUT, name + ".stored.f32"))
+        ref["stored"] = name + ".stored.f32"
+        # the mirror of the JS matrix path must reproduce the truth on these pixels
+        m, trcs = icc_matrix_reference(icc)
+        mm = np.array(m, dtype=np.float64).reshape(3, 3)
+        g = stored[np.ix_(ys, xs)].reshape(-1, 3)
+        lin = np.array([[eval_trc_reference(trcs[c], float(v[c])) for c in range(3)] for v in g])
+        out = np.vectorize(srgb_encode_reference)(lin @ mm.T)
+        dev = np.abs(out - rgb[np.ix_(ys, xs)].reshape(-1, 3)).max() * 255
+        expect(dev <= ICC_BROWSER_MAX, f"{name}: the matrix mirror is {dev:.2f} levels off pairs.to_srgb")
+        ref["mirrorMaxLevels"] = round(float(dev), 4)
+    return ref
 
 
 def icc_matrix_json(icc: bytes) -> dict:
@@ -537,6 +597,13 @@ def main():
         "TIFF, strong optical vignetting as content", nef,
         "devignette coefficients estimation input"))
 
+    # ---- appended after the TIFF cases so the rng sequence of the existing cases is unchanged
+    reg("jpg_icc_p3", build_case("jpg_icc_p3",
+        save_jpg("jpg_icc_p3", add_patches(base_scene(*JP, rng)), icc=p3_icc()),
+        "JPEG, embedded Display-P3-like ICC with a 'para' type-3 TRC (np3-target-p3 v1.0)", nef,
+        "the parametric-curve ICC path of real P3 targets (a broken para evaluation made every "
+        "P3 target white -> NCC 0)"))
+
     # ------------------------------------------------------------------ self-checks
     m = {r[0]: r[1] for r in rows}
     x = m["jpg_wb"]
@@ -569,7 +636,7 @@ def main():
                f"{k}: expected the no-XMP warning")
     for k, o in (("jpg_orient6", 6), ("jpg_orient8", 8), ("tif_orient8", 8)):
         expect(m[k]["image"]["exifOrientation"] == o, f"{k}: orientation tag lost")
-    for k in ("jpg_icc", "tif_icc"):
+    for k in ("jpg_icc", "tif_icc", "jpg_icc_p3"):
         expect(m[k]["image"]["icc"]["embedded"] and "sRGB" not in m[k]["image"]["icc"]["profile"],
                f"{k}: ICC missing or misdetected")
         a = np.asarray(Image.open(os.path.join(OUT, m[k]["file"])), dtype=np.float64)
@@ -586,7 +653,10 @@ def main():
     expect(np.allclose(wb["multipliers"], multipliers, atol=1e-12), "wb.json: multipliers mismatch")
     meta = m["jpg_icc"]
     expect("iccMatrix" in meta and len(meta["iccMatrix"]["m"]) == 9, "jpg_icc: iccMatrix missing")
-    expect(meta["ref"]["source"] == "icc-matrix", "jpg_icc: reference grid not ICC-normalized")
+    for k in ("jpg_icc", "jpg_icc_p3"):
+        expect(m[k]["ref"]["source"] == "pairs.to_srgb" and m[k]["ref"].get("stored"),
+               f"{k}: reference grid not ICC-normalized")
+        expect("iccMatrix" in m[k], f"{k}: iccMatrix missing")
     grid = np.fromfile(os.path.join(OUT, meta["ref"]["file"]), dtype="<f4")
     expect(grid.size == len(meta["ref"]["gridW"]) * len(meta["ref"]["gridH"]) * 3,
            "jpg_icc: reference grid size")

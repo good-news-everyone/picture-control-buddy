@@ -523,47 +523,104 @@ function oriented(candidates, tgtU8, tw, th) {
 }
 
 // ------------------------------------------------------------------ preparePair
-// The pure half of pairs.embedded_jpeg: the largest structurally valid JPEG inside the RAW.
-// Python validates by opening each \xff\xd8\xff candidate with PIL; a pure port cannot run a
-// decoder, so it parses the JPEG marker stream (SOI..segments, dimensions from SOF0/1/2) and
-// takes the widest candidate. Returns the JPEG bytes (from SOI to EOI) or null.
+// The pure half of pairs.embedded_jpeg: the largest JPEG inside the RAW. Python opens every
+// \xff\xd8\xff candidate with PIL and keeps the widest one that opens; a pure port cannot run
+// a decoder, so jpegDimensions() ports what makes PIL's Image.open accept or reject a candidate
+// (JpegImageFile._open's marker walk + Image.open's decompression-bomb error). Accepting a
+// candidate PIL rejects is not harmless: RAW sensor data contains \xff\xd8\xff runs that parse
+// as a "huge SOF15" frame, which wins the width race and then fails in the browser decoder
+// ("The source image could not be decoded"). Returns the JPEG bytes (SOI to EOI) or null.
 export function extractEmbeddedJpeg(rawBytes) {
   let best = null;
+  for (const c of embeddedJpegCandidates(rawBytes)) if (!best || c.w > best.w) best = c;
+  return best ? rawBytes.slice(best.offset, best.end) : null;
+}
+
+// Every \xff\xd8\xff offset PIL would open, in file order: [{offset, w, h, end}] (level 1j).
+export function embeddedJpegCandidates(rawBytes) {
+  const out = [];
   for (let p = 0; p + 4 <= rawBytes.length - 1; p++) {
     if (rawBytes[p] !== 0xFF || rawBytes[p + 1] !== 0xD8 || rawBytes[p + 2] !== 0xFF) continue;
     const dims = jpegDimensions(rawBytes, p);
-    if (dims && (!best || dims[0] > best.w)) {
-      best = { offset: p, w: dims[0], h: dims[1], end: dims[2] };
-    }
+    if (dims) out.push({ offset: p, w: dims[0], h: dims[1], end: dims[2] });
   }
-  if (!best) return null;
-  return rawBytes.slice(best.offset, best.end);
+  return out;
 }
 
-// Parses SOI + marker segments from `from`, returns [width, height, offsetPastEOI] or null.
+// PIL Image.MAX_IMAGE_PIXELS: Image.open raises DecompressionBombError above twice this many
+// pixels (pairs.embedded_jpeg skips the candidate).
+const PIL_MAX_IMAGE_PIXELS = 89478485;
+const isSofMarker = (i) => (i >= 0xFFC0 && i <= 0xFFCF && i !== 0xFFC4 && i !== 0xFFC8 && i !== 0xFFCC)
+  || i === 0xFFDE;                                  // DHP uses the SOF handler in PIL
+const noHandler = (i) => i === 0xFFC8 || (i >= 0xFFD0 && i <= 0xFFD9) || (i >= 0xFFF0 && i <= 0xFFFD);
+
+// The port of PIL JpegImageFile._open (Pillow 12) on b[from:], up to the first SOS. Returns
+// [width, height, offsetPastEOI] when PIL would open the candidate, else null:
+//   - every marker FFC0..FFFE is known; a handler reads a 2-byte length and the payload
+//     (a truncated payload -> reject); FFFF is padding, FF00 escaped data, other FF xx -> reject;
+//     non-FF bytes between markers are skipped as junk; EOF before SOS -> reject;
+//   - SOF*/DHP: 8-bit precision and 1, 3 or 4 components, else reject; the last SOF wins;
+//   - DQT: every table must be complete (1 + 64 * precision bytes);
+//   - no SOF before SOS, or a zero width/height -> ImageFile's "not identified" (reject);
+//   - width * height > 2 * MAX_IMAGE_PIXELS -> the decompression-bomb error (reject).
+// The APPn payload parsing (JFIF density, Adobe) is not ported: its rare short-segment errors
+// are not reproduced.
 function jpegDimensions(b, from) {
-  let p = from + 2;                       // after SOI
-  if (b[p] !== 0xFF) return null;
+  const n = b.length;
+  if (from + 3 > n || b[from] !== 0xFF || b[from + 1] !== 0xD8 || b[from + 2] !== 0xFF) return null;
+  let q = from + 3;                                 // the next unread byte
+  let cur = 0xFF;                                   // s = b"\xff"
+  let w = 0, h = 0, sof = false;
   for (;;) {
-    if (p + 4 > b.length) return null;
-    if (b[p] !== 0xFF) return null;
-    const marker = b[p + 1];
-    p += 2;
-    if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
-    if (marker === 0xD9) return [0, 0, p];            // stray EOI: treat as zero-size
-    const len = (b[p] << 8) | b[p + 1];
-    if (len < 2 || p + len > b.length) return null;
-    if ((marker >= 0xC0 && marker <= 0xCF) && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
-      const h = (b[p + 3] << 8) | b[p + 4];
-      const w = (b[p + 5] << 8) | b[p + 6];
-      // find EOI: scan for FF D9 (in entropy data a stuffed FF 00 is used, so FF D9 is real)
-      let q = p + len;
-      while (q + 1 < b.length && !(b[q] === 0xFF && b[q + 1] === 0xD9)) q++;
-      return [w, h, Math.min(q + 2, b.length)];
+    if (cur !== 0xFF) {                             // skip non-0xFF junk
+      if (q >= n) return null;
+      cur = b[q++];
+      continue;
     }
-    if (marker === 0xDA) return null;                 // SOS before SOF: not a candidate
-    p += len;
+    if (q >= n) return null;
+    const i = 0xFF00 | b[q++];
+    if (i >= 0xFFC0 && i <= 0xFFFE) {
+      if (!noHandler(i)) {
+        if (q + 2 > n) return null;
+        const len = (b[q] << 8) | b[q + 1];
+        q += 2;
+        const size = len - 2;
+        if (size < 0 || q + size > n) return null;
+        if (isSofMarker(i)) {
+          if (size < 6) return null;
+          if (b[q] !== 8) return null;                                  // "cannot handle N-bit layers"
+          const layers = b[q + 5];
+          if (layers !== 1 && layers !== 3 && layers !== 4) return null; // "cannot handle N-layer images"
+          h = (b[q + 1] << 8) | b[q + 2];
+          w = (b[q + 3] << 8) | b[q + 4];
+          sof = true;
+        } else if (i === 0xFFDB) {
+          for (let t = q, end = q + size; t < end;) {
+            const qtLength = 1 + (b[t] >> 4 === 0 ? 1 : 2) * 64;
+            if (end - t < qtLength) return null;                         // "bad quantization table marker"
+            t += qtLength;
+          }
+        }
+        q += size;
+      }
+      if (i === 0xFFDA) break;                      // SOS: the image data starts
+      if (q >= n) return null;
+      cur = b[q++];
+    } else if (i === 0xFFFF) {
+      cur = 0xFF;                                   // padding
+    } else if (i === 0xFF00) {
+      if (q >= n) return null;
+      cur = b[q++];
+    } else {
+      return null;                                  // "no marker found"
+    }
   }
+  if (!sof || w <= 0 || h <= 0) return null;     // ImageFile: "not identified by this driver"
+  if (w * h > 2 * PIL_MAX_IMAGE_PIXELS) return null;
+  // the end: the first FF D9 after the scan header (a stuffed FF 00 cannot form FF D9)
+  let e = q;
+  while (e + 1 < n && !(b[e] === 0xFF && b[e + 1] === 0xD9)) e++;
+  return [w, h, Math.min(e + 2, n)];
 }
 
 // ------------------------------------------------------------------ preparePair

@@ -1,0 +1,178 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "jpg_icc_p3.jpg",
+ "case": "JPEG, embedded Display-P3-like ICC with a 'para' type-3 TRC (np3-target-p3 v1.0)",
+ "image": {
+  "format": "JPEG",
+  "w": 384,
+  "h": 256,
+  "mode": "RGB",
+  "storedSize": [
+   384,
+   256
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": true,
+   "profile": "np3-target-p3 v1.0\n",
+   "treatedAsSrgb": false,
+   "normalizedTo": "sRGB (converted via the embedded profile)"
+  }
+ },
+ "xmp": {
+  "_masks": false
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   384,
+   256
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "jpg_icc_p3.jpg: read only the 384x256 preview, better give a JPEG or TIFF",
+  "jpg_icc_p3.jpg: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile"
+ ],
+ "content": {
+  "clippedShare": 0.0
+ },
+ "ref": {
+  "file": "jpg_icc_p3.ref.f32",
+  "gridW": [
+   0,
+   12,
+   24,
+   37,
+   49,
+   61,
+   74,
+   86,
+   98,
+   111,
+   123,
+   135,
+   148,
+   160,
+   172,
+   185,
+   197,
+   210,
+   222,
+   234,
+   247,
+   259,
+   271,
+   284,
+   296,
+   308,
+   321,
+   333,
+   345,
+   358,
+   370,
+   383
+  ],
+  "gridH": [
+   0,
+   11,
+   22,
+   33,
+   44,
+   55,
+   66,
+   77,
+   88,
+   99,
+   110,
+   121,
+   133,
+   144,
+   155,
+   166,
+   177,
+   188,
+   199,
+   210,
+   221,
+   232,
+   243,
+   255
+  ],
+  "source": "pairs.to_srgb",
+  "browserMaxLevels": 1.0,
+  "stored": "jpg_icc_p3.stored.f32",
+  "mirrorMaxLevels": 0.6372
+ },
+ "iccMatrix": {
+  "m": [
+   1.2248117736346376,
+   -0.2248325504267552,
+   6.034457651238334e-06,
+   -0.042052893713716226,
+   1.0420606629286417,
+   1.661673113639156e-05,
+   -0.019648866749291623,
+   -0.07864807641900923,
+   1.0983016515259525
+  ],
+  "trc": [
+   {
+    "x": 0,
+    "r": 0.0,
+    "g": 0.0,
+    "b": 0.0
+   },
+   {
+    "x": 0.1,
+    "r": 0.01002391265060553,
+    "g": 0.01002391265060553,
+    "b": 0.01002391265060553
+   },
+   {
+    "x": 0.25,
+    "r": 0.05087855813910014,
+    "g": 0.05087855813910014,
+    "b": 0.05087855813910014
+   },
+   {
+    "x": 0.5,
+    "r": 0.21404519268810554,
+    "g": 0.21404519268810554,
+    "b": 0.21404519268810554
+   },
+   {
+    "x": 0.75,
+    "r": 0.5225251204095402,
+    "g": 0.5225251204095402,
+    "b": 0.5225251204095402
+   },
+   {
+    "x": 0.9,
+    "r": 0.7874141418532061,
+    "g": 0.7874141418532061,
+    "b": 0.7874141418532061
+   },
+   {
+    "x": 1.0,
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.0
+   }
+  ]
+ },
+ "exercises": "the parametric-curve ICC path of real P3 targets (a broken para evaluation made every P3 target white -> NCC 0)"
+}

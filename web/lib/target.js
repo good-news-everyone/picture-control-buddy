@@ -171,6 +171,9 @@ function trcTag(icc, tags, name) {
 }
 
 // Evaluates a trcTag value at x (the matrix-shaper forward TRC, profile RGB -> linear).
+// 'para' follows ICC.1 10.18 (the parametricCurveType functions 0-4, p = [g, a, b, c, d, e, f]):
+//   0: X^g   1: (aX+b)^g, X >= -b/a, else 0   2: (aX+b)^g + c, X >= -b/a, else c
+//   3: (aX+b)^g, X >= d, else cX             4: (aX+b)^g + e, X >= d, else cX + f
 export function evalTrc(trc, x) {
   if (!trc) return x;
   if (trc.kind === "gamma") return x >= 0 ? Math.pow(x, trc.g) : 0;
@@ -180,13 +183,21 @@ export function evalTrc(trc, x) {
     return trc.v[i] + (trc.v[i + 1] - trc.v[i]) * (f - i);
   }
   const p = trc.p;
-  const g = p[0], a = p.length > 1 ? p[1] : 1, b = p.length > 2 ? p[2] : 0;
-  if (x < -b / a) return p.length >= 7 ? p[6] : (p.length === 4 ? p[3] : 0);
-  const y = p.length >= 5 ? (a * x + b) / (p[3] * x + p[4]) : a * x + b;
-  const out = Math.pow(Math.max(y, 0), g);
-  if (p.length === 4) return out + p[3];
-  if (p.length === 7) return out + p[5];
-  return out;
+  const g = p[0];
+  if (p.length === 1) return x >= 0 ? Math.pow(x, g) : 0;
+  const a = p[1], b = p[2];
+  const pw = (v) => Math.pow(Math.max(v, 0), g);
+  if (p.length === 3) return x >= -b / a ? pw(a * x + b) : 0;
+  if (p.length === 4) return x >= -b / a ? pw(a * x + b) + p[3] : p[3];
+  if (p.length === 5) return x >= p[4] ? pw(a * x + b) : p[3] * x;
+  return x >= p[4] ? pw(a * x + b) + p[5] : p[3] * x + p[6];
+}
+
+// The sRGB transfer function (linear -> encoded), clamped to [0, 1] like an 8-bit CMS output.
+export function srgbEncode(v) {
+  if (!(v > 0)) return 0;
+  if (v >= 1) return 1;
+  return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
 }
 
 // Bradford chromatic adaptation matrices and the sRGB primaries (as in littleCMS).
@@ -194,50 +205,44 @@ const BRADFORD = [[0.8951, 0.2664, -0.1614], [-0.7502, 1.7135, 0.0367], [0.0389,
 const BRADFORD_INV = [[0.986993, -0.147054, 0.159963], [0.432305, 0.518360, 0.049291], [-0.008529, 0.040043, 0.968487]];
 const XYZ2SRGB = [[3.2404542, -1.5371385, -0.4985314], [-0.9692660, 1.8760108, 0.0415560], [0.0556434, -0.2040259, 1.0572252]];
 const D65 = [0.95047, 1.0, 1.08883];
+const D50 = [0.9642, 1.0, 0.8249];      // the ICC PCS illuminant (littleCMS cmsD50_XYZ)
 
 const mul3 = (a, b) => a.map((row, i) => row.map((_, j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j]));
 const mulV = (a, v) => a.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
-const inv3 = (m) => {
-  const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
-  const A = e * i - f * h, B = c * h - b * i, C = b * f - c * e;
-  const det = a * A + d * B + g * C;
-  if (!det) return null;
-  return [[A / det, B / det, C / det],
-          [(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det],
-          [(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det]];
-};
 
-// littleCMS profileToProfile for a v2/v4 matrix-shaper profile: the Bradford-adapted
-// RGB->linear-sRGB matrix plus the three forward TRCs. Returns null for LUT-based (A2B0/mft1)
-// profiles so the caller falls back to the browser CMS (§7.1).
+// littleCMS profileToProfile(profile -> sRGB) for a v2/v4 matrix-shaper profile: the forward
+// TRCs, the colorant matrix (profile linear RGB -> PCS XYZ, D50 — the colorants are
+// PCS-relative by the ICC spec, so the media white point is NOT the adaptation source), the
+// Bradford D50 -> D65 adaptation and XYZ -> linear sRGB; applyIcc then encodes with the sRGB
+// curve. Returns null for LUT-based (A2B0/mft1) profiles so the caller falls back to the
+// browser CMS (§7.1).
 export function iccToSrgbMatrix(icc) {
   const tags = iccTags(icc);
   if (!tags || sig(icc, 16) !== "RGB ") return null;
   if (tags.has("A2B0") || sig(icc, 12) === "mft1" || sig(icc, 12) === "mft2"
       || sig(icc, 12) === "mAB " || sig(icc, 12) === "mBA ") return null;
-  const wtpt = xyzTag(icc, tags, "wtpt");
   const r = xyzTag(icc, tags, "rXYZ"), g = xyzTag(icc, tags, "gXYZ"), b = xyzTag(icc, tags, "bXYZ");
   const trcR = trcTag(icc, tags, "rTRC"), trcG = trcTag(icc, tags, "gTRC"), trcB = trcTag(icc, tags, "bTRC");
-  if (!wtpt || !r || !g || !b || !trcR || !trcG || !trcB) return null;
+  if (!r || !g || !b || !trcR || !trcG || !trcB) return null;
   const adapt = (() => {
-    const s = mulV(BRADFORD, wtpt), d = mulV(BRADFORD, D65);
+    const s = mulV(BRADFORD, D50), d = mulV(BRADFORD, D65);
     const scale = [[d[0] / s[0], 0, 0], [0, d[1] / s[1], 0], [0, 0, d[2] / s[2]]];
     return mul3(BRADFORD_INV, mul3(scale, BRADFORD));
   })();
   const rgb2xyz = [[r[0], g[0], b[0]], [r[1], g[1], b[1]], [r[2], g[2], b[2]]];
-  const m = inv3(mul3(XYZ2SRGB, mul3(adapt, rgb2xyz)));
-  if (!m) return null;
+  const m = mul3(XYZ2SRGB, mul3(adapt, rgb2xyz));
   return { m: m.flat(), trc: { r: trcR, g: trcG, b: trcB } };
 }
 
-// Applies the iccToSrgbMatrix() result to linear-light RGB in [0,1] (row-major, in place capable).
+// Applies the iccToSrgbMatrix() result to encoded profile RGB in [0,1] (row-major, in place):
+// forward TRC -> matrix -> the sRGB curve, so the output is encoded sRGB like pairs.to_srgb.
 export function applyIcc(rgb, icc) {
   const { m, trc } = icc;
   for (let i = 0; i < rgb.length; i += 3) {
     const r = evalTrc(trc.r, rgb[i]), g = evalTrc(trc.g, rgb[i + 1]), b = evalTrc(trc.b, rgb[i + 2]);
-    rgb[i]     = m[0] * r + m[1] * g + m[2] * b;
-    rgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
-    rgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
+    rgb[i]     = srgbEncode(m[0] * r + m[1] * g + m[2] * b);
+    rgb[i + 1] = srgbEncode(m[3] * r + m[4] * g + m[5] * b);
+    rgb[i + 2] = srgbEncode(m[6] * r + m[7] * g + m[8] * b);
   }
   return rgb;
 }

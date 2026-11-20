@@ -12,6 +12,7 @@ import { deserialize, serialize } from "./lib/np3.js";
 import { curveTable } from "./lib/curve.js";
 import { scaled } from "./lib/strength.js";
 import { level1i } from "./test-node-advice.mjs";
+import { level1j } from "./test-node-stage2.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));   // web/
 const ROOT = path.dirname(HERE);                             // the project root
@@ -65,6 +66,7 @@ export const LEVELS = {
   "1g": level1g,
   "1h": level1h,
   "1i": level1i,
+  "1j": level1j,
   "9": level9,
   "4": level4,
   "5": level5,
@@ -313,11 +315,17 @@ async function level1e(ctx) {
            + (bad.length ? ` — ${bad.join("; ")}` : ""));
   }
 
-  // extractEmbeddedJpeg: a pure port of the pairs.embedded_jpeg marker scan (two candidates,
-  // the widest wins; a candidate without a SOF segment is skipped)
-  const jpg = (w, h) => Uint8Array.from([0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x08, 0x08,
-                                         h >> 8, h & 255, w >> 8, w & 255, 0x03, 0xFF, 0xD9]);
-  const broken = Uint8Array.from([0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 0xFF, 0xD9]);
+  // extractEmbeddedJpeg: a pure port of the pairs.embedded_jpeg PIL scan (two candidates,
+  // the widest wins; a candidate without a SOF segment is skipped). The candidates are
+  // complete SOF + SOS streams — PIL rejects a SOF without a following SOS (verified with
+  // Pillow 12.3: offsets 4 -> 100x50, 45 -> rejected, 57 -> 640x480). The PIL-faithfulness of
+  // the scan on adversarial runs is level 1j.
+  const jpg = (w, h) => Uint8Array.from([0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08,
+                                         h >> 8, h & 255, w >> 8, w & 255, 0x03,
+                                         1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0,
+                                         0xFF, 0xDA, 0x00, 0x0C, 0x03, 1, 0, 2, 0x11, 3, 0x11, 0, 0x3F, 0,
+                                         0x12, 0x34, 0xFF, 0xD9]);
+  const broken = Uint8Array.from([0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x05, 1, 2, 3, 0xFF, 0xD9]);
   const raw = new Uint8Array([9, 9, 9, 9, ...jpg(100, 50), 0, 0, ...broken, 7, ...jpg(640, 480), 1, 2, 3]);
   const got = P.extractEmbeddedJpeg(raw);
   const want = jpg(640, 480);
