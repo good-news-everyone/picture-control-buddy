@@ -306,6 +306,12 @@
   body.step-edit #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; grid-row: 1; }
   body.step-edit #panel { grid-column: 2; grid-row: 1; min-height: 0; }
   body.step-edit #files, body.step-edit #view, body.step-edit #report { display: none; }
+  /* no page-level horizontal scroll in these steps: the quick editor's panel slides in
+     from the right (panel-in below) and the transient 24 px overflow would otherwise make
+     the page horizontally scrollable — and grow a horizontal scrollbar on systems with
+     classic scrollbars, which shrinks the 1fr row and visibly moves the viewer */
+  body.step-compare, body.step-edit { overflow-x: hidden; }
+  html:has(body.step-compare), html:has(body.step-edit) { overflow-x: hidden; }
   body.step-edit #cmp-strength-box { opacity: .45; }
   /* the quick editor stands out: a darker panel that slides in from the right edge
      (the report it replaces fades back in on Done / Cancel) */

@@ -641,9 +641,23 @@ export async function runMobileLevels({ browser, port, report, skip }) {
         c: window.__np3app.state.control.contrast, n: window.__np3app.state.control.name, pref: localStorage.getItem("np3view") }));
       report(dk.path === "/web/picture-control-editor.html" && dk.kind === "desktop" && dk.c === want && dk.n === name && dk.pref === "desktop",
         `9b version switch: "Desktop version" opens picture-control-editor.html with the current profile (contrast ${dk.c}, name "${dk.n}") and stores the preference`);
-      // and back: the desktop page offers "Mobile version" because a preference is stored
-      const vis = await pg.evaluate(() => !document.getElementById("to-mobile").hidden);
-      await Promise.all([pg.waitForNavigation(), pg.evaluate(() => document.querySelector("#to-mobile button").click())]);
+      // and back: the desktop page offers "Mobile version" because a preference is stored.
+      // The button visibility + click chain runs in Chromium only: headless Firefox
+      // (WebDriver BiDi) has no touch emulation — emulation.setTouchOverride is an unknown
+      // command there — so (pointer: coarse) never matches and #to-mobile stays hidden no
+      // matter what; that is a test-environment limitation, not an app behavior (the rule is
+      // unit-checked in 9a). The return switch itself runs in Firefox through the same
+      // NP3Route.switchTo() the button handler calls, with the np3 from shareLink() exactly
+      // as the handler extracts it.
+      let vis = true, back;
+      if (BROWSER === "chrome") {
+        vis = await pg.evaluate(() => !document.getElementById("to-mobile").hidden);
+        back = pg.evaluate(() => document.querySelector("#to-mobile button").click());
+      } else {
+        back = pg.evaluate(() => window.NP3Route.switchTo("mobile",
+          new URL(window.__np3app.transfer.shareLink()).searchParams.get("np3")));
+      }
+      await Promise.all([pg.waitForNavigation(), back]);
       await pg.waitForFunction(() => window.__np3app && window.__np3app.state.status.startsWith("Imported from link"), { timeout: 120000, polling: 100 });
       const mb = await pg.evaluate(() => ({ path: location.pathname, kind: window.__np3app.shell.kind, c: window.__np3app.state.control.contrast,
         pref: localStorage.getItem("np3view") }));
@@ -687,12 +701,19 @@ export async function runMobileLevels({ browser, port, report, skip }) {
       r = await land(null, `${base}picture-control-editor-mobile.html?view=desktop&np3=${q}`);
       report(r.path === "/web/picture-control-editor.html" && r.search === "" && r.pref === "desktop" && r.kind === "desktop" && r.name === want,
         "9b redirect: ?view=desktop on picture-control-editor-mobile.html lands on picture-control-editor.html with the profile, the choice is stored");
-      r = await land(null, `${base}picture-control-editor.html?np3=${q}`);       // an emulated phone: coarse pointer, short side 390
-      report(r.path === "/web/picture-control-editor-mobile.html" && r.kind === "mobile" && r.name === want && r.pref === null,
-        "9b redirect: the auto rule sends an emulated phone from picture-control-editor.html to picture-control-editor-mobile.html (nothing stored)");
-      r = await land(null, `${base}?np3=${q}`);
-      report(r.path === "/web/picture-control-editor-mobile.html" && r.name === want,
-        "9b redirect: a legacy directory URL (…/web/?np3=) goes landing -> editor -> the mobile page on a phone");
+      // the auto-rule cases need a full phone emulation (a coarse pointer AND a small emulated
+      // screen) — available in Chromium only; headless Firefox BiDi cannot emulate either
+      // (see the version-switch note above). The rule itself is unit-checked in 9a.
+      if (BROWSER !== "chrome") {
+        skip("9b redirect: the phone auto-rule cases need touch/screen emulation (Chromium only; the rule is unit-checked in 9a)");
+      } else {
+        r = await land(null, `${base}picture-control-editor.html?np3=${q}`);     // an emulated phone: coarse pointer, short side 390
+        report(r.path === "/web/picture-control-editor-mobile.html" && r.kind === "mobile" && r.name === want && r.pref === null,
+          "9b redirect: the auto rule sends an emulated phone from picture-control-editor.html to picture-control-editor-mobile.html (nothing stored)");
+        r = await land(null, `${base}?np3=${q}`);
+        report(r.path === "/web/picture-control-editor-mobile.html" && r.name === want,
+          "9b redirect: a legacy directory URL (…/web/?np3=) goes landing -> editor -> the mobile page on a phone");
+      }
       r = await land(null, `${base}picture-control-editor.html?np3=${q}`, { width: 1280, height: 800 });
       report(r.path === "/web/picture-control-editor.html" && r.kind === "desktop" && r.name === want,
         "9b redirect: a desktop (fine pointer, wide screen) stays on picture-control-editor.html");
@@ -711,13 +732,21 @@ export async function runMobileLevels({ browser, port, report, skip }) {
         return hidden;
       };
       const PREF = "localStorage.setItem('np3view','desktop')";
+      // without a coarse pointer the "shown" cases cannot run in Firefox (no touch emulation,
+      // see the version-switch note); the hidden cases are emulation-independent
       const hDesk = await linkState({ width: 1280, height: 800 }, null, `${base}picture-control-editor.html`);
       const hMouse = await linkState({ width: 1280, height: 800 }, PREF, `${base}picture-control-editor.html`);
-      const hTablet = await linkState({ width: 834, height: 1112, isMobile: true, hasTouch: true }, PREF, `${base}picture-control-editor.html`);
       const hTabletNo = await linkState({ width: 834, height: 1112, isMobile: true, hasTouch: true }, null, `${base}picture-control-editor.html`);
-      const hPhone = await linkState({ width: 390, height: 844, isMobile: true, hasTouch: true }, PREF, `${base}picture-control-editor.html`);
-      report(hDesk === true && hMouse === true && hTablet === false && hTabletNo === true && hPhone === false,
-        "9b picture-control-editor.html: the \"Mobile version\" link is hidden on a mouse desktop (also with a stored preference) and without a preference on a tablet, shown on a phone and on a touch device with a stored preference");
+      report(hDesk === true && hMouse === true && hTabletNo === true,
+        "9b picture-control-editor.html: the \"Mobile version\" link is hidden on a mouse desktop (also with a stored preference) and without a preference on a tablet");
+      if (BROWSER !== "chrome") {
+        skip("9b picture-control-editor.html: the \"Mobile version\" link shown on an emulated phone/tablet with a preference needs touch emulation (Chromium only)");
+      } else {
+        const hTablet = await linkState({ width: 834, height: 1112, isMobile: true, hasTouch: true }, PREF, `${base}picture-control-editor.html`);
+        const hPhone = await linkState({ width: 390, height: 844, isMobile: true, hasTouch: true }, PREF, `${base}picture-control-editor.html`);
+        report(hTablet === false && hPhone === false,
+          "9b picture-control-editor.html: the \"Mobile version\" link is shown on a phone and on a touch device with a stored preference");
+      }
     }
 
     // ---- RAW-dependent: the viewer with a real frame ----
