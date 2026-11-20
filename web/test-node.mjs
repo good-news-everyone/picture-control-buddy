@@ -747,25 +747,6 @@ async function level1g(ctx) {
       ` binMean ${binMean.toFixed(4)} vs ${aggDoc.aggregateBinMean.toFixed(4)}${bad ?? badT ?? ""}`);
   }
 
-  // --- the §4.4 download document ---
-  {
-    const result = scaled(JSON.parse(JSON.stringify(control)), 100);
-    result.name = control.name;          // strength.scaled(base, 100, base.name) keeps the name
-    const dl = A.downloadDoc({
-      generator: "np3-fit web <git describe>",
-      files: P0.pd.files,
-      version: { id: "draft", name: control.name, strength: 100 },
-      summary: A.summaryOf(S0, neutralDoc.summary.renderDE, 100, null),
-      table: A.tableOf(S0),
-      aggregate: aggDoc.aggregate,
-      parameters: { base: control, result, deltas: null },
-    });
-    const want = JSON.parse(await readFile(path.join(HERE, "golden/report/report_download.json"), "utf8"));
-    const bad = deepClose({ ...dl, generator: null }, { ...want, generator: null }, 1e-4, 1e-9, "download");
-    report(!bad && /^np3-fit web \S+$/.test(want.generator),
-      `1g download doc vs golden (§4.4, generator is a git describe: "${want.generator}")${bad ? ` — ${bad}` : ""}`);
-  }
-
   // --- edge cases: a fully clipped frame (Python's NaN behavior, no crash) ---
   {
     const zeroMask = new Uint8Array(P0.pd.h3 * P0.pd.w3);
@@ -882,6 +863,27 @@ async function level1g(ctx) {
         `1g worker: ready at strength 100 (regionSums rel ${eS.toExponential(1)},` +
         ` ${((r1.ms || 0) / 1000).toFixed(1)}s, progress posts, maps transferred)` +
         (bad ? ` — ${bad}` : ""));
+      // the curve-thumbnail backdrop (spec/ui.md decision #8): the neutral's Y' luma histogram,
+      // raw counts over the working grid, binned with detail.YW exactly like
+      // renderer.lumaHistogram (re-derived here independently from model/detail.json)
+      if (rep) {
+        const { loadDev, develop } = await import("./lib/fit.js");
+        const dev = loadDev(modelBytes.devMeta, modelBytes.devLut);
+        const P = prepared.dsc_6550;
+        const xg = new Float64Array(P.x.length);
+        for (let i = 0; i < xg.length; i++) xg[i] = P.x[i] * P.pd.gain[i % 3];
+        const fb = develop(dev, xg);
+        const yw = JSON.parse(await readFile(path.join(HERE, "model/detail.json"), "utf8")).YW;
+        const want = new Float64Array(256);
+        for (let i = 0; i < fb.length; i += 3)
+          want[Math.min(255, Math.floor((yw[0] * fb[i] + yw[1] * fb[i + 1] + yw[2] * fb[i + 2]) * 255))]++;
+        const got = rep.neutralHist, agg = r1.aggregate.neutralHist;
+        const ok = got && got.length === 256 && want.every((v, i) => v === got[i])
+          && got.reduce((a, b) => a + b, 0) === fb.length / 3
+          && agg && agg.every((v, i) => v === got[i]);
+        report(ok, `1g worker: neutralHist = the Y' (detail.YW) histogram of the developed neutral,` +
+          ` ${fb.length / 3} pixels; the one-pair aggregate equals it`);
+      }
       // task 1b: a doctored generation (pixel 0 masked out) — the cache invalidates by the
       // pair generation and the maps are NaN at the excluded pixel (dsc_6550's own mask
       // is all-ones, so the plain run cannot show an outside-mask NaN)

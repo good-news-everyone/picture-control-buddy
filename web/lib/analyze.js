@@ -237,11 +237,18 @@ export async function mapsOf(predSrgb, targetLab, reportMask, onChunk) {
 }
 
 /**
- * The §4.4 JSON download document — versioned, self-contained, file names only
- * (summary, table, aggregate and parameters; no pixel maps). `generator` is supplied by
- * the caller ("np3-fit web <git describe>"); everything else is report data.
+ * The Y' luma histogram of a display-encoded sRGB image (n, 3) in 0..1: 256 bins 0..255,
+ * raw counts (Float64Array). The weights are detail.YW (Rec. 601: 0.299/0.587/0.114) — the
+ * same binning as renderer.lumaHistogram (the curve editor's backdrop), which normalizes
+ * to the peak; the report sends counts so the aggregate can sum them (spec/ui.md decision #8).
  */
-export function downloadDoc({ generator, files, version, summary, table, aggregate, parameters }) {
-  return { schemaVersion: 1, kind: "report", generator, files, version, summary, table,
-           aggregate, parameters };
+export const LUMA_YW = [0.299, 0.587, 0.114];
+export function lumaHistogram(rgb, yw = LUMA_YW) {
+  const bins = new Float64Array(256);
+  const [yr, yg, yb] = yw;
+  for (let i = 0; i + 2 < rgb.length; i += 3) {
+    const y = (yr * rgb[i] + yg * rgb[i + 1] + yb * rgb[i + 2]) * 255;
+    bins[Math.min(255, Math.max(0, y | 0))]++;
+  }
+  return bins;
 }

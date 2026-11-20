@@ -1002,10 +1002,14 @@ export async function runLevel8({ browser, port, report, skip }) {
     // suite runs these at the 800×600 default and at 1280×800 (the wider layout with the
     // report panel beside the canvas) — see spec/web-tests.md.
     const viewAssertions = async (tag) => {
-      // all three modes render through the same shared mapping
+      // both modes render through the same shared mapping (the key-toggle mode is gone,
+      // spec/ui.md decision #8)
       {
+        const modes = await ev(() => [...document.querySelectorAll("#cmp-modes button")].map((b) => b.dataset.mode));
+        report(modes.join(",") === "side,curtain" && !(await ev(() => !!document.getElementById("cmp-reset"))),
+          `8 compare modes [${tag}]: exactly side-by-side and curtain (${modes.join(", ")}), no Reset view button`);
         const maps = {}, sums = {};
-        for (const m of ["side", "curtain", "toggle"]) {
+        for (const m of ["side", "curtain"]) {
           await ev((mm) =>
             document.querySelector(`#cmp-modes button[data-mode="${mm}"]`).click(), m);
           maps[m] = await ev(() => {
@@ -1026,7 +1030,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           sums[m] = (await ev(() => window.__t8.snapCC())).split(":")[2];
         }
         report(Object.values(sums).every((v) => +v > 0),
-          `8 compare modes [${tag}]: all three modes draw the frame (sums ${Object.values(sums).join(", ")})`);
+          `8 compare modes [${tag}]: both modes draw the frame (sums ${Object.values(sums).join(", ")})`);
         // the relative offsets are compared with a tolerance: mapPoint carries the large
         // viewport-center offset and back, so the raw floats can differ at the 1e-14
         // (double-rounding) level — the geometry itself must agree exactly
@@ -1035,22 +1039,19 @@ export async function runLevel8({ browser, port, report, skip }) {
           near(a.base, b.base) && near(a.view.x, b.view.x) && near(a.view.y, b.view.y)
           && near(a.view.scale, b.view.scale)
           && near(a.L.x, b.L.x) && near(a.L.y, b.L.y) && near(a.R.x, b.R.x) && near(a.R.y, b.R.y);
-        report(sameMap(maps.side, maps.curtain) && sameMap(maps.side, maps.toggle),
-          `8 compare modes [${tag}]: side-by-side, curtain and toggle share the same zoom/pan mapping`);
-        // key-toggle: hold swaps the images, release restores
+        report(sameMap(maps.side, maps.curtain),
+          `8 compare modes [${tag}]: side-by-side and curtain share the same zoom/pan mapping`);
+        // Space no longer swaps anything on Compare
         const t0 = await ev(() => window.__t8.snapCC());
         await ev(() => document.body.dispatchEvent(
           new KeyboardEvent("keydown", { key: " ", bubbles: true })));
-        const t1 = await ev(() => ({ snap: window.__t8.snapCC(),
-                                     show: window.__np3app.compare.debug().showTarget }));
+        const t1 = await ev(() => window.__t8.snapCC());
         await ev(() => document.body.dispatchEvent(
           new KeyboardEvent("keyup", { key: " ", bubbles: true })));
-        const t2 = await ev(() => window.__t8.snapCC());
-        report(t1.show === true && t1.snap !== t0 && t2 === t0,
-          `8 key toggle [${tag}]: holding Space swaps to the target, releasing restores the render`);
+        report(t1 === t0, `8 compare [${tag}]: holding Space changes nothing (no key-toggle mode)`);
       }
 
-      // shared zoom/pan: wheel zoom to the cursor, drag pan, reset. The zoom anchor is
+      // shared zoom/pan: wheel zoom to the cursor, drag pan, double-click reset. The zoom anchor is
       // asserted on the image coordinates of the point under the cursor (exact), not
       // on the pixel color — resampling at a different scale legitimately changes the
       // color of a probe landing on a high-contrast edge. The event's clientX/Y are
@@ -1102,10 +1103,15 @@ export async function runLevel8({ browser, port, report, skip }) {
         });
         report(pan.after.x === pan.before.x + 60 && pan.after.y === pan.before.y + 30,
           `8 pan [${tag}]: dragging pans both halves through the shared view`);
-        await ev(() => document.getElementById("cmp-reset").click());
+        await ev(() => {
+          const c = document.getElementById("cc");
+          const r = c.getBoundingClientRect();
+          c.dispatchEvent(new MouseEvent("dblclick", { button: 0, clientX: r.left + r.width * 0.6,
+            clientY: r.top + r.height * 0.5, bubbles: true, cancelable: true }));
+        });
         const rst = await ev(() => window.__np3app.compare.debug().view);
         report(rst.scale === 1 && rst.x === 0 && rst.y === 0,
-          `8 reset [${tag}]: the view returns to the fit`);
+          `8 reset [${tag}]: a double click returns the view to the fit`);
       }
     };
 
@@ -1398,14 +1404,23 @@ export async function runLevel8({ browser, port, report, skip }) {
             const right = window.__t8.px(r.width * 0.5, r.height * 0.5);
             return { left, right, w: r.width, h: r.height };
           });
-          // the same screen points in the toggle mode: unheld = the render, held = the target
-          await ev(() => document.querySelector('#cmp-modes button[data-mode="toggle"]').click());
+          // the same screen points with the divider at the edges: at the right edge the
+          // whole canvas is the render, at the left edge the whole canvas is the target
+          const dragDivider = (from, to) => ev((ft) => {
+            const c = document.getElementById("cc");
+            const r = c.getBoundingClientRect();
+            const cy = r.height * 0.5;
+            const opts = (x) => ({ button: 0, clientX: r.left + x, clientY: r.top + cy,
+                                   bubbles: true, cancelable: true });
+            c.dispatchEvent(new MouseEvent("mousedown", opts(r.width * ft[0])));
+            window.dispatchEvent(new MouseEvent("mousemove", opts(r.width * ft[1])));
+            window.dispatchEvent(new MouseEvent("mouseup", opts(r.width * ft[1])));
+          }, [from, to]);
+          await dragDivider(0.3, 1.0);
           const renderPx = await ev((s) => window.__t8.px(s.w * 0.1, s.h * 0.5), sides);
-          await ev(() => document.body.dispatchEvent(
-            new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+          await dragDivider(1.0, 0.0);
           const targetPx = await ev((s) => window.__t8.px(s.w * 0.5, s.h * 0.5), sides);
-          await ev(() => document.body.dispatchEvent(
-            new KeyboardEvent("keyup", { key: " ", bubbles: true })));
+          await dragDivider(0.0, 0.3);
           const same = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
           report(same(sides.left, renderPx) <= 3 && same(sides.right, targetPx) <= 3,
             "8 curtain: left of the divider is the render, right is the target");
@@ -1508,6 +1523,9 @@ export async function runLevel8({ browser, port, report, skip }) {
                                         strength: window.__np3app.state.strength,
                                         panelVal: document.querySelector('#panel [data-group="strength"] input[type=range]').value }));
           const hash150 = await ev(() => window.__t8.snapCC());
+          const label150 = await ev(() => document.getElementById("cmp-strength-val").textContent);
+          report(label150 === "150%",
+            `8 strength label: the value next to the Compare slider follows it live ("${label150}")`);
           report(st1.strength === 150 && hash150 !== hash100
                  && st1.develops === st0.develops && st1.neutrals === st0.neutrals,
             `8 strength 150%: re-renders with no re-develop (develops ${st0.develops},` +
@@ -2081,6 +2099,36 @@ export async function runLevel8({ browser, port, report, skip }) {
                && pr.resultHead.includes("100"),
           `8 report: the parameters — two columns over ${pr.nRows} fields, zero muting (${pr.zeroRows}),` +
           " the curve thumbnail");
+        // the thumbnail is square, with the neutral histogram and the identity diagonal under
+        // the curve; with the curve off the square, the histogram and the diagonal stay
+        const th = await ev(() => {
+          const A = window.__np3app;
+          const p = A.state.pairs[0];
+          const shape = () => {
+            const svg = document.querySelector("#rep-curve svg");
+            const r = svg?.getBoundingClientRect();
+            const hist = svg?.querySelector("path.rep-hist");
+            return { w: r?.width ?? 0, h: r?.height ?? 0, hist: hist?.getAttribute("d") ?? "",
+                     diag: !!svg?.querySelector("line.rep-curve-diag"),
+                     line: !!svg?.querySelector("polyline.rep-curve-line"),
+                     off: /off/.test(document.getElementById("rep-curve").textContent) };
+          };
+          const on = shape();
+          const orig = p.report;
+          const base = { ...orig.parameters.base, curve: null };
+          const result = { ...orig.parameters.result, curve: null };
+          p.report = { ...orig, parameters: { ...orig.parameters, base, result } };
+          A.report.refresh();
+          const offShape = shape();
+          p.report = orig;
+          A.report.refresh();
+          return { on, offShape, histLen: orig.neutralHist?.length ?? 0 };
+        });
+        report(th.histLen === 256 && th.on.w > 50 && Math.abs(th.on.w - th.on.h) <= 1
+               && th.on.hist.length > 100 && th.on.diag && th.on.line
+               && th.offShape.hist === th.on.hist && th.offShape.diag && !th.offShape.line && th.offShape.off,
+          `8 report: the curve thumbnail is square (${th.on.w.toFixed(0)}×${th.on.h.toFixed(0)}) with the` +
+          " neutral histogram and the diagonal; with the curve off the histogram stays and \"off\" shows");
         const cl = await ev(async () => {
           const A = window.__np3app;
           const p = A.state.pairs[0];
@@ -2109,34 +2157,10 @@ export async function runLevel8({ browser, port, report, skip }) {
           `8 report: at strength 150% a clipped field is highlighted (${cl.base} -> ${cl.result})`);
       }
 
-      // the §4.4 JSON download: versioned, file names, summary/table/parameters, no maps
-      {
-        await page.evaluate(() => {
-          window.__exp = [];
-          const orig = URL.createObjectURL.bind(URL);
-          URL.createObjectURL = (blob) => {
-            blob.arrayBuffer().then((b) => window.__exp.push(new Uint8Array(b)));
-            return orig(blob);
-          };
-          document.getElementById("rep-download").click();
-        });
-        await page.waitForFunction("window.__exp.length > 0", { timeout: 15000 });
-        const doc = JSON.parse(Buffer.from(await page.evaluate(() => Array.from(window.__exp.at(-1)))).toString("utf8"));
-        const ref = await ev(() => {
-          const r = window.__np3app.state.pairs[0].report;
-          return { renderDE: r.summary.renderDE, n: r.table.length, name: r.parameters.base.name,
-                   strength: r.strength };
-        });
-        report(doc.schemaVersion === 1 && doc.kind === "report"
-               && doc.files.raw === "DSC_5584.NEF" && doc.files.target === "DSC_5584.JPG"
-               && doc.version.name === ref.name && doc.version.strength === ref.strength
-               && doc.version.id === "draft"
-               && Math.abs(doc.summary.renderDE - ref.renderDE) < 1e-9
-               && doc.table.length === ref.n && doc.table[0].group
-               && doc.parameters.base.name === ref.name && !("maps" in doc)
-               && doc.aggregate && typeof doc.aggregate.all === "number",
-          "8 report: the download is the §4.4 document (versioned, file names, summary/table/parameters, no maps)");
-      }
+      // no JSON download (spec/ui.md decision #8)
+      report(!(await ev(() => !!document.getElementById("rep-download")
+          || [...document.querySelectorAll("#report button")].some((b) => /download/i.test(b.textContent)))),
+        "8 report: no Download report control");
 
       // the aggregate switch: hidden with one reported pair; totals over two pairs
       {
@@ -2165,17 +2189,21 @@ export async function runLevel8({ browser, port, report, skip }) {
           for (const k of ["n", "de", "dL", "dC", "dh", "nh", "bn", "bde", "tLabSum", "pLabSum"])
             aggSums[k] = Float64Array.from(rs[k], (v) => v * 1.5);
           s.reportAggregate = { regionSums: aggSums, binMean: rep.summary.binMean * 1.5,
-                                table: rep.table };
+                                table: rep.table, neutralHist: Float64Array.from(rep.neutralHist).reverse() };
           A.report.refresh();
           const tgl = document.getElementById("rep-scope");
           const out = { shown: !tgl.hidden, buttons: tgl.querySelectorAll("button").length };
+          const histD = () => document.querySelector("#rep-curve path.rep-hist")?.getAttribute("d") ?? "";
+          out.histPair = histD();
           document.querySelector('#rep-scope button[data-scope="aggregate"]').click();
+          out.histAgg = histD();
           out.renderDE = document.getElementById("rep-render-de").textContent;
           out.binMean = document.getElementById("rep-bin-mean").textContent;
           out.rows = document.querySelectorAll("#rep-table tbody tr").length;
           out.mapHidden = document.getElementById("rep-map-section").hidden;
           document.querySelector('#rep-scope button[data-scope="pair"]').click();
           out.pairDE = document.getElementById("rep-render-de").textContent;
+          out.histBack = histD();
           p2.prepared = saved.prepared;
           p2.fitBlocked = saved.fitBlocked; p2.report = saved.report;
           s.reportAggregate = saved.agg;
@@ -2184,8 +2212,10 @@ export async function runLevel8({ browser, port, report, skip }) {
                    wantRows: rep.table.length, pairDE: rs.all.toFixed(2) };
         });
         report(agg.shown && agg.buttons === 2 && agg.renderDE === agg.wantDE
-               && agg.binMean === agg.wantBin && agg.rows === agg.wantRows && agg.mapHidden === true,
-          "8 report: the aggregate switch — the totals over all reported pairs (the map stays per-pair)");
+               && agg.binMean === agg.wantBin && agg.rows === agg.wantRows && agg.mapHidden === true
+               && agg.histPair && agg.histAgg && agg.histAgg !== agg.histPair && agg.histBack === agg.histPair,
+          "8 report: the aggregate switch — the totals over all reported pairs (the map stays per-pair);" +
+          " the curve backdrop switches to the summed histogram and back");
         // back to the pair scope: the selected pair's numbers again
         const back = await ev(() => document.getElementById("rep-render-de").textContent);
         const want = await ev(() => window.__np3app.state.pairs[0].report.summary.renderDE.toFixed(2));

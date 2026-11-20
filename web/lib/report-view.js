@@ -3,8 +3,8 @@
 // web/lib/report-worker.js) and the aggregate over the compared pairs
 // (state.reportAggregate) — the summary, the sortable color-match table with the
 // target/render swatches, the per-pixel error map with the sequential/diverging
-// legends, the two-column NP3 parameters view with the curve thumbnail, and the §4.4
-// JSON download. Pure presentation: every number comes from web/lib/analyze.js / the
+// legends and the two-column NP3 parameters view with the square curve thumbnail over the
+// neutral luma histogram (no JSON download — spec/ui.md decision #8). Pure presentation: every number comes from web/lib/analyze.js / the
 // report worker; this module owns no color science. The same component shows on the
 // Compare screen and beside the manual editor (spec/ui.md steps 2 and 3.1); a row
 // click highlights the group's pixels on the compare image through the onHighlight
@@ -12,10 +12,9 @@
 // grid), the error map can be overlaid on the compare image through onMapOverlay.
 import { t } from "./i18n.js";
 import { labToSrgb } from "./color.js";
-import { GROUPS, downloadDoc } from "./analyze.js";
+import { GROUPS } from "./analyze.js";
 import { COLORS, ZONES } from "./np3.js";
 
-const GENERATOR = "np3-fit web dev";   // the §4.4 `generator` (a git describe on release builds)
 
 // ---------- the error-map scales (spec/ui.md: dE sequential with 0/2/5/10+, dL/dC/dh diverging) ----------
 // Sequential dE: dark blue -> light blue -> yellow -> red; above 10 stays at the last stop.
@@ -138,14 +137,12 @@ function clippedPaths(base, strength) {
 export function createReport({ state, onHighlight = null, onMapOverlay = null }) {
   const root = document.getElementById("report");
 
-  // ---------- the head: the scope switch, the updating badge, the download ----------
+  // ---------- the head: the scope switch and the updating badge ----------
   const scopeTgl = h("div", { class: "tgl", id: "rep-scope", hidden: "" },
     h("button", { type: "button", "data-scope": "pair" }, t("This pair")),
     h("button", { type: "button", "data-scope": "aggregate" }, t("All pairs")));
   const updating = h("span", { id: "rep-updating", hidden: "" }, t("Updating…"));
-  const downloadBtn = h("button", { type: "button", id: "rep-download", disabled: "" },
-    t("Download report"));
-  const head = h("div", { id: "rep-head" }, scopeTgl, updating, downloadBtn);
+  const head = h("div", { id: "rep-head" }, scopeTgl, updating);
 
   // ---------- the body ----------
   const empty = h("div", { id: "rep-empty", hidden: "" },
@@ -318,7 +315,7 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     onMapOverlay?.(overlayChk.checked ? mapCanvas : null));
 
   // ---------- the NP3 parameters ----------
-  function renderParams(rep) {
+  function renderParams(rep, agg) {
     paramsEl.replaceChildren();
     curveEl.replaceChildren();
     if (!rep?.parameters) return;
@@ -345,24 +342,47 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
       }
       paramsEl.append(secEl);
     }
-    // the curve thumbnail from the curve raw table (the result at this strength)
+    curveEl.append(h("div", { class: "sub" }, t("Curve")), curveThumb(rep, agg));
+  }
+
+  // The square curve thumbnail (spec/ui.md decision #8): 0..255 on both axes as in the curve
+  // editor, the identity diagonal, the neutral's luma histogram underneath (the selected
+  // pair, or the sum over the reported pairs in the "All pairs" scope; normalized to the
+  // peak) and the curve result at this strength on top. With the curve off: the same square
+  // with the histogram and the diagonal, and the "off" label.
+  function curveThumb(rep, agg) {
+    const NS = "http://www.w3.org/2000/svg";
+    const PAD = 4, S = 255, W = S + 2 * PAD;
+    const svgEl = (tag, attrs) => {
+      const e = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+      return e;
+    };
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${W}`, class: "rep-curve-svg" });
+    const hist = agg?.neutralHist ?? rep?.neutralHist ?? null;
+    let peak = 0;
+    if (hist) for (const v of hist) if (v > peak) peak = v;
+    if (peak > 0) {
+      let d = `M${PAD} ${PAD + S}`;
+      for (let i = 0; i < 256; i++) {
+        const x = PAD + (i + 0.5) * S / 256;
+        const y = PAD + S - (hist[i] / peak) * (S - 20);   // peak -> 20 px under the top
+        d += ` L${x.toFixed(2)} ${y.toFixed(2)}`;
+      }
+      d += ` L${PAD + S} ${PAD + S} Z`;
+      svg.append(svgEl("path", { d, class: "rep-hist" }));
+    }
+    svg.append(svgEl("line", { x1: PAD, y1: PAD + S, x2: PAD + S, y2: PAD, class: "rep-curve-diag" }));
+    const { base, result } = rep.parameters;
     const curve = result?.curve ?? base?.curve;
     if (curve) {
-      const W = 150, H = 84;
-      const NS = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(NS, "svg");
-      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      const n = curve.raw.length - 1;
       const pts = curve.raw.map((v, i) =>
-        `${(2 + i / 256 * (W - 4)).toFixed(1)},${(H - 2 - (v / 32767) * (H - 4)).toFixed(1)}`);
-      const poly = document.createElementNS(NS, "polyline");
-      poly.setAttribute("points", pts.join(" "));
-      poly.setAttribute("class", "rep-curve-line");
-      svg.append(poly);
-      curveEl.append(h("div", { class: "sub" }, t("Curve")), svg);
-    } else {
-      curveEl.append(h("div", { class: "sub" }, t("Curve")),
-        h("div", { class: "hint" }, t("off")));
+        `${(PAD + i / n * S).toFixed(1)},${(PAD + S - (v / 32767) * S).toFixed(1)}`);
+      svg.append(svgEl("polyline", { points: pts.join(" "), class: "rep-curve-line" }));
+      return svg;
     }
+    return h("div", { class: "rep-curve-off" }, svg, h("div", { class: "hint" }, t("off")));
   }
 
   // ---------- the summary ----------
@@ -387,45 +407,6 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     deltaDt.hidden = !showDelta;
     if (showDelta) deltaEl.textContent = fsign(s.fittedDelta);
   }
-
-  // ---------- the §4.4 download ----------
-  function sumsJson(s) {
-    const out = {};
-    for (const k of Object.keys(s))
-      out[k] = ArrayBuffer.isView(s[k]) ? Array.from(s[k]) : s[k];
-    return out;
-  }
-
-  function download() {
-    const rep = currentPair()?.report;
-    if (!rep) return;
-    const agg = scope === "aggregate" ? state.reportAggregate : null;
-    const reports = pairReports().map((p) => p.report);
-    const summary = agg
-      ? { strength: rep.strength, renderDE: agg.regionSums.all,
-          neutralDE: meanFinite(reports.map((r) => r.summary.neutralDE)),
-          binMean: agg.binMean,
-          fittedDelta: meanFinite(reports.map((r) => r.summary.fittedDelta).filter((v) => v != null)) }
-      : rep.summary;
-    const doc = downloadDoc({
-      generator: GENERATOR,
-      files: rep.files,
-      version: { id: state.selectedVersionId ?? rep.id.split(":")[0],
-                 name: rep.parameters.base.name, strength: rep.strength },
-      summary,
-      table: agg ? agg.table : rep.table,
-      aggregate: state.reportAggregate ? sumsJson(state.reportAggregate.regionSums) : null,
-      parameters: rep.parameters,
-    });
-    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);          // the transfer.js download pattern
-    const a = h("a", { href: url, download: `${rep.parameters.base.name}-report.json` });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
-  downloadBtn.addEventListener("click", download);
 
   // ---------- the scope switch ----------
   for (const btn of scopeTgl.querySelectorAll("button")) {
@@ -454,10 +435,9 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     }
     const agg = scope === "aggregate" ? state.reportAggregate : null;
     empty.hidden = !!(rep || agg);
-    downloadBtn.disabled = !rep;
     renderSummary(rep, agg);
     renderTable(agg ? agg.table : (rep?.table ?? []));
-    renderParams(rep);
+    renderParams(rep, agg);
     paintMapSection(rep, agg);
   }
 
@@ -467,6 +447,6 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   }
 
   refresh();
-  return { refresh, setUpdating, download,
+  return { refresh, setUpdating,
            get scope() { return scope; } };
 }

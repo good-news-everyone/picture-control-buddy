@@ -43,7 +43,7 @@ import { loadDev, develop } from "./fit.js";
 import { scaled } from "./strength.js";
 import { buildFrame } from "./advice.js";
 import { labelsOf, binsOf, regionSums, binMean, totalSums, summaryOf, tableOf, mapsOf,
-       } from "./analyze.js";
+         lumaHistogram } from "./analyze.js";
 
 // Node (level 1g) has no `self`: map the web Worker surface onto worker_threads (the
 // onmessage event shape and postMessage(message, transfer) are the same).
@@ -67,6 +67,8 @@ function buildPairCache(rec, dev) {
   // the neutral-vs-target sums: cached independently of profile edits (§4.1)
   rec.neutralSums = regionSums(rec.fb, rec.targetLab, rec.labels, rec.bins, rec.reportMask);
   rec.neutralAll = rec.neutralSums.all;
+  // the neutral's luma histogram (counts) for the curve thumbnail backdrop (decision #8)
+  rec.neutralHist = lumaHistogram(rec.fb);
 }
 
 function ensureModels(m) {
@@ -168,14 +170,15 @@ async function runReport(m, stale) {
       regionSums: sums,
       maps: { ...maps, mode: "dE" },
       parameters: { base: m.control, result, deltas: m.deltas ?? null },
-      // the §4.4 download document is assembled from the report + the session aggregate by
-      // the caller (analyze.downloadDoc) — no per-report copy here
+      neutralHist: rec.neutralHist.slice(),
     });
   }
   let aggregate = null;
   if (allSums.length) {
     const sums = totalSums(allSums);
-    aggregate = { regionSums: sums, binMean: binMean(sums), table: tableOf(sums) };
+    const neutralHist = new Float64Array(256);
+    for (const r of reports) for (let i = 0; i < 256; i++) neutralHist[i] += r.neutralHist[i];
+    aggregate = { regionSums: sums, binMean: binMean(sums), table: tableOf(sums), neutralHist };
   }
   if (stale()) return;
   scope.postMessage({ type: "ready", id: m.id, generation: m.generation,

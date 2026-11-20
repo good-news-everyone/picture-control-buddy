@@ -252,7 +252,10 @@ report: {
   table: [ {group: string, share: f64, n: int,
             targetLab: [f64,f64,f64], renderLab: [f64,f64,f64],   # means = sums / n
             dE: f64, dL: f64, dC: f64, dh: f64 | null} ],        # one per group above REPORT_SHARE
-  aggregate: { ...regionSums-shaped totals..., table: [...] } | null,   # analyze.total over included pairs
+  aggregate: { ...regionSums-shaped totals..., table: [...],
+               neutralHist: Float64Array 256 } | null,  # analyze.total over included pairs; neutralHist = the sum of the pairs' counts
+  neutralHist: Float64Array 256,    # the developed neutral's Y' luma histogram (detail.YW, 256 bins 0..255,
+                                    # raw counts over the working grid) — the curve-thumbnail backdrop (ui.md #8)
   parameters: {                     # NP3 parameters view
     base: control-object (§3.3),    # the version control at 100%
     result: control-object,         # strength applied (port of strength.scaled)
@@ -272,7 +275,7 @@ report: {
 
 ### 4.4 JSON download format
 
-> **2026-11-20: removed from the UI** ([ui.md](ui.md) decision #8, [ui-plan.md](ui-plan.md) stage 10). The format below is kept only until stage 10 deletes the serializer and its golden fixture.
+> **2026-11-20: removed** ([ui.md](ui.md) decision #8, [ui-plan.md](ui-plan.md) stage 10): no UI, no serializer (`analyze.downloadDoc`), no golden fixture. The format below is kept for history only.
 
 
 Versioned, self-contained, file-name only (matches ui.md "summary, table, parameters,
@@ -353,7 +356,7 @@ sampled arrays ≈ 4800×3):
   swatch sums), `summary`, `table`;
 - `report/<key>__cache.f32` + `__labels.u8` + `__bins.u8` — the §4.1 per-pixel cache;
 - `report/aggregate.json` — `analyze.total` over the two pairs;
-- `report/report_download.json` — the exact §4.4 download document.
+- ~~`report/report_download.json` — the exact §4.4 download document.~~ Removed with the download (ui.md decision #8).
 
 Existing levels 1–8 tolerances (`web/golden/manifest.json` `TOL`) are not relaxed by
 any of this.

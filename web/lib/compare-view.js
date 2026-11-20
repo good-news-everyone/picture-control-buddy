@@ -21,8 +21,8 @@ import { isRawReady, isTargetReady } from "./session.js";
 
 const $ = (id) => document.getElementById(id);
 
-// The compare modes (spec/ui.md step 2).
-const MODES = ["side", "curtain", "toggle"];
+// The compare modes (spec/ui.md step 2; the key-toggle mode is removed, decision #8).
+const MODES = ["side", "curtain"];
 
 // A pair is selectable for the comparison: decoded, prepared and not blocked (a RAW error,
 // a failed alignment — ncc_low — or a too-small target excludes it, as in the fit).
@@ -43,7 +43,6 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   // ---------- view state ----------
   let mode = "side";
   let curtain = 0.5;             // the divider position, a fraction of the canvas width
-  let showTarget = false;        // the hold-key swap (Space)
   const view = { scale: 1, x: 0, y: 0 };   // user zoom multiplier + pan in canvas pixels
   let renderBitmap = null;       // { data, w, h } — the render side (the working rectangle, finer)
   let targetBitmap = null;       // { data, w, h } — the decoded target at its own resolution
@@ -276,8 +275,6 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
       place(targetCv, full, { x, w: cw - x }, null);
       ctx.fillStyle = "#e6e6e6";
       ctx.fillRect(x - 1, 0, 2, ch);
-    } else {
-      place(showTarget ? targetCv : renderCv, full, null, showTarget ? labelT : labelR);
     }
     drawRegion();
     drawMap();
@@ -333,23 +330,13 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
       .observe(canvas.parentElement);
   }
 
-  // the hold-key swap (Space) — before/after in the editor is guarded to the edit step,
-  // so the key is free here. Ignored while a form control has the focus.
-  window.addEventListener("keydown", (e) => {
-    if (e.key !== " " || e.repeat || state.step !== "compare") return;
-    if (e.target.closest?.("input, textarea, select, button")) return;
-    e.preventDefault();
-    showTarget = true;
-    draw();
-  });
-  window.addEventListener("keyup", (e) => {
-    if (e.key === " " && showTarget) { showTarget = false; draw(); }
-  });
-
-  $("cmp-reset").addEventListener("click", () => {
+  // a double click on the image returns zoom and pan to the fitted view (spec/ui.md
+  // decision #8: there is no "Reset view" button)
+  function resetView() {
     view.scale = 1; view.x = 0; view.y = 0;
     draw();
-  });
+  }
+  canvas.addEventListener("dblclick", (e) => { e.preventDefault(); resetView(); });
   $("cmp-manual").addEventListener("click", () => onManual());
   $("cmp-more").addEventListener("click", () => onMore());
   $("cmp-start").addEventListener("click", () => onStart());
@@ -371,6 +358,7 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   }
   strengthInput.addEventListener("input", () => {
     onStrength(parseFloat(strengthInput.value));   // app.js: state + the panel + a re-render
+    paintStrength();                               // the label shows the live value (decision #8)
   });
 
   // ---------- the pair strip ----------
@@ -446,7 +434,7 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   function debug() {
     const p = pair();
     return {
-      mode, curtain, showTarget,
+      mode, curtain,
       view: { ...view },
       requestedGen, appliedGen, pending,
       base: base(),

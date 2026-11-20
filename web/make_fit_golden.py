@@ -26,7 +26,6 @@ What is written (existing fixture dirs are left untouched, manifest.json too):
   report/<key>__{neutral,fit}.json full regionSums (extended, incl. tLabSum/pLabSum)
   report/<key>__cache.f32.br       targetLab; __labels.u8, __bins.u8 (§4.1)
   report/aggregate.json            analyze.total over the two fit pairs
-  report/report_download.json      the exact §4.4 download document
 
 Needs the local-only data (_local/, renders/), dcraw_emu and exiv2, like
 make_golden.py. The fits take minutes.
@@ -692,18 +691,6 @@ def report_fixtures(info: dict, qs: dict, p_fit: M.Params, ctrl_fit):
                 "table": table_of(agg)})
     save_json("report/aggregate.json", doc)
 
-    base = ctrl_fit
-    result = strength.scaled(base, 100, base.name)
-    download = {"schemaVersion": SCHEMA_VERSION, "kind": "report",
-                "generator": f"np3-fit web {git_describe()}",
-                "files": files,
-                "version": {"id": "draft", "name": base.name, "strength": 100},
-                "summary": summary_of(versions["fit"], neutral_all),
-                "table": table_of(versions["fit"]),
-                "aggregate": json_sums(agg),
-                "parameters": {"base": control_json(base), "result": control_json(result),
-                               "deltas": None}}
-    save_json("report/report_download.json", download)
 
 
 # ---------------------------------------------------------------- resample kernels (level 1d)

@@ -278,7 +278,9 @@ Tests (level 8 / 8b rewrite, no new golden data):
 
 ### Stage 10. Compare screen and report panel cleanup
 
-Spec: [ui.md](ui.md) decision #8 (2026-11-20, user review of step 2). Not started.
+Spec: [ui.md](ui.md) decision #8 (2026-11-20, user review of step 2).
+
+> **Status 2026-11-20: done.** `compare-view.js`: modes side/curtain only (the toggle mode, its Space handler and `showTarget` removed), `#cmp-reset` removed, `dblclick` on `#cc` resets the view, `paintStrength()` on the slider's `input` (the other strength labels were fine: the editor slider's number is live, the report states the strength it was computed at). `report-view.js`: no "Download report" (`analyze.downloadDoc`, the level-1g download check, `make_fit_golden.py`'s `report_download.json` and the fixture are gone); the curve thumbnail is a square SVG (0..255 + 4 px pad, `aspect-ratio: 1`) with the identity diagonal and the neutral histogram, "off" keeps the square. `report-worker.js` caches `analyze.lumaHistogram(fb)` per pair (counts, detail.YW binning) and sends `neutralHist` per report and summed in the aggregate (web-schemas §4.3). Tests: level 1g checks `neutralHist` against an independent Y' binning of the developed neutral; level 8 checks the two mode buttons, Space doing nothing, the double-click reset, the live "150%" label, no download control, the square thumbnail with/without the curve and the scope switch of the backdrop; the curtain render/target check samples with the divider at the edges instead of the toggle mode. Verified in headless Chromium.
 
 Tasks:
 

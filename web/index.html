@@ -182,9 +182,12 @@
   .rep-prow.head { color: var(--dim); font-size: 10px; text-transform: uppercase;
     letter-spacing: .04em; }
   .rep-delta { color: var(--ok); font-size: 10px; margin-left: 4px; }
-  #rep-curve svg { width: 100%; background: #202020; border: 1px solid var(--line);
-    border-radius: 3px; }
+  /* the square curve thumbnail over the neutral luma histogram (spec/ui.md decision #8) */
+  #rep-curve svg { display: block; width: 100%; aspect-ratio: 1 / 1; height: auto;
+    background: #202020; border: 1px solid var(--line); border-radius: 3px; }
   .rep-curve-line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+  .rep-hist { fill: rgba(255, 255, 255, .16); stroke: none; }
+  .rep-curve-diag { stroke: #4a4a4a; stroke-width: 1; stroke-dasharray: 4 4; }
 
   /* Start screen (stage 1 of the full flow, spec/ui.md step 1) */
   #start { display: none; grid-column: 1 / -1; overflow: auto; }
@@ -366,9 +369,7 @@
     <div class="tgl" id="cmp-modes">
       <button type="button" data-mode="side" class="active" data-i18n="Side by side">Side by side</button>
       <button type="button" data-mode="curtain" data-i18n="Curtain">Curtain</button>
-      <button type="button" data-mode="toggle" data-i18n="Key toggle">Key toggle</button>
     </div>
-    <button type="button" id="cmp-reset" data-i18n="Reset view">Reset view</button>
     <label id="cmp-strength-box">
       <span data-i18n="Profile strength">Profile strength</span>
       <input type="range" id="cmp-strength" min="0" max="150" step="5">
@@ -385,8 +386,8 @@
       <button type="button" id="cmp-more" data-i18n="Continue fitting">Continue fitting</button>
       <button type="button" id="cmp-start" data-i18n="Back to Start">Back to Start</button>
       <div id="cmp-hint" class="hint"
-           data-i18n="Wheel — zoom to the cursor, drag — pan (in the curtain mode drag the divider); hold Space to swap the images in the key-toggle mode.">
-        Wheel — zoom to the cursor, drag — pan (in the curtain mode drag the divider); hold Space to swap the images in the key-toggle mode.</div>
+           data-i18n="Wheel — zoom to the cursor, drag — pan, double click — fit to the screen; in the curtain mode drag the divider.">
+        Wheel — zoom to the cursor, drag — pan, double click — fit to the screen; in the curtain mode drag the divider.</div>
     </div>
   </div>
 </section>
