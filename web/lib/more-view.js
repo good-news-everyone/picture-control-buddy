@@ -15,7 +15,7 @@
 // version (summary.renderDE feeds the exclusion hints). Adding/removing/toggling pairs
 // recomputes the advice from these cached records — never a fit.
 import { t } from "./i18n.js";
-import { createStart } from "./start.js";
+import { createStart, fitCount } from "./start.js";
 import { isCompletePair, refitPairIds } from "./session.js";
 import { GROUPS, coverage, level, liftMedian, verdict, infoWarnings, recommend, suggest,
          coverageNotes, exclusionCandidates } from "./advice.js";
@@ -23,9 +23,8 @@ import { GROUPS, coverage, level, liftMedian, verdict, infoWarnings, recommend, 
 const $ = (id) => document.getElementById(id);
 
 export const MORE_IDS = {
-  pairs: "more-pairs", name: null, nameErr: null, fit: null, toCompare: null,
-  rawZone: "more-raw-drop", targetZone: "more-target-drop",
-  rawPicker: "more-raw-file", targetPicker: "more-target-file",
+  pairs: "more-pairs", name: null, nameErr: null, fit: null, fitCount: null, toCompare: null,
+  rawZone: "more-raw-drop", rawPicker: "more-raw-file",
 };
 
 /** A frame record is current when it was built from the pair's present preparation. */
@@ -141,12 +140,12 @@ function noteText(n) {
 
 /**
  * Callbacks (app.js owns every state change):
- *   onAddRaws(files) / onAddTargets(files) — the shared loading path;
- *   onRemovePair(pair), onIncludeChange(pair), onUseRecommended(), onRefit(), onCancel(), onBack().
+ *   onAddRaws(files) / onAddTarget(pair, file) — the shared loading path;
+ *   onRemovePair(pair), onRefit(), onCancel(), onBack().
  * Returns { refresh }.
  */
-export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemovePair, onIncludeChange,
-                             onUseRecommended, onRefit, onCancel, onBack }) {
+export function createMore({ state, setStatus, onAddRaws, onAddTarget, onRemovePair,
+                             onRefit, onCancel, onBack }) {
   const adviceEl = $("more-advice");
   const refitBtn = $("more-refit");
   const cancelBtn = $("more-cancel");
@@ -177,18 +176,24 @@ export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemove
     } else if (isCompletePair(p) && !p.blocked && !p.fitBlocked && !p.prepError && !p.prepared?.blocked) {
       box.append(el("div", "hint pair-verdict", t("Analyzing…")));
     }
+    // outside the recommended set: a mark only, nothing is removed automatically (decision #7)
+    if (a.recommended.length && a.candidates.includes(p.id) && !a.recommended.includes(p.id)) {
+      const nr = el("div", "pair-not-rec",
+        t("Not recommended: the recommended set covers the colors without this pair — remove it from the fit if you agree"));
+      nr.dataset.notRecommended = "1";
+      box.append(nr);
+    }
     const hi = a.exclusion.find((x) => x.id === p.id);
     if (hi) {
       const w = el("div", "bad pair-high-error",
-        t("Error {de} dE is {ratio}× the set median {median} — consider excluding this pair from the fit",
+        t("Error {de} dE is {ratio}× the set median {median} — consider removing this pair from the fit",
           { de: hi.renderDE.toFixed(2), ratio: hi.ratio.toFixed(1), median: hi.median.toFixed(2) }));
       box.append(w);
     }
   }
 
-  const list = createStart({ state, setStatus, onAddRaws, onAddTargets,
-    onEditPair: () => {}, onFit: () => {}, ids: MORE_IDS, mode: "more",
-    onRemovePair, onIncludeChange, decorate });
+  const list = createStart({ state, setStatus, onAddRaws, onAddTarget,
+    ids: MORE_IDS, mode: "more", onRemovePair, decorate });
 
   function renderAdvice() {
     const a = state.advice;
@@ -200,9 +205,9 @@ export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemove
     }
     if (a.pending) out.push(el("div", "hint more-pending", t("Analyzing {n} pair(s)…", { n: a.pending })));
 
-    // coverage of the selected pairs (analyze.coverage / level)
-    const h = el("h2", null, t("Color coverage of the selected pairs"));
-    h.dataset.i18n = "Color coverage of the selected pairs";
+    // coverage of the pairs in the fit (analyze.coverage / level)
+    const h = el("h2", null, t("Color coverage of the pairs"));
+    h.dataset.i18n = "Color coverage of the pairs";
     out.push(h);
     if (a.coverage.length) {
       const tbl = el("table", "more-cov");
@@ -221,7 +226,7 @@ export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemove
           { groups: missing.map((c) => t(c.group)).join(", ") })));
       }
     } else {
-      out.push(el("div", "hint", t("No analyzed pair is selected")));
+      out.push(el("div", "hint", t("No pair is analyzed yet")));
     }
 
     // missing-color suggestions (analyze.suggest)
@@ -234,22 +239,13 @@ export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemove
     }
     for (const n of a.notes) out.push(el("div", "hint more-note", noteText(n)));
 
-    // the recommended set (analyze.recommend); the user may override it
+    // the recommended set (analyze.recommend): shown, the cards outside it are marked; the
+    // user removes pairs by hand (decision #7 — no automatic selection)
     if (a.recommended.length) {
-      const same = a.recommended.length === a.selected.length
-        && a.recommended.every((id) => a.selected.includes(id));
       const r = el("div", "more-rec", t("Recommended set ({n} of {m}): {names}",
         { n: a.recommended.length, m: a.candidates.length, names: a.recommended.map(label).join(", ") }));
       r.dataset.ids = a.recommended.join(",");
       out.push(r);
-      const b = el("button", null, t("Use the recommended selection"));
-      b.type = "button";
-      b.id = "more-use-rec";
-      b.dataset.i18n = "Use the recommended selection";
-      b.disabled = same || state.fitting;
-      b.addEventListener("click", () => onUseRecommended());
-      out.push(b);
-      if (same) out.push(el("div", "hint", t("The current selection is the recommended one")));
     }
     adviceEl.replaceChildren(...out);
   }
@@ -261,8 +257,11 @@ export function createMore({ state, setStatus, onAddRaws, onAddTargets, onRemove
     refitBtn.textContent = state.fitting ? t("Refitting…") : t("Refit ({n} pairs)", { n: ids.length });
     refitBtn.disabled = state.fitting || !ids.length || !state.versions.length || preparing;
     cancelBtn.hidden = !state.fitting;
-    idsEl.textContent = ids.length ? t("Refit over: {names}", { names: ids.map(label).join(", ") })
-                                   : t("Select at least one pair to refit");
+    const { m, k } = fitCount(state);
+    let txt = ids.length ? t("Refit over: {names}", { names: ids.map(label).join(", ") })
+                         : t("Add at least one RAW + JPEG pair to refit");
+    if (m || k) txt += "; " + t("{m} without a JPEG, {k} blocked — skipped", { m, k });
+    idsEl.textContent = txt;
   }
 
   refitBtn.addEventListener("click", () => onRefit());

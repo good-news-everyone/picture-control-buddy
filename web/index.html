@@ -198,7 +198,7 @@
   .start-col > .hint { margin: 4px 0 0; }
   .start-col ul.dash { margin: 4px 0 12px; padding-left: 18px; }
   .start-col ul.dash li { margin: 3px 0; }
-  .zones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 6px; }
+  .zones { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 8px 0 6px; }
   .zone { border: 1px dashed #555; border-radius: 6px; padding: 14px 10px; text-align: center;
     color: var(--dim); cursor: pointer; }
   .zone.over { border-color: var(--accent); color: var(--accent); }
@@ -208,7 +208,12 @@
   .pair.selected { border-color: #6a6a6a; }
   .pair.blocked { opacity: .8; }
   .pair-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .pair-inc { color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .pair-state { color: var(--dim); }
+  .pair.over { border-color: var(--accent); }
+  .pair-jpeg { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+  .pair-add-jpeg { border-style: dashed; }
+  .pair-target-err { margin-top: 6px; }
+  #fit-count { margin: 4px 0; }
   .pair-meta { margin: 6px 0 0; }
   .pair-warn { margin: 6px 0 0; padding-left: 18px; color: #cfa15a; }
   .pair-blocked { margin-top: 6px; }
@@ -232,7 +237,7 @@
   .more-cov tr.lv-little td { color: #cfa15a; }
   .more-cov tr.lv-none td { color: #e07a6a; }
   .more-missing, .more-suggest, .more-rec { margin: 4px 0; }
-  #more-use-rec { margin: 4px 0 8px; }
+  #more .pair-not-rec { margin-top: 6px; color: #cfa15a; }
   #more-refit, #more-cancel, #more-back { margin-right: 8px; }
 
   /* Stage 6: changed-field marks and reset controls (web/lib/mark.js). A mark keeps its box
@@ -341,15 +346,10 @@
         <b data-i18n="RAW (.NEF / .DNG)">RAW (.NEF / .DNG)</b><br>
         <span data-i18n="Drop RAW files here or click to choose">Drop RAW files here or click to choose</span>
       </div>
-      <div id="target-drop" class="zone">
-        <b data-i18n="JPEG targets (.JPG)">JPEG targets (.JPG)</b><br>
-        <span data-i18n="Drop JPEG targets here or click to choose">Drop JPEG targets here or click to choose</span>
-      </div>
     </div>
     <input type="file" id="raw-file" accept=".nef,.NEF,.dng,.DNG" multiple hidden>
-    <input type="file" id="target-file" accept=".jpg,.JPG,.jpeg,.JPEG" multiple hidden>
-    <div class="hint" data-i18n="A RAW and a JPEG with the same base name form a pair; the remaining files are matched in the order they were added. TIFF targets are not accepted in the browser — the Python CLI covers them.">
-      A RAW and a JPEG with the same base name form a pair; the remaining files are matched in the order they were added.
+    <div class="hint" data-i18n="Add the RAW files first; once a RAW is decoded, add its JPEG target on the card. TIFF targets are not accepted in the browser — the Python CLI covers them.">
+      Add the RAW files first; once a RAW is decoded, add its JPEG target on the card.
       TIFF targets are not accepted in the browser — the Python CLI covers them.</div>
     <div id="pairs"></div>
     <div id="start-status" class="hint"></div>
@@ -359,6 +359,7 @@
     <div id="fit-name-err" class="bad" hidden data-i18n="Name must be 1–19 ASCII characters">
       Name must be 1–19 ASCII characters</div>
     <button id="fit" type="button" disabled data-i18n="Fit">Fit</button>
+    <div id="fit-count" class="hint"></div>
     <button id="to-compare" type="button" disabled data-i18n="Comparison">Comparison</button>
   </div>
 </section>
@@ -395,20 +396,15 @@
 <section id="more">
   <div class="start-col">
     <h1 data-i18n="More frames">More frames</h1>
-    <div class="hint" data-i18n="Add pairs with the same checks as on the Start screen, see which colors the selected pairs miss, choose the set and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.">
-      Add pairs with the same checks as on the Start screen, see which colors the selected pairs miss, choose the set and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.</div>
+    <div class="hint" data-i18n="Add pairs the same way as on the Start screen, see which colors the pairs miss, remove the pairs you do not want and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.">
+      Add pairs the same way as on the Start screen, see which colors the pairs miss, remove the pairs you do not want and refit: the result becomes the next version (_r1, _r2, …), the earlier versions stay.</div>
     <div class="zones">
       <div id="more-raw-drop" class="zone">
         <b data-i18n="RAW (.NEF / .DNG)">RAW (.NEF / .DNG)</b><br>
         <span data-i18n="Drop RAW files here or click to choose">Drop RAW files here or click to choose</span>
       </div>
-      <div id="more-target-drop" class="zone">
-        <b data-i18n="JPEG targets (.JPG)">JPEG targets (.JPG)</b><br>
-        <span data-i18n="Drop JPEG targets here or click to choose">Drop JPEG targets here or click to choose</span>
-      </div>
     </div>
     <input type="file" id="more-raw-file" accept=".nef,.NEF,.dng,.DNG" multiple hidden>
-    <input type="file" id="more-target-file" accept=".jpg,.JPG,.jpeg,.JPEG" multiple hidden>
     <div id="more-pairs"></div>
     <div id="more-advice"></div>
     <h2 data-i18n="Refit">Refit</h2>

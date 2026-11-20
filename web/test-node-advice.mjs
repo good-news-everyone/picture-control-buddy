@@ -170,16 +170,39 @@ export async function level1i(ctx) {
   // ---- session.js: refit selection ----
   {
     const ready = { name: "x", info: {}, image: {}, warn: null };
-    const P = (id, o = {}) => ({ id, raw: ready, target: { width: 1, height: 1 }, included: true, blocked: false,
+    const P = (id, o = {}) => ({ id, raw: ready, target: { width: 1, height: 1 }, blocked: false,
                                  prepared: { blocked: null }, fitBlocked: null, ...o });
     const session = { pairs: [
-      P(5), P(2, { included: false }), P(7, { blocked: true }), P(3, { fitBlocked: { code: "target_too_small" } }),
+      P(5), P(2), P(7, { blocked: true }), P(3, { fitBlocked: { code: "target_too_small" } }),
       P(9, { prepared: { blocked: { code: "ncc_low" } } }), P(4, { raw: "pending" }), P(6, { target: null }),
       P(1, { prepared: null }), P(8),
     ] };
     const got = S.refitPairIds(session);
-    report(JSON.stringify(got) === "[5,1,8]",
-      `1i refitPairIds: included, decoded, unblocked, display order -> [${got}]`);
+    report(JSON.stringify(got) === "[5,2,1,8]",
+      `1i refitPairIds: every decoded, unblocked pair in display order (no inclusion state) -> [${got}]`);
+  }
+
+  // ---- session.js: RAW-first assembly (spec/ui.md decision #7) ----
+  {
+    const F = (name) => ({ name });
+    const pairs = [];
+    const a = S.addRawPair(pairs, F("DSC_1.NEF"));
+    const b = S.addRawPair(pairs, F("DSC_2.dng"));
+    const retry = S.addRawPair(pairs, F("dsc_2.DNG"));        // b still decoding -> retry the card
+    a.pair.raw = { name: "DSC_1.NEF", info: {}, image: {}, warn: null };
+    const dup = S.addRawPair(pairs, F("DSC_1.nef"));          // a is ready -> a duplicate
+    b.pair.raw = "error";
+    const retry2 = S.addRawPair(pairs, F("DSC_2.DNG"));       // b failed -> retry the card
+    const ok = pairs.length === 2 && !a.retry && !b.retry && retry.retry && retry.pair === b.pair
+      && dup === null && retry2.retry && retry2.pair === b.pair && b.pair.rawFile.name === "DSC_2.DNG"
+      && pairs[0].targetFile === null && !("included" in pairs[0])
+      && S.canAttachTarget(a.pair) && !S.canAttachTarget(b.pair);
+    const pick = [S.pickTargetFile([F("x.JPG")]).file?.name, S.pickTargetFile([F("x.jpeg")]).file?.name,
+                  S.pickTargetFile([F("a.jpg"), F("b.jpg")]).error, S.pickTargetFile([F("x.tif")]).error,
+                  S.pickTargetFile([]).error];
+    report(ok && JSON.stringify(pick) === '["x.JPG","x.jpeg","count","type","count"]',
+      `1i addRawPair: new card per RAW, retry of a decoding/failed card, a ready duplicate skipped;` +
+      ` canAttachTarget only on a decoded RAW; pickTargetFile one JPEG (${JSON.stringify(pick)})`);
   }
 
   // ---- session.js: the refit version ----

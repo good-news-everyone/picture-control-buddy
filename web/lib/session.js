@@ -2,8 +2,12 @@
 // shape, the pair-assembly rule, the profile-name rule. Pure functions — no DOM, no codec;
 // the only state is the module-level pair id counter (per page load, like a fresh session).
 //
-// Pair shape (stage 1):
-//   { id, rawFile, targetFile, raw, target, warnings, included, blocked }
+// Pair assembly is RAW first (spec/ui.md decision #7, stage 9): a pair is created only by a
+// RAW; its JPEG is attached on the card, base names are not matched. There is no inclusion
+// state: every decoded, prepared, unblocked pair is fitted; "Remove from fit" deletes it.
+//
+// Pair shape:
+//   { id, rawFile, targetFile, raw, target, warnings, blocked, targetError }
 //   raw:    null | "pending" | "error" | { name, info, image, warn }   (loader ready payload)
 //   target: null | "pending" | decodeTarget() result
 //   warnings: structured entries { code, ... } — localized in the UI via t()
@@ -29,36 +33,35 @@ export function defaultProfileName(rawFileName) {
 
 export function createPair() {
   return { id: nextPairId++, rawFile: null, targetFile: null, raw: null, target: null,
-           warnings: [], included: true, blocked: false };
+           warnings: [], blocked: false, targetError: null };
 }
 
-// The pairing rule (spec/ui.md step 1): a RAW and a JPEG with the same base name join one
-// pair; the remaining files are matched in the order they arrived — a file joins the first
-// pair that has the other kind of file and lacks its own; with no candidate a new pair is
-// created (possibly a single-file pair, to be completed later). Re-dropping a file with the
-// same base name as its own slot of an existing pair replaces that slot (the user fixes a
-// wrong file); a same-name RAW retry of a not-yet-ready slot is the same rule.
-export function assignFile(pairs, kind, file) {
-  const mine = kind === "raw" ? "rawFile" : "targetFile";
-  const other = kind === "raw" ? "targetFile" : "rawFile";
+// The RAW rule (spec/ui.md decision #7): a RAW whose base name matches a card that is still
+// decoding or failed retries that card; one matching a ready card is a duplicate (null — the
+// caller skips it with a status message); any other RAW creates a new card at the end.
+// Returns { pair, retry } or null for a duplicate.
+export function addRawPair(pairs, file) {
   const name = baseName(file.name);
-  let p = pairs.find((q) => q[mine] && baseName(q[mine].name) === name);
-  if (!p && kind === "raw")
-    p = pairs.find((q) => q.rawFile && baseName(q.rawFile.name) === name && !isRawReady(q));
-  if (!p) p = pairs.find((q) => !q[mine] && q[other] && baseName(q[other].name) === name);
-  if (!p) p = pairs.find((q) => !q[mine] && q[other]);
-  if (!p) { p = createPair(); pairs.push(p); }
-  p[mine] = file;
-  return p;
+  const same = pairs.find((q) => q.rawFile && baseName(q.rawFile.name) === name);
+  if (same && isRawReady(same)) return null;
+  if (same) { same.rawFile = file; return { pair: same, retry: true }; }
+  const p = createPair();
+  p.rawFile = file;
+  pairs.push(p);
+  return { pair: p, retry: false };
 }
 
-/** Drops pairs that hold neither a file nor any decoded data — the placeholder left behind
- *  by a rejected file. Existing (possibly valid) pairs are never removed by an error path. */
-export function pruneEmpty(pairs) {
-  for (let i = pairs.length - 1; i >= 0; i--) {
-    const p = pairs[i];
-    if (!p.rawFile && !p.targetFile && !isRawReady(p) && !isTargetReady(p)) pairs.splice(i, 1);
-  }
+/** A JPEG can be added to (or replace the one of) a card only once its RAW is decoded. */
+export function canAttachTarget(p) {
+  return isRawReady(p) && !p.blocked;
+}
+
+/** The JPEG files of a card drop / picker: exactly one .jpg/.jpeg — returns the file, or an
+ *  error code ("count" for several files, "type" for a non-JPEG). */
+export function pickTargetFile(files) {
+  if (files.length !== 1) return { error: "count" };
+  if (!/\.(jpe?g)$/i.test(files[0].name)) return { error: "type" };
+  return { file: files[0] };
 }
 
 export function isRawReady(p) {
@@ -136,15 +139,15 @@ export function nextVersionId(versions) {
   return `r${n + 1}`;
 }
 
-/** The pairs a refit runs over (spec/ui-plan.md stage 7 readiness: "exactly the displayed
- *  selected IDs"): included, both files decoded, not blocked — neither the stage-1 block,
+/** The pairs a fit/refit runs over (spec/ui.md decision #7: every remaining pair, no
+ *  inclusion state): both files decoded, not blocked — neither the stage-1 block,
  *  the target-size block nor a finished preparation's block (ncc_low) — in display
  *  (session) order. Pairs not prepared yet are included: the caller prepares them before
  *  the fit and calls this again, so a pair the preparation blocks drops out. The fit payload
  *  names a pair String(id), so FitResult.pairs (a version's pairIds) are these ids as strings. */
 export function refitPairIds(session) {
   return session.pairs
-    .filter((p) => p.included && isCompletePair(p) && !p.fitBlocked && !p.prepared?.blocked)
+    .filter((p) => isCompletePair(p) && !p.fitBlocked && !p.prepared?.blocked)
     .map((p) => p.id);
 }
 

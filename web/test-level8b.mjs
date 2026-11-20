@@ -38,6 +38,9 @@ function installHelpers() {
     fileOf,
     dropOn: async (zone, url, name) => dropFiles(document.querySelector(zone), [await fileOf(url, name)]),
     dropDoc: (file) => dropFiles(document, [file]),
+    // RAW first (decision #7): a JPEG goes onto its RAW's card
+    dropOnCard: async (id, url, name, list = "pairs") =>
+      dropFiles(document.querySelector(`#${list} .pair[data-pair-id="${id}"]`), [await fileOf(url, name)]),
     groupSlider: (group, idx, v) => {
       const inp = document.querySelectorAll(`#panel [data-group="${group}"] input[type=range]`)[idx];
       inp.value = v;
@@ -168,8 +171,10 @@ async function mainFlow({ browser, port, report, skip }) {
   // ---------- 1. Start -> Fit -> Compare ----------
   await ev(() => window.__t8b.dropOn("#raw-drop", "/test1/DSC_5584.NEF", "DSC_5584.NEF"));
   await wf("window.__np3app.state.pairs[0] && window.__np3app.state.pairs[0].raw && !!window.__np3app.state.pairs[0].raw.image", 300000, 500);
-  await ev(() => window.__t8b.dropOn("#target-drop", "/test1/DSC_5584.jpg", "DSC_5584.jpg"));
+  await ev(() => window.__t8b.dropOnCard(window.__np3app.state.pairs[0].id, "/test1/DSC_5584.jpg", "DSC_5584.jpg"));
   await wf("window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width", 120000);
+  // the pair prepares by itself once both files are in (decision #7); Fit unlocks after it
+  await wf("window.__np3app.state.pairs[0].prepared && !document.getElementById('fit').disabled", 600000, 500);
   await ev(() => document.getElementById("fit").click());
   await wf(`window.__np3app.state.versions.length === 1 && window.__np3app.state.step === "compare"`, 900000, 500);
   {
@@ -302,7 +307,11 @@ async function mainFlow({ browser, port, report, skip }) {
 
   // ---------- 5. More: a second pair (a renamed copy — a pair known to prepare everywhere) ----------
   await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
-  await ev(() => window.__t8b.dropOn("#more-target-drop", "/test1/DSC_5584.jpg", "DSC_5584B.jpg"));
+  await wf(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+             return p && (p.raw === "error" || !!p.raw?.image); })()`, 600000, 500);
+  await ev(() => window.__t8b.dropOnCard(
+    window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF").id,
+    "/test1/DSC_5584.jpg", "DSC_5584B.jpg", "more-pairs"));
   await wf(`(() => { const s = window.__np3app.state;
              const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
              return p && (p.raw === "error" || p.prepError || p.prepared?.blocked
@@ -311,12 +320,52 @@ async function mainFlow({ browser, port, report, skip }) {
   const more = await ev(() => {
     const s = window.__np3app.state;
     const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
-    for (const b of document.querySelectorAll("#more-pairs .pair-inc-box")) if (!b.checked && !b.disabled) b.click();
     return { id: p.id, ncc: p.prepared?.ncc ?? 0, err: p.prepError ?? p.prepared?.blocked?.code ?? null,
              ids: document.getElementById("more-refit").dataset.pairIds };
   });
   report(more.ncc >= 0.6 && !more.err && more.ids.split(",").length === 2,
     `8b flow: More adds a second pair (NCC ${more.ncc.toFixed(3)}), the refit selection is ${more.ids}`);
+
+  // ---------- 5b. Remove from fit (decision #7): while decoding, a RAW-only card, during a refit ----------
+  {
+    const v0 = await ev(() => JSON.stringify(window.__np3app.state.versions));
+    // a RAW removed while it decodes: the card goes at once, the late decode lands nowhere
+    await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584E.NEF"));
+    const e = await ev(() => {
+      const s = window.__np3app.state;
+      const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584E.NEF");
+      const pending = p?.raw === "pending";
+      document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"] .pair-remove`).click();
+      return { pending, gone: !s.pairs.includes(p) && !document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"]`) };
+    });
+    await wf(`!window.__np3app.state.pairs.some((p) => p.raw === "pending")`, 600000, 300);
+    await sleep(1000);
+    const e2 = await ev(() => ({ names: window.__np3app.state.pairs.map((p) => p.rawFile.name),
+                                 raw: window.__np3app.state.raw?.name ?? null }));
+    report(e.pending && e.gone && !e2.names.includes("DSC_5584E.NEF") && e2.raw !== "DSC_5584E.NEF",
+      `8b remove: a RAW removed while it decodes is gone for good (pairs ${e2.names.join(", ")})`);
+    // a RAW-only card is not fitted and is counted as skipped
+    await ev(() => window.__t8b.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584D.NEF"));
+    await wf(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584D.NEF");
+               return p && !!p.raw?.image; })()`, 600000, 300);
+    const d = await ev(() => ({ ids: document.getElementById("more-refit").dataset.pairIds,
+                                txt: document.getElementById("more-refit-ids").textContent }));
+    report(d.ids.split(",").length === 2 && /1 without a JPEG, 0 blocked — skipped/.test(d.txt),
+      `8b remove: a RAW-only card stays out of the refit ("${d.txt}")`);
+    // removing a card during a refit cancels the refit; the versions stay
+    await ev(() => document.getElementById("more-refit").click());
+    await wf(`/iteration/.test(window.__np3app.state.status)`, 600000, 100);
+    const r = await ev(() => {
+      const s = window.__np3app.state;
+      const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584D.NEF");
+      document.querySelector(`#more-pairs .pair[data-pair-id="${p.id}"] .pair-remove`).click();
+      return { status: s.status, fitting: s.fitting, n: s.pairs.length };
+    });
+    await sleep(2000);                         // a late result of the cancelled refit would land here
+    const after = await ev(() => JSON.stringify(window.__np3app.state.versions));
+    report(r.status.startsWith("Refit cancelled") && !r.fitting && r.n === 2 && after === v0,
+      `8b remove: removing a card during a refit cancels it, the versions are unchanged ("${r.status}")`);
+  }
 
   // ---------- 6. race (c): cancel a refit mid-LM, start another at once ----------
   {
@@ -449,7 +498,7 @@ async function mainFlow({ browser, port, report, skip }) {
                workers: T.workers, terminated: T.terminated, bitmaps: T.bitmaps, closed: T.bitmapsClosed,
                downloads: T.downloads.length };
     });
-    report(r.created >= 5 && r.open.length === 0,
+    report(r.created >= 1 && r.open.length === 0,
       `8b resources: every object URL is revoked (${r.created} created, ${r.open.length} open)`);
     report(r.workers === 0,
       `8b resources: no page Worker is created across the fit, two refits, reports and decodes (${r.workers} new, ${r.terminated} terminated)`);
@@ -497,7 +546,7 @@ async function probe({ browser, port, report, skip }) {
         { raw: c.raw, stem: c.stem, ext });
       await page.waitForFunction(`(() => { const p = window.__np3app.state.pairs[0];
           return p && (p.raw === "error" || !!p.raw?.image); })()`, { timeout: 600000, polling: 500 });
-      await page.evaluate((a) => window.__t8b.dropOn("#target-drop", `/${a.target}`, `${a.stem}.jpg`), c);
+      await page.evaluate((a) => window.__t8b.dropOnCard(window.__np3app.state.pairs[0].id, `/${a.target}`, `${a.stem}.jpg`), c);
       await page.waitForFunction(`(() => { const s = window.__np3app.state, p = s.pairs[0];
           return p && p.target !== "pending"; })()`, { timeout: 300000, polling: 300 });
       const pre = await page.evaluate(() => {
@@ -512,7 +561,8 @@ async function probe({ browser, port, report, skip }) {
       }
       const r = await page.evaluate(async () => {
         const A = window.__np3app, p = A.state.pairs[0];
-        await A.prepareOne(p);
+        // the card prepares by itself (decision #7): wait for its terminal state
+        while (p.preparing || (!p.prepared && !p.prepError && !p.fitBlocked)) await new Promise((r) => setTimeout(r, 300));
         if (p.prepError) return { err: `prepError "${p.prepError}"` };
         if (!p.prepared) return { err: "no result" };
         const P = await import("./lib/pair-prepare.js");

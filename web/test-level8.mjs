@@ -63,8 +63,27 @@ export async function runLevel8({ browser, port, report, skip }) {
           document.querySelector(zone).dispatchEvent(
             new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
         },
+        // RAW first (decision #7): the JPEG goes onto its card — a drop on the card, or the
+        // card's own picker (files set through a DataTransfer, then "change")
+        card: (id, list = "pairs") => document.querySelector(`#${list} .pair[data-pair-id="${id}"]`),
+        dropOnCard: async (id, files, list = "pairs") => {
+          const dt = new DataTransfer();
+          for (const [path, name, byte] of files) {
+            const buf = path ? await (await fetch(path)).arrayBuffer() : new Uint8Array(4096).fill(byte);
+            dt.items.add(new File([buf], name));
+          }
+          window.__t8.card(id, list).dispatchEvent(
+            new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+        },
+        pickOnCard: async (id, path, name, list = "pairs") => {
+          const dt = new DataTransfer();
+          dt.items.add(new File([await (await fetch(path)).arrayBuffer()], name));
+          const inp = window.__t8.card(id, list).querySelector(".pair-jpeg-file");
+          inp.files = dt.files;
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+        },
         // a real but wrong-aspect JPEG synthesised in place (a 2:1 frame vs the 3:2 RAW)
-        dropWrongDim: async (name) => {
+        dropWrongDim: async (id, name) => {
           const c = document.createElement("canvas");
           c.width = 400; c.height = 200;
           const x = c.getContext("2d");
@@ -73,7 +92,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           const blob = await new Promise((r) => c.toBlob(r, "image/jpeg"));
           const dt = new DataTransfer();
           dt.items.add(new File([blob], name));
-          document.getElementById("target-drop").dispatchEvent(
+          window.__t8.card(id).dispatchEvent(
             new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
         },
         // the application canvas is WebGL: read the default framebuffer directly
@@ -95,7 +114,7 @@ export async function runLevel8({ browser, port, report, skip }) {
         },
       };
     });
-    // --- stage 1 of the full flow: the Start screen (spec/ui.md step 1) ---
+    // --- stage 1 of the full flow: the Start screen (spec/ui.md step 1, RAW first — decision #7) ---
     {
       const ui = await ev(() => {
         const heads = [...document.querySelectorAll("#start h2")].map((e) => e.textContent);
@@ -109,7 +128,8 @@ export async function runLevel8({ browser, port, report, skip }) {
           bullets: bullets ? [...bullets.children].map((e) => e.textContent) : [],
           recs: [...document.querySelectorAll("#start h2")].find((e) => e.textContent === "Pair recommendations")
             ?.nextElementSibling?.children.length ?? 0,
-          zones: !!document.getElementById("raw-drop") && !!document.getElementById("target-drop"),
+          zones: !!document.getElementById("raw-drop") && !document.getElementById("target-drop")
+            && !document.getElementById("target-file") && document.querySelectorAll("#start .zone").length === 1,
           name: document.getElementById("fit-name").value,
           fitDisabled: document.getElementById("fit").disabled,
         };
@@ -121,11 +141,23 @@ export async function runLevel8({ browser, port, report, skip }) {
         `8 Start: the DISCLAIMER stub with the three required bullets (dE 1.85 / Z f / local)`);
       report(ui.recs === 6, `8 Start: the pair recommendations (draft, ${ui.recs} items)`);
       report(ui.zones && ui.name === "" && ui.fitDisabled,
-        "8 Start: separate RAW/target drop zones, an empty name, Fit disabled");
+        "8 Start: one RAW drop zone (no JPEG zone), an empty name, Fit disabled");
     }
 
-    // --- pair assembly: a valid pair and the default profile name from the first RAW ---
+    // --- RAW first: a card per RAW, decoding first, the JPEG slot only after the decode ---
     await ev(() => window.__t8.dropOn("#raw-drop", "/test1/DSC_5584.NEF", "DSC_5584.NEF"));
+    {
+      const dec = await ev(() => {
+        const p = window.__np3app.state.pairs[0];
+        const card = window.__t8.card(1);
+        return { raw: p?.raw, state: card?.querySelector(".pair-state")?.dataset.state,
+                 slot: !!card?.querySelector(".pair-add-jpeg"), remove: !!card?.querySelector(".pair-remove"),
+                 inc: !!card?.querySelector("input[type=checkbox]"), edit: !!card?.querySelector(".pair-edit") };
+      });
+      report(dec.raw === "pending" && dec.state === "decoding" && !dec.slot && dec.remove && !dec.inc && !dec.edit,
+        "8 pairs: a dropped RAW gets a card at once in the decoding state — no JPEG slot yet, only Remove from fit" +
+        " (no include checkbox, no Edit)");
+    }
     await page.waitForFunction(
       "window.__np3app.state.pairs[0] && window.__np3app.state.pairs[0].raw"
       + " && !!window.__np3app.state.pairs[0].raw.image",
@@ -133,163 +165,201 @@ export async function runLevel8({ browser, port, report, skip }) {
     {
       const p1 = await ev(() => {
         const p = window.__np3app.state.pairs[0];
+        const card = window.__t8.card(1);
         return { name: p.rawFile.name, cam: `${p.raw.info.make} ${p.raw.info.model}`, warn: p.raw.warn,
                  w: p.raw.image.w, h: p.raw.image.h,
                  defName: window.__np3app.state.profileName,
                  fitName: document.getElementById("fit-name").value,
-                 card: document.querySelector('#pairs .pair[data-pair-id="1"] .pair-meta')?.textContent || "" };
+                 card: card?.querySelector(".pair-meta")?.textContent || "",
+                 state: card.querySelector(".pair-state").dataset.state,
+                 slot: !!card.querySelector(".pair-add-jpeg"),
+                 count: document.getElementById("fit-count").textContent,
+                 fitDisabled: document.getElementById("fit").disabled };
       });
       report(p1.name === "DSC_5584.NEF" && p1.cam.includes("Z f") && !p1.warn
              && p1.defName === "dsc_5584" && p1.fitName === "dsc_5584",
         `8 pairs: the RAW decodes into pair 1 (${p1.cam}), the default name "${p1.defName}" (as in match.py)`);
       report(p1.card.includes(p1.cam) && p1.card.includes(`${p1.w}×${p1.h}`) && p1.card.includes("Active D-Lighting"),
         `8 pairs: the card shows the camera and the frame size (${p1.w}×${p1.h}), ADL is honestly "?"`);
+      report(p1.state === "no_jpeg" && p1.slot && p1.fitDisabled && /0 pair\(s\) will be fitted/.test(p1.count)
+             && /1 without a JPEG/.test(p1.count),
+        `8 pairs: after the decode the card offers "Add JPEG"; Fit stays disabled ("${p1.count}")`);
     }
 
-    // --- the stage-1 dimension guard: a wrong-aspect target is rejected atomically ---
-    await ev(() => window.__t8.dropWrongDim("DSC_5584.JPG"));
+    // --- the dimension guard: a wrong-aspect JPEG is rejected on the card ---
+    await ev(() => window.__t8.dropWrongDim(1, "DSC_5584.JPG"));
     await page.waitForFunction(`window.__np3app.state.status.includes("dimensions")`,
       { timeout: 15000, polling: 100 });
     {
       const rej = await ev(() => {
         const p = window.__np3app.state.pairs[0];
         return { pairs: window.__np3app.state.pairs.length,
-                 target: p.target, targetFile: p.targetFile?.name ?? null, rawOk: !!p.raw.image };
+                 target: p.target, targetFile: p.targetFile?.name ?? null, rawOk: !!p.raw.image,
+                 err: window.__t8.card(1).querySelector(".pair-target-err")?.textContent ?? "",
+                 slot: !!window.__t8.card(1).querySelector(".pair-add-jpeg") };
       });
-      report(rej.pairs === 1 && rej.target === null && rej.targetFile === null && rej.rawOk,
-        "8 pairs: a dimensionally incompatible target is rejected, the pair keeps its RAW");
+      report(rej.pairs === 1 && rej.target === null && rej.targetFile === null && rej.rawOk
+             && /dimensions/.test(rej.err) && rej.slot,
+        "8 pairs: a dimensionally incompatible JPEG is rejected on its card, the card keeps its RAW and the slot");
     }
 
-    // --- a valid target joins the same-name pair; the XMP warnings show as codes ---
-    await ev(() => window.__t8.dropOn("#target-drop", "/web/golden/target/jpg_plain.jpg", "DSC_5584.JPG"));
+    // --- a card takes exactly one JPEG: several files or a non-JPEG are rejected on the card ---
+    await ev(() => window.__t8.dropOnCard(1, [["/web/golden/target/jpg_plain.jpg", "a.jpg"],
+                                              ["/web/golden/target/jpg_wb.jpg", "b.jpg"]]));
+    {
+      const two = await ev(() => ({ target: window.__np3app.state.pairs[0].target,
+        err: window.__t8.card(1).querySelector(".pair-target-err")?.textContent ?? "" }));
+      report(two.target === null && /one JPEG per card/.test(two.err),
+        `8 pairs: two files dropped on a card are rejected ("${two.err}")`);
+      await ev(() => window.__t8.dropOnCard(1, [[null, "scan.tif", 0x11]]));
+      const tif = await ev(() => ({ target: window.__np3app.state.pairs[0].target,
+        err: window.__t8.card(1).querySelector(".pair-target-err")?.textContent ?? "" }));
+      report(tif.target === null && /not a JPEG/.test(tif.err),
+        `8 pairs: a non-JPEG dropped on a card is rejected ("${tif.err}")`);
+    }
+
+    // --- a valid JPEG on the card completes the pair; the XMP warnings show as codes; the
+    //     small golden target is pre-fit-blocked as soon as the pair is prepared ---
+    await ev(() => window.__t8.dropOnCard(1, [["/web/golden/target/jpg_plain.jpg", "DSC_5584.JPG"]]));
     await page.waitForFunction(
-      "window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width",
-      { timeout: 30000, polling: 200 });
+      "window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width"
+      + " && !!window.__np3app.state.pairs[0].fitBlocked",
+      { timeout: 60000, polling: 200 });
     {
       const p1 = await ev(() => {
         const p = window.__np3app.state.pairs[0];
+        const card = window.__t8.card(1);
         return { target: p.targetFile.name, w: p.target.width, h: p.target.height,
-                 codes: p.warnings.map((w) => w.code),
-                 card: document.querySelector('#pairs .pair[data-pair-id="1"]').textContent,
+                 codes: p.warnings.map((w) => w.code), block: p.fitBlocked?.code ?? null,
+                 card: card.textContent, state: card.querySelector(".pair-state").dataset.state,
+                 replace: !!card.querySelector(".pair-replace-jpeg"), err: !!card.querySelector(".pair-target-err"),
+                 count: document.getElementById("fit-count").textContent,
                  fitDisabled: document.getElementById("fit").disabled };
       });
       report(p1.target === "DSC_5584.JPG" && p1.w === 384 && p1.h === 256
              && p1.codes.includes("small_target") && p1.codes.includes("no_lr_settings"),
-        `8 pairs: a valid target completes pair 1 (warnings: ${p1.codes.join(", ")})`);
-      report(p1.card.includes("384×256") && !p1.fitDisabled,
-        "8 pairs: the card shows the target size; Fit is enabled with a complete pair");
+        `8 pairs: a JPEG dropped on the card completes pair 1 (warnings: ${p1.codes.join(", ")})`);
+      report(p1.card.includes("384×256") && p1.replace && !p1.err && p1.block === "target_too_small"
+             && p1.state === "blocked" && p1.fitDisabled && /1 blocked/.test(p1.count),
+        `8 pairs: the card shows the target size and "Replace JPEG"; the preview target is blocked right away ("${p1.count}")`);
     }
 
-    // --- a non-Z f RAW warns (does not block); same-name matching beats in-order ---
+    // --- a second RAW (a non-Z f camera warns, does not block); its JPEG through the card's
+    //     picker, a different base name is accepted ---
     await ev(() => window.__t8.dropOn("#raw-drop", "/test2/SKL_3024.dng", "SKL_3024.dng"));
     await page.waitForFunction(
       "window.__np3app.state.pairs[1] && window.__np3app.state.pairs[1].raw"
       + " && !!window.__np3app.state.pairs[1].raw.image",
       { timeout: 300000, polling: 500 });
-    await ev(() => window.__t8.dropOn("#target-drop", "/web/golden/target/jpg_wb.jpg", "SKL_3024.JPG"));
+    await ev(() => window.__t8.pickOnCard(2, "/web/golden/target/jpg_wb.jpg", "export-of-skl.JPG"));
     await page.waitForFunction(
       "window.__np3app.state.pairs[1].target && !!window.__np3app.state.pairs[1].target.width",
       { timeout: 30000, polling: 200 });
     {
       const p2 = await ev(() => {
         const p = window.__np3app.state.pairs[1];
-        return { cam: p.raw.info.model, codes: p.warnings.map((w) => w.code),
+        return { cam: p.raw.info.model, codes: p.warnings.map((w) => w.code), target: p.targetFile.name,
                  gain: p.warnings.find((w) => w.code === "gain_note")?.note ?? null,
                  p1target: window.__np3app.state.pairs[0].targetFile.name };
       });
       report(p2.cam.includes("Z 8") && p2.codes.includes("camera"),
         `8 pairs: a non-Z f RAW is a warning, not a blocker (${p2.cam})`);
-      report(p2.p1target === "DSC_5584.JPG" && p2.gain && p2.gain.includes("6500 K") && p2.gain.includes("exposure +0.50"),
-        `8 pairs: same-name matching (the SKL target found the SKL RAW) and the edit-gain note: "${p2.gain}"`);
+      report(p2.target === "export-of-skl.JPG" && p2.p1target === "DSC_5584.JPG" && p2.gain
+             && p2.gain.includes("6500 K") && p2.gain.includes("exposure +0.50"),
+        `8 pairs: the card's picker attaches a JPEG of another base name to its own card; edit-gain note: "${p2.gain}"`);
     }
 
-    // --- in-order matching: an unmatched target forms a new pair ---
-    await ev(() => window.__t8.dropOn("#target-drop", "/web/golden/target/jpg_masks.jpg", "nomatch.JPG"));
-    await page.waitForFunction(
-      "window.__np3app.state.pairs.length === 3 && window.__np3app.state.pairs[2].target"
-      + " && !!window.__np3app.state.pairs[2].target.width",
-      { timeout: 30000, polling: 200 });
+    // --- a JPEG dropped on the page (not on a card) is skipped with a hint ---
+    await ev(() => window.__t8.dropFile("/web/golden/target/jpg_masks.jpg", "loose.JPG"));
     {
-      const p3 = await ev(() => {
-        const p = window.__np3app.state.pairs[2];
-        return { raw: p.rawFile?.name ?? null, target: p.targetFile.name,
-                 codes: p.warnings.map((w) => w.code) };
-      });
-      report(p3.raw === null && p3.target === "nomatch.JPG" && p3.codes.includes("masks"),
-        `8 pairs: an unmatched target joins a new pair in order (warnings: ${p3.codes.join(", ")})`);
+      const loose = await ev(() => ({ n: window.__np3app.state.pairs.length, status: window.__np3app.state.status }));
+      report(loose.n === 2 && /add the JPEG on its RAW's card/.test(loose.status),
+        `8 pairs: a JPEG dropped outside the cards is skipped ("${loose.status}")`);
     }
 
-    // --- a corrupt target is rejected without losing the session ---
-    await ev(() => window.__t8.dropBytes("#target-drop", "corrupt.JPG", 0xAB));
+    // --- Replace JPEG: a corrupt replacement is rejected, the card is left without a target;
+    //     then a valid one ---
+    await ev(() => window.__t8.dropOnCard(2, [[null, "corrupt.JPG", 0xAB]]));
     await page.waitForFunction(`window.__np3app.state.status.includes("could not be read")`,
       { timeout: 15000, polling: 100 });
     {
       const ok = await ev(() => ({ n: window.__np3app.state.pairs.length,
-                                   t0: !!window.__np3app.state.pairs[0].target.width }));
-      report(ok.n === 3 && ok.t0, "8 pairs: a corrupt target is rejected, the assembled session is preserved");
+                                   t0: !!window.__np3app.state.pairs[0].target.width,
+                                   t1: window.__np3app.state.pairs[1].target,
+                                   err: window.__t8.card(2).querySelector(".pair-target-err")?.textContent ?? "",
+                                   slot: !!window.__t8.card(2).querySelector(".pair-add-jpeg") }));
+      report(ok.n === 2 && ok.t0 && ok.t1 === null && /could not be read/.test(ok.err) && ok.slot,
+        "8 pairs: a corrupt replacement JPEG is rejected on its card; the other pair is untouched");
     }
+    await ev(() => window.__t8.dropOnCard(2, [["/web/golden/target/jpg_wb.jpg", "SKL_3024.JPG"]]));
+    await page.waitForFunction(
+      "window.__np3app.state.pairs[1].target && !!window.__np3app.state.pairs[1].target.width"
+      + " && !!window.__np3app.state.pairs[1].fitBlocked",
+      { timeout: 60000, polling: 200 });
 
-    // --- an unreadable RAW blocks its pair only ---
-    // (joins the target-only pair 3 in order — the pairing rule from the step above)
+    // --- an unreadable RAW: its card shows the error, only removal; a duplicate RAW is skipped ---
     await ev(() => window.__t8.dropBytes("#raw-drop", "broken.NEF", 0x55));
     await page.waitForFunction(
-      "window.__np3app.state.pairs.length === 3 && window.__np3app.state.pairs[2].blocked === true"
-      + " && !!window.__np3app.state.pairs[2].rawFile",
+      "window.__np3app.state.pairs.length === 3 && window.__np3app.state.pairs[2].blocked === true",
       { timeout: 60000, polling: 200 });
     {
       const b = await ev(() => {
         const p = window.__np3app.state.pairs[2];
-        const card = document.querySelector('#pairs .pair[data-pair-id="3"]');
-        return { raw: p.rawFile.name, codes: p.warnings.map((w) => w.code),
-                 editDisabled: card.querySelector(".pair-edit").disabled,
-                 blockedShown: !card.querySelector(".pair-blocked").hidden,
-                 fitDisabled: document.getElementById("fit").disabled };
+        const card = window.__t8.card(p.id);
+        return { id: p.id, raw: p.rawFile.name, codes: p.warnings.map((w) => w.code),
+                 state: card.querySelector(".pair-state").dataset.state,
+                 slot: !!card.querySelector(".pair-add-jpeg"), remove: !!card.querySelector(".pair-remove"),
+                 count: document.getElementById("fit-count").textContent };
       });
-      report(b.raw === "broken.NEF" && b.codes.includes("raw_error") && b.editDisabled
-             && b.blockedShown && !b.fitDisabled,
-        "8 pairs: an unreadable RAW blocks its pair (Edit disabled), the fit still has the good pairs");
+      report(b.raw === "broken.NEF" && b.codes.includes("raw_error") && b.state === "raw_error" && !b.slot
+             && b.remove && /3 blocked/.test(b.count),
+        `8 pairs: an unreadable RAW blocks its card (no JPEG slot, only Remove from fit) — "${b.count}"`);
+      await ev((id) => window.__t8.dropOnCard(id, [["/web/golden/target/jpg_plain.jpg", "x.JPG"]]), b.id);
+      const noJpeg = await ev((id) => ({ target: window.__np3app.state.pairs.find((p) => p.id === id).target,
+        err: window.__t8.card(id).querySelector(".pair-target-err")?.textContent ?? "" }), b.id);
+      report(noJpeg.target === null && /unreadable/.test(noJpeg.err),
+        "8 pairs: a JPEG dropped on a RAW-error card is refused");
+      await ev(() => window.__t8.dropOn("#raw-drop", "/test1/DSC_5584.NEF", "DSC_5584.NEF"));
+      const dup = await ev(() => ({ n: window.__np3app.state.pairs.length, status: window.__np3app.state.status }));
+      report(dup.n === 3 && /already in the list/.test(dup.status),
+        `8 pairs: a RAW already in the list (decoded) is skipped ("${dup.status}")`);
+      // Remove from fit: the card and the pair are gone for good
+      await ev((id) => window.__t8.card(id).querySelector(".pair-remove").click(), b.id);
+      const rm = await ev(() => ({ ids: window.__np3app.state.pairs.map((p) => p.id),
+        cards: document.querySelectorAll("#pairs .pair").length, status: window.__np3app.state.status }));
+      report(rm.ids.join(",") === "1,2" && rm.cards === 2 && /Removed broken\.NEF/.test(rm.status),
+        `8 pairs: "Remove from fit" deletes the card and the pair (${rm.ids}; "${rm.status}")`);
     }
 
-    // --- the name rule validates immediately and the Fit stub is honest ---
+    // --- the name rule validates immediately; with only blocked pairs Fit stays disabled ---
     {
       const bad = await ev(() => {
         const inp = document.getElementById("fit-name");
         inp.value = "THIS NAME IS FAR TOO LONG";
         inp.dispatchEvent(new Event("input", { bubbles: true }));
-        return { fitDisabled: document.getElementById("fit").disabled,
-                 bad: inp.classList.contains("bad"), err: !document.getElementById("fit-name-err").hidden };
+        return { bad: inp.classList.contains("bad"), err: !document.getElementById("fit-name-err").hidden };
       });
-      report(bad.fitDisabled && bad.bad && bad.err,
-        "8 name: more than 19 chars is highlighted right away and blocks Fit");
+      report(bad.bad && bad.err, "8 name: more than 19 chars is highlighted right away");
       const nonAscii = await ev(() => {
         const inp = document.getElementById("fit-name");
         inp.value = "ÉTOILE";
         inp.dispatchEvent(new Event("input", { bubbles: true }));
-        return document.getElementById("fit").disabled;
+        return inp.classList.contains("bad");
       });
-      report(nonAscii, "8 name: non-ASCII blocks Fit (the np3.serialize rule)");
-      await ev(() => {
+      report(nonAscii, "8 name: non-ASCII is highlighted (the np3.serialize rule)");
+      const st = await ev(() => {
         const inp = document.getElementById("fit-name");
         inp.value = "dsc_5584";
         inp.dispatchEvent(new Event("input", { bubbles: true }));
-        document.getElementById("fit").click();
+        document.getElementById("fit").click();      // disabled: nothing happens
+        const s = window.__np3app.state;
+        return { disabled: document.getElementById("fit").disabled, fitting: s.fitting,
+                 codes: s.pairs.map((p) => p.fitBlocked?.code ?? null), versions: s.versions.length,
+                 count: document.getElementById("fit-count").textContent };
       });
-      // stage 3: Fit runs the pre-fit checks first (the small golden targets are previews);
-      // with every included pair blocked, nothing is fitted and no version is created
-      await page.waitForFunction(
-        `window.__np3app.state.status.startsWith("Nothing to fit")`,
-        { timeout: 60000, polling: 200 });
-      const fitMsg = await ev(() => window.__np3app.state.status);
-      report(fitMsg.startsWith("Nothing to fit"),
-        `8 Fit: honestly reports that nothing can fit ("${fitMsg.slice(0, 52)}…")`);
-      {
-        const small = await ev(() => window.__np3app.state.pairs.slice(0, 2)
-          .map((p) => p.fitBlocked?.code ?? null));
-        report(small.every((c) => c === "target_too_small"),
-          `8 Fit: the small golden targets are pre-fit-blocked (${small.join(", ")})`);
-        const noVersion = await ev(() => window.__np3app.state.versions.length);
-        report(noVersion === 0, "8 Fit: a blocked run creates no versions");
-      }
+      report(st.disabled && !st.fitting && st.codes.every((c) => c === "target_too_small") && st.versions === 0
+             && /^0 pair\(s\) will be fitted; 0 without a JPEG, 2 blocked/.test(st.count),
+        `8 Fit: with only pre-fit-blocked pairs (small golden previews) Fit is disabled, no version ("${st.count}")`);
     }
 
     // Export through the real exportNow(); the Blob bytes are intercepted from createObjectURL.
@@ -400,8 +470,11 @@ export async function runLevel8({ browser, port, report, skip }) {
         `8 export without RAW: the default new profile${c0 ? ` (${c0.name})` : " — the file did not parse"}`);
     }
 
-    // --- Start -> the manual editor with the selected pair ---
-    await ev(() => document.querySelector('#pairs .pair[data-pair-id="1"] .pair-edit').click());
+    // --- the standalone manual editor with pair 1's RAW ---
+    // Decision #7 removed the Edit button: the editor is reached from Compare after a fit;
+    // the standalone editor (no fitted version, neutral resets) moves to its own page in
+    // stage 11 (spec/ui-pages.md). Until then its checks enter it through the app entry point.
+    await ev(() => window.__np3app.enterEditor(window.__np3app.state.pairs.find((p) => p.id === 1)));
     await page.waitForFunction(
       `window.__np3app.state.step === "edit" && window.__np3app.state.raw`
       + ` && window.__np3app.state.raw.name === "DSC_5584.NEF"`,
@@ -944,7 +1017,7 @@ export async function runLevel8({ browser, port, report, skip }) {
       report(st.step === "start" && st.startShown && !st.editorShown
              && st.pairs === before.pairs && st.cards === before.pairs && st.sat === before.sat,
         "8 navigation: Back to Start keeps the assembled session and the profile");
-      await ev(() => document.querySelector('#pairs .pair[data-pair-id="1"] .pair-edit').click());
+      await ev(() => window.__np3app.enterEditor(window.__np3app.state.pairs.find((p) => p.id === 1)));
       const back = await ev(() => ({ step: window.__np3app.state.step,
                                      raw: window.__np3app.state.raw?.name,
                                      sat: window.__np3app.state.control.saturation,
@@ -1115,7 +1188,8 @@ export async function runLevel8({ browser, port, report, skip }) {
       }
     };
 
-    // --- stage 2: prepare-on-Fit — pair preparation in the Worker (spec/ui-plan.md stage 2) ---
+    // --- stage 2: pair preparation in the Worker (spec/ui-plan.md stage 2); since stage 9 it
+    //     starts as soon as a card has both files (decision #7), Fit then fits the ready pairs ---
     {
       // (a fresh page after the share-link section: the drop helper is installed again)
       await ev(() => {
@@ -1125,6 +1199,14 @@ export async function runLevel8({ browser, port, report, skip }) {
           const dt = new DataTransfer();
           dt.items.add(new File([buf], name));
           document.querySelector(zone).dispatchEvent(
+            new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+        };
+        // the card helpers (RAW first): a JPEG goes onto its card
+        window.__t8.card = (id, list = "pairs") => document.querySelector(`#${list} .pair[data-pair-id="${id}"]`);
+        window.__t8.dropOnCard = async (id, files, list = "pairs") => {
+          const dt = new DataTransfer();
+          for (const [path, name] of files) dt.items.add(new File([await (await fetch(path)).arrayBuffer()], name));
+          window.__t8.card(id, list).dispatchEvent(
             new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
         };
         // the slider helper too: the stage-6 and stage-7 scenarios below edit the panel
@@ -1138,94 +1220,80 @@ export async function runLevel8({ browser, port, report, skip }) {
       // a real aligned pair (DSC_5584.NEF + its own export) and a cross pair
       // (SKL_3024 RAW against the DSC_5584 target — NCC below 0.6 blocks it)
       await ev(() => window.__t8.dropOn("#raw-drop", "/test1/DSC_5584.NEF", "DSC_5584.NEF"));
-      await page.waitForFunction(
-        "window.__np3app.state.pairs[0] && window.__np3app.state.pairs[0].raw"
-        + " && !!window.__np3app.state.pairs[0].raw.image",
-        { timeout: 300000, polling: 500 });
-      await ev(() => window.__t8.dropOn("#target-drop", "/test1/DSC_5584.jpg", "DSC_5584.JPG"));
-      await page.waitForFunction(
-        "window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width",
-        { timeout: 60000, polling: 200 });
       await ev(() => window.__t8.dropOn("#raw-drop", "/test2/SKL_3024.dng", "SKL_3024.dng"));
       await page.waitForFunction(
-        "window.__np3app.state.pairs[1] && window.__np3app.state.pairs[1].raw"
-        + " && !!window.__np3app.state.pairs[1].raw.image",
-        { timeout: 300000, polling: 500 });
-      await ev(() => window.__t8.dropOn("#target-drop", "/test1/DSC_5584.jpg", "SKL_3024.JPG"));
-      await page.waitForFunction(
-        "window.__np3app.state.pairs[1].target && !!window.__np3app.state.pairs[1].target.width",
-        { timeout: 60000, polling: 200 });
-      {
-        const pre = await ev(() => ({ fit: document.getElementById("fit").disabled,
-                                      name: document.getElementById("fit-name").value }));
-        report(!pre.fit && pre.name === "dsc_5584",
-          `8 prepare: two complete pairs, Fit enabled (name "${pre.name}")`);
-      }
-
-      // cancel/replace on re-drop: start preparing, then replace the target mid-flight —
-      // the running task is cancelled, its result is stale and must not land on the pair
-      await ev(() => document.getElementById("fit").click());
+        "window.__np3app.state.pairs.length === 2"
+        + " && window.__np3app.state.pairs.every((p) => p.raw && !!p.raw.image)",
+        { timeout: 600000, polling: 500 });
+      // the JPEG of pair 1: its preparation starts by itself (decision #7) — the card shows
+      // the progress and Fit is locked meanwhile
+      await ev(() => window.__t8.dropOnCard(1, [["/test1/DSC_5584.jpg", "DSC_5584.JPG"]]));
       await page.waitForFunction("window.__np3app.state.pairs[0].preparing === true",
         { timeout: 60000, polling: 100 });
       {
         const during = await ev(() => ({
           fitDisabled: document.getElementById("fit").disabled,
-          card: document.querySelector('#pairs .pair[data-pair-id="1"] .pair-meta').textContent,
+          card: window.__t8.card(1).querySelector(".pair-meta").textContent,
+          state: window.__t8.card(1).querySelector(".pair-state").dataset.state,
+          name: document.getElementById("fit-name").value,
         }));
-        report(during.fitDisabled && during.card.includes("Preparing"),
-          `8 prepare: the card shows progress, Fit is locked while preparing ("${during.card.slice(0, 60)}…")`);
+        report(during.fitDisabled && during.card.includes("Preparing") && during.state === "preparing"
+               && during.name === "dsc_5584",
+          `8 prepare: a card with both files prepares by itself — progress on the card, Fit locked ("${during.card.slice(0, 60)}…")`);
       }
-      await ev(() => window.__t8.dropOn("#target-drop", "/test1/DSC_5584.jpg", "DSC_5584.JPG"));
-      await page.waitForFunction(
-        "window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width"
-        + " && window.__np3app.state.pairs[0].prepared === null"
-        + " && window.__np3app.state.pairs[0].preparing === false",
-        { timeout: 60000, polling: 200 });
+      // cancel/replace: the JPEG is replaced mid-preparation — the running task is cancelled,
+      // its result is stale and must not land; the pair is prepared again for the new file
+      await ev(() => window.__t8.dropOnCard(1, [["/test1/DSC_5584.jpg", "DSC_5584.JPG"]]));
       {
         const cancelled = await ev(() => ({
           gen: window.__np3app.state.pairs[0].prepGen,
-          card: document.querySelector('#pairs .pair[data-pair-id="1"] .pair-meta').textContent,
+          prepared: window.__np3app.state.pairs[0].prepared,
+          card: window.__t8.card(1).querySelector(".pair-meta").textContent,
         }));
-        report(cancelled.gen >= 1 && !cancelled.card.includes("NCC"),
-          "8 prepare: a mid-flight re-drop cancels the task, no stale NCC lands on the card");
+        report(cancelled.gen >= 2 && cancelled.prepared === null && !cancelled.card.includes("NCC"),
+          "8 prepare: replacing the JPEG mid-preparation cancels the task, no stale NCC lands on the card");
       }
-      // the aborted run settles (nothing prepares against the changed input anymore)
-      await page.waitForFunction("!window.__np3app.state.pairs.some((p) => p.preparing)",
-        { timeout: 60000, polling: 200 });
-
-      // prepare both pairs and fit the aligned one (stage 3): the cross pair is blocked
-      // (ncc_low) — only pair 1 goes into the fit
-      await ev(() => document.getElementById("fit").click());
+      await ev(() => window.__t8.dropOnCard(2, [["/test1/DSC_5584.jpg", "SKL_3024.JPG"]]));
       await page.waitForFunction(
-        "window.__np3app.state.pairs[0].prepared && window.__np3app.state.pairs[1].prepared"
-        + " && window.__np3app.state.fitting === true",
+        "window.__np3app.state.pairs.every((p) => p.prepared && !p.preparing)",
         { timeout: 600000, polling: 500 });
       {
         const done = await ev(() => {
           const s = window.__np3app.state;
           return {
             p1: { ncc: s.pairs[0].prepared.ncc, blocked: s.pairs[0].prepared.blocked?.code ?? null,
-                  card: document.querySelector('#pairs .pair[data-pair-id="1"]').textContent,
-                  incDisabled: document.querySelector('#pairs .pair[data-pair-id="1"] .pair-inc-box').disabled },
+                  card: window.__t8.card(1).textContent },
             p2: { ncc: s.pairs[1].prepared.ncc, blocked: s.pairs[1].prepared.blocked?.code ?? null,
-                  card: document.querySelector('#pairs .pair[data-pair-id="2"]').textContent,
-                  incDisabled: document.querySelector('#pairs .pair[data-pair-id="2"] .pair-inc-box').disabled },
+                  card: window.__t8.card(2).textContent,
+                  state: window.__t8.card(2).querySelector(".pair-state").dataset.state },
             fitDisabled: document.getElementById("fit").disabled,
-            fitLabel: document.getElementById("fit").textContent,
-            status: document.getElementById("status").textContent,
-            versions: s.versions.length,
+            count: document.getElementById("fit-count").textContent,
           };
         });
         report(done.p1.ncc > 0.7 && !done.p1.blocked && done.p1.card.includes("NCC"),
           `8 prepare: the aligned pair shows NCC ${done.p1.ncc.toFixed(3)}`);
-        report(done.p2.blocked === "ncc_low" && /Alignment failed/.test(done.p2.card) && done.p2.incDisabled,
+        report(done.p2.blocked === "ncc_low" && /Alignment failed/.test(done.p2.card) && done.p2.state === "blocked",
           `8 prepare: the cross pair is blocked (ncc ${done.p2.ncc.toFixed(3)} < 0.60), its card shows the badge`);
+        report(!done.fitDisabled && /^1 pair\(s\) will be fitted; 0 without a JPEG, 1 blocked/.test(done.count),
+          `8 prepare: Fit is enabled over the one usable pair ("${done.count}")`);
+      }
+
+      // fit the aligned one (stage 3): the cross pair is blocked — only pair 1 goes into the fit
+      await ev(() => document.getElementById("fit").click());
+      await page.waitForFunction("window.__np3app.state.fitting === true", { timeout: 600000, polling: 200 });
+      {
+        const done = await ev(() => ({
+          fitDisabled: document.getElementById("fit").disabled,
+          fitLabel: document.getElementById("fit").textContent,
+          status: document.getElementById("status").textContent,
+          versions: window.__np3app.state.versions.length,
+        }));
         report(done.fitDisabled && done.fitLabel === "Fitting…" && /^(Fitting|Fitting:)/.test(done.status)
                && done.versions === 0,
           `8 fit: the fit runs with progress in the status line, Fit is locked ("${done.status.slice(0, 44)}…")`);
       }
-      // cancel on a mid-flight re-drop: the running fit is cancelled, no version is created
-      await ev(() => window.__t8.dropOn("#target-drop", "/test1/DSC_5584.jpg", "DSC_5584.JPG"));
+      // cancel on a mid-flight JPEG replacement: the running fit is cancelled, no version is created
+      await ev(() => window.__t8.dropOnCard(1, [["/test1/DSC_5584.jpg", "DSC_5584.JPG"]]));
       await page.waitForFunction(`window.__np3app.state.status.startsWith("Fit cancelled")`,
         { timeout: 60000, polling: 200 });
       {
@@ -1235,13 +1303,13 @@ export async function runLevel8({ browser, port, report, skip }) {
           fitting: window.__np3app.state.fitting,
         }));
         report(cancelled.versions === 0 && cancelled.p1prepared && !cancelled.fitting,
-          "8 fit: a mid-flight re-drop cancels the fit, no partial version lands");
+          "8 fit: a mid-flight JPEG replacement cancels the fit, no partial version lands");
       }
-      // re-Fit (after the re-dropped target has finished decoding): pair 1 is prepared again,
-      // then the free fit creates the immutable draft version
+      // re-Fit once pair 1 is prepared again: the free fit creates the immutable draft version
       await page.waitForFunction(
-        "window.__np3app.state.pairs[0].target && !!window.__np3app.state.pairs[0].target.width",
-        { timeout: 60000, polling: 200 });
+        "window.__np3app.state.pairs[0].prepared && !window.__np3app.state.pairs[0].preparing"
+        + " && !document.getElementById('fit').disabled",
+        { timeout: 600000, polling: 500 });
       await ev(() => document.getElementById("fit").click());
       await page.waitForFunction("window.__np3app.state.versions.length === 1",
         { timeout: 600000, polling: 500 });
@@ -1261,14 +1329,14 @@ export async function runLevel8({ browser, port, report, skip }) {
         report(draft.id === "draft" && draft.kind === "fit" && draft.parentId === null
                && draft.pairIds.length === 1 && draft.pairIds[0] === "1" && draft.selected === "draft"
                && draft.nParams === 56 && draft.strength === 100,
-          `8 fit: the draft version over the exact included pair id (${draft.pairIds}), strength kept`);
+          `8 fit: the draft version over the exact usable pair id (${draft.pairIds}), strength kept`);
         report(draft.name === "NPF-DSC_5584" && draft.status.startsWith("Fit finished")
                && draft.iters > 0 && draft.cost > 0,
           `8 fit: "${draft.name}" in ${draft.iters} iterations (cost ${draft.cost}) — "${draft.status.slice(0, 52)}…"`);
       }
-      // entering the editor from the fitted pair applies the version control (the editor
-      // stays the manual editor — reset-to-fitted and version history are stage 4/6)
-      await ev(() => document.querySelector('#pairs .pair[data-pair-id="1"] .pair-edit').click());
+      // the manual editor is reached from Compare (decision #7) and applies the version control
+      await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
+      await ev(() => document.getElementById("cmp-manual").click());
       await page.waitForFunction(
         `window.__np3app.state.step === "edit" && window.__np3app.state.raw`,
         { timeout: 60000, polling: 200 });
@@ -1285,30 +1353,32 @@ export async function runLevel8({ browser, port, report, skip }) {
           };
         });
         report(ed.controlSame && ed.strength === 100 && ed.shown,
-          `8 fit: the editor opens the fitted pair with the draft control (${ed.name})`);
+          `8 fit: Compare -> manual adjustment opens the fitted pair with the draft control (${ed.name})`);
       }
       await ev(() => document.getElementById("to-start").click());
       await page.waitForFunction(`window.__np3app.state.step === "start"`,
         { timeout: 60000, polling: 200 });
-      // a re-dropped preview blocks its pair (target_too_small); the prepared pair is refit,
+      // a preview as pair 2's new JPEG blocks it (target_too_small); the prepared pair is refit,
       // the blocked one stays out of the version
-      await ev(() => window.__t8.dropOn("#target-drop", "/web/golden/target/jpg_plain.jpg", "SKL_3024.JPG"));
+      await ev(() => window.__t8.dropOnCard(2, [["/web/golden/target/jpg_plain.jpg", "SKL_3024.JPG"]]));
       await page.waitForFunction(
-        "window.__np3app.state.pairs[1].target && window.__np3app.state.pairs[1].target.width === 384",
+        "window.__np3app.state.pairs[1].target && window.__np3app.state.pairs[1].target.width === 384"
+        + " && !!window.__np3app.state.pairs[1].fitBlocked && !document.getElementById('fit').disabled",
         { timeout: 60000, polling: 200 });
       await ev(() => document.getElementById("fit").click());
+      await page.waitForFunction("window.__np3app.state.fitting === true", { timeout: 60000, polling: 100 });
       await page.waitForFunction(
-        `window.__np3app.state.status.startsWith("Fit finished")`,
+        `window.__np3app.state.status.startsWith("Fit finished") && !window.__np3app.state.fitting`,
         { timeout: 600000, polling: 500 });
       {
         const small = await ev(() => ({
           code: window.__np3app.state.pairs[1].fitBlocked?.code ?? null,
-          card: document.querySelector('#pairs .pair[data-pair-id="2"]').textContent,
+          card: window.__t8.card(2).textContent,
           pairIds: window.__np3app.state.versions[0].pairIds,
         }));
         report(small.code === "target_too_small" && /too small/.test(small.card)
                && small.pairIds.length === 1 && small.pairIds[0] === "1",
-          "8 fit: a re-dropped preview is excluded from the refit (target_too_small), the aligned pair stays in");
+          "8 fit: a preview JPEG blocks its pair (target_too_small), the aligned pair stays in the version");
       }
 
 
@@ -2409,9 +2479,12 @@ export async function runLevel8({ browser, port, report, skip }) {
         skip("8 stage 7: no second pair to remove");
       }
 
-      // a new pair through the More screen's zones (the same loading path and checks)
+      // a new pair through the More screen (the same RAW-first loading path and checks)
       await ev(() => window.__t8.dropOn("#more-raw-drop", "/test1/DSC_5584.NEF", "DSC_5584B.NEF"));
-      await ev(() => window.__t8.dropOn("#more-target-drop", "/test1/DSC_5584.jpg", "DSC_5584B.jpg"));
+      await moreSettle(`(() => { const p = window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
+                         return p && (p.raw === "error" || (p.raw && !!p.raw.image)); })()`, 600000);
+      const id3 = await ev(() => window.__np3app.state.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF").id);
+      await ev((id) => window.__t8.dropOnCard(id, [["/test1/DSC_5584.jpg", "DSC_5584B.jpg"]], "more-pairs"), id3);
       // wait for a terminal state of the new pair (analyzed, or failed — reported below)
       await moreSettle(`(() => { const s = window.__np3app.state;
                          const p = s.pairs.find((q) => q.rawFile?.name === "DSC_5584B.NEF");
@@ -2432,49 +2505,28 @@ export async function runLevel8({ browser, port, report, skip }) {
         `${m1.err ? ", " + m1.err : ""})`);
       report(m1.versions === v0.n && !m1.fitting && m1.selected.includes(m1.id3)
              && JSON.stringify(m1.coverage) !== JSON.stringify(m0.advice.coverage),
-        `8 stage 7: the advice follows the new pair without a fit (selected ${m1.selected}, versions ${m1.versions})`);
+        `8 stage 7: the advice follows the new pair without a fit (in the fit: ${m1.selected}, versions ${m1.versions})`);
 
-      // exclude / include: the advice and the displayed refit ids follow, still no fit
-      const toggle3 = () => ev((id) =>
-        document.querySelector(`#more-pairs .pair[data-pair-id="${id}"] .pair-inc-box`).click(), m1.id3);
-      await toggle3();
-      const ex = await ev(() => ({ selected: window.__np3app.state.advice.selected,
-        ids: document.getElementById("more-refit").dataset.pairIds,
-        coverage: window.__np3app.state.advice.coverage, versions: window.__np3app.state.versions.length }));
-      report(!ex.selected.includes(m1.id3) && ex.ids === ex.selected.join(",")
-             && JSON.stringify(ex.coverage) === JSON.stringify(m0.advice.coverage) && ex.versions === v0.n,
-        `8 stage 7: excluding a pair updates the advice and the refit ids (${ex.ids}) without a fit`);
-      await toggle3();
-      const inc = await ev(() => document.getElementById("more-refit").dataset.pairIds);
-      report(inc.split(",").map(Number).includes(m1.id3), `8 stage 7: including it back (${inc})`);
-
-      // the recommended set: one click selects it, the user can override it afterwards
+      // no inclusion state (decision #7): no checkboxes, no "Use the recommended selection";
+      // the recommended set is shown and the cards outside it are only marked
       {
-        const rec0 = await ev(() => window.__np3app.state.advice.recommended);
-        const sel0 = await ev(() => window.__np3app.state.advice.selected);
-        if (rec0.length) {
-          if (rec0.length === sel0.length && rec0.every((id) => sel0.includes(id))) await toggle3();
-          const r = await ev(() => {
-            const b = document.getElementById("more-use-rec");
-            const enabled = b && !b.disabled;
-            b?.click();
-            const s = window.__np3app.state;
-            return { enabled, rec: s.advice.recommended, selected: s.advice.selected,
-                     text: document.querySelector("#more-advice .more-rec")?.textContent ?? "" };
-          });
-          const same = r.rec.length === r.selected.length && r.rec.every((id) => r.selected.includes(id));
-          report(r.enabled && same && /Recommended set/.test(r.text),
-            `8 stage 7: "Use the recommended selection" selects the recommended set (${r.rec}) — "${r.text.slice(0, 50)}"`);
-        } else {
-          skip("8 stage 7: no recommended set (every candidate is bad)");
-        }
-        // override: both pairs in the refit
-        await ev((id3) => {
-          for (const id of [1, id3]) {
-            const b = document.querySelector(`#more-pairs .pair[data-pair-id="${id}"] .pair-inc-box`);
-            if (b && !b.checked && !b.disabled) b.click();
-          }
-        }, m1.id3);
+        const r = await ev(() => {
+          const s = window.__np3app.state;
+          const a = s.advice;
+          const marked = [...document.querySelectorAll("#more-pairs .pair")]
+            .filter((c) => c.querySelector(".pair-not-rec")).map((c) => Number(c.dataset.pairId));
+          const want = a.candidates.filter((id) => a.recommended.length && !a.recommended.includes(id));
+          return { boxes: document.querySelectorAll("#more-pairs input[type=checkbox]").length,
+                   useRec: !!document.getElementById("more-use-rec"),
+                   rec: a.recommended, marked, want, selected: a.selected, all: s.pairs.map((p) => p.id),
+                   text: document.querySelector("#more-advice .more-rec")?.textContent ?? "",
+                   ids: document.getElementById("more-refit").dataset.pairIds };
+        });
+        report(r.boxes === 0 && !r.useRec && r.marked.join(",") === r.want.join(",")
+               && (!r.rec.length || /Recommended set/.test(r.text))
+               && r.ids === r.selected.join(","),
+          `8 stage 7: no checkboxes and no auto-selection; recommended ${r.rec.length ? r.rec : "—"},` +
+          ` "not recommended" marks on [${r.marked}]; the refit takes every usable pair (${r.ids})`);
       }
 
       // cancel path: a cancelled refit leaves the session unchanged

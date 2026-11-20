@@ -1,7 +1,7 @@
 // The application: the session shell (spec/ui-plan.md §3) around the manual editor.
 // State by contract: the session fields — step (start | compare | edit | more; "edit" is the
 // manual adjustment step 3.1 — the name predates the full flow and stays for the tests),
-// pairs: [{ id, rawFile, targetFile, raw, target, warnings, included, blocked }],
+// pairs: [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }] (RAW first, decision #7),
 // selectedPairId, versions: [{ id, name, control, parentId, kind, pairIds, fitVector, … }],
 // selectedVersionId, fitting, profileName (the fit's NP3 name),
 // strength, generation, status — plus the editor state, preserved unchanged:
@@ -34,7 +34,7 @@ import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { createMore, computeAdvice, frameOf } from "./more-view.js";
 import { viewRemap, applyRemap } from "./pair-prepare.js";
-import { assignFile, pruneEmpty, defaultProfileName, isRawReady, isTargetReady,
+import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion } from "./session.js";
 import { neutralControl, isDirty, fieldDeltas } from "./baseline.js";
@@ -64,7 +64,7 @@ for (const z of ZONES) control.grade[z] = [0, 0, 0];
 const state = {
   // --- session (spec/ui-plan.md §3) ---
   step: "start",              // start | compare | edit (manual adjustment) | more (step 3.2, stage 7)
-  pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, included, blocked }]
+  pairs: [],                  // [{ id, rawFile, targetFile, raw, target, warnings, blocked, targetError }]
   selectedPairId: null,
   versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
   selectedVersionId: null,
@@ -381,10 +381,13 @@ const reportView = createReport({ state,
 // aligned NCC and the blocked state land on the pair cards. Stage 3: the prepared pairs go
 // to the fit Worker (lib/fit-worker.js) — progress in the status line, cancel on a re-drop
 // or on navigation, the immutable draft version on success.
+// Stage 9 (decision #7): RAW first — the JPEG is added on its card; "Remove from fit" on
+// every card; no include checkbox and no editor entry from Start (the manual editor is
+// reached from Compare only).
 const start = createStart({ state, setStatus,
   onAddRaws: (files) => { for (const f of files) addRawFile(f); },
-  onAddTargets: (files) => { for (const f of files) addTargetFile(f); },
-  onEditPair: (pair) => enterEditor(pair),
+  onAddTarget: (pair, file) => addTargetFile(pair, file),
+  onRemovePair: (p) => removePair(p),
   onFit: () => runFitPreparation(),
 });
 
@@ -393,10 +396,8 @@ const start = createStart({ state, setStatus,
 // advice is recomputed from the cached frame records on every pair change — never a fit.
 const more = createMore({ state, setStatus,
   onAddRaws: (files) => { for (const f of files) addRawFile(f); },
-  onAddTargets: (files) => { for (const f of files) addTargetFile(f); },
+  onAddTarget: (pair, file) => addTargetFile(pair, file),
   onRemovePair: (p) => removePair(p),
-  onIncludeChange: () => selectionChanged(),
-  onUseRecommended: () => useRecommended(),
   onRefit: () => runRefit(),
   onCancel: () => cancelFit(t("Refit cancelled — the session is unchanged")),
   onBack: () => enterCompare(),
@@ -405,10 +406,6 @@ function refreshPairsUI() {
   start.refresh();
   more?.refresh();
 }
-// the Start screen's include checkbox changes the selection too (the advice follows)
-$("pairs").addEventListener("change", (e) => {
-  if (e.target.classList?.contains("pair-inc-box")) selectionChanged();
-});
 
 // ---------- pair preparation (stage 2, spec/web-schemas.md §2) ----------
 // The pure port runs in a Worker (lib/pair-worker.js): the main thread stays responsive
@@ -798,12 +795,15 @@ async function prepareOne(pair) {
   return true;
 }
 
-// Fit (stages 2–3): prepare every included pair, then send the prepared pairs to the fit
-// Worker (stage 3). A preparation superseded mid-run (the user changed a file) aborts the
+// Fit (stages 2–3): prepare every pair, then send the prepared pairs to the fit Worker
+// (stage 3). Since stage 9 the pairs are prepared as soon as their JPEG decodes (the same
+// chain as More frames), so Fit normally finds them ready; the loop below still prepares
+// whatever is left. A preparation superseded mid-run (the user changed a file) aborts the
 // run — the inputs no longer match what the remaining pairs would prepare against.
 async function runFitPreparation() {
   if (state.fitting) return;
-  const pairs = state.pairs.filter((p) => isCompletePair(p) && p.included);
+  await autoChain;                            // a running auto-preparation finishes first
+  const pairs = state.pairs.filter((p) => isCompletePair(p));
   if (!pairs.length) {
     setStatus(t("Assemble at least one RAW + JPEG pair to fit"));
     return;
@@ -817,10 +817,10 @@ async function runFitPreparation() {
       return;
     }
   }
-  // only the prepared, unblocked included pairs are fitted — the exact ids go into the version
+  // only the prepared, unblocked pairs are fitted — the exact ids go into the version
   const eligible = pairs.filter((p) => p.prepared && !p.prepared.blocked && !p.fitBlocked);
   if (!eligible.length) {
-    setStatus(t("Nothing to fit: every included pair is blocked"));
+    setStatus(t("Nothing to fit: every pair is blocked"));
     return;
   }
   if (!(await startFit(eligible))) {
@@ -828,10 +828,10 @@ async function runFitPreparation() {
   }
 }
 
-// ---------- stage 7: More frames — auto-preparation, selection, removal, refit ----------
-// In the More step every complete pair is prepared as soon as both files are decoded (the
-// same checks as Fit: the size pre-check, the alignment, NCC) so its frame record — and the
-// advice — is available before any refit. One serialized chain; a superseded preparation
+// ---------- auto-preparation, removal, refit (stages 7 and 9) ----------
+// Every complete pair is prepared as soon as both files are decoded — on Start (stage 9: the
+// card shows the alignment before Fit) and on More frames (the advice needs the frame record
+// before any refit) — with the same checks as Fit: the size pre-check, the alignment, NCC. One serialized chain; a superseded preparation
 // just moves on to the next pair.
 let autoChain = Promise.resolve();
 function sizeBlocked(p) {
@@ -854,45 +854,46 @@ function autoPrepare() {
       any = true;
       if (!p.prepared && !p.prepError) break;     // superseded by a changed file: a re-drop re-queues
     }
-    requestFrames();
+    if (state.step === "more") requestFrames();   // the advice records (enterMore asks too)
     if (any && state.versions.length) requestReport();   // renderDE of the new pairs (exclusion hints)
     updateAdvice();
   });
   return autoChain;
 }
 
-// A selection change (include/exclude) updates the advice; a refit computing over the old
-// selection is superseded (the refit must use exactly the displayed ids).
-function selectionChanged() {
-  if (state.fitting && fitKind === "refit") cancelFit(t("Refit cancelled — the selection changed"));
-  updateAdvice();
-}
-
+// "Remove from fit" (decision #7): the pair leaves the session for good — its files, decode,
+// preparation, advice record and report/worker caches are released, its running decode or
+// preparation is cancelled (a late result finds the pair gone and is dropped), and a running
+// fit or refit is cancelled (it may include the pair). Versions are kept unchanged.
 function removePair(p) {
   const i = state.pairs.indexOf(p);
   if (i < 0) return;
-  if (state.fitting && fitKind === "refit") cancelFit(t("Refit cancelled — the selection changed"));
+  const name = p.rawFile?.name ?? `#${p.id}`;
+  let msg = t("Removed {name} from the fit", { name });
+  if (state.fitting) {
+    msg = fitKind === "refit" ? t("Refit cancelled — {name} was removed from the fit", { name })
+                              : t("Fit cancelled — {name} was removed from the fit", { name });
+    cancelFit(msg);
+  }
   cancelPreparation(p);
   p.prepGen = (p.prepGen ?? 0) + 1;        // whatever is still in flight for it is stale
   state.pairs.splice(i, 1);
   reportWorkerPairs.delete(String(p.id));
+  p.prepared = null;                       // release the big arrays held by the pair
+  p.raw = null;
+  p.target = null;
+  p.report = null;
+  p.frame = null;
   if (state.selectedPairId === p.id) {
-    const next = state.pairs.find(compareUsable) ?? state.pairs[0];
+    const next = state.pairs[i] ?? state.pairs[i - 1] ?? null;
     state.selectedPairId = next ? next.id : null;
     compareFramePair = null;
   }
   state.reportAggregate = null;
   if (state.versions.length) requestReport();   // the aggregate over the remaining pairs
-  setStatus(t("Removed {name} from the session", { name: p.rawFile?.name ?? p.targetFile?.name ?? `#${p.id}` }));
+  setStatus(msg);
+  refreshPairsUI();
   updateAdvice();
-}
-
-function useRecommended() {
-  const a = state.advice;
-  if (!a || !a.recommended.length) return;
-  const rec = new Set(a.recommended);
-  for (const p of state.pairs) if (a.candidates.includes(p.id)) p.included = rec.has(p.id);
-  selectionChanged();
 }
 
 // Refit (spec/ui.md step 3.2, decision #3): a new deterministic fit from the zero init over
@@ -983,11 +984,10 @@ const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => 
       // A RAW that does not decode blocks its pair (spec/ui.md checks table); the other
       // pairs and the editor state stay untouched.
       const p = st.tag.pair;
-      if (p.rawFile && p.rawFile.name === st.name) {
+      if (inSession(p) && p.rawFile && p.rawFile.name === st.name) {
         p.raw = "error";
         p.rawError = `${msg}${st.detail ? " — " + st.detail : ""}`;
         p.blocked = true;
-        p.included = false;
         refreshPair(p);
       }
     }
@@ -997,7 +997,7 @@ const loader = createRawLoader({ worker: "lib/raw-worker.js", onUpdate: (st) => 
   } else if (st.type === "ready") {
     if (st.tag?.kind === "pair") {
       const p = st.tag.pair;
-      if (p.rawFile && p.rawFile.name === st.name && p.raw === "pending") {
+      if (inSession(p) && p.rawFile && p.rawFile.name === st.name && p.raw === "pending") {
         p.raw = { name: st.name, image: st.image, info: st.info, warn: st.warn };
         refreshPair(p);
         setStatus(t("Ready"));
@@ -1031,59 +1031,74 @@ function refreshPair(p) {
 // RAW decodes are serialized: the loader is single-generation, so a second concurrent open
 // would make the first one stale and its pair would never resolve.
 let rawQueue = Promise.resolve();
+const inSession = (p) => state.pairs.includes(p);
 function addRawFile(file) {
-  const pair = assignFile(state.pairs, "raw", file);
+  const got = addRawPair(state.pairs, file);
+  if (!got) {
+    setStatus(t("{name} is already in the list — skipped", { name: file.name }));
+    return rawQueue;
+  }
+  const pair = got.pair;
   if (state.selectedPairId == null) state.selectedPairId = pair.id;
   pair.raw = "pending";
-  pair.blocked = false;    // a re-drop retries the decode (assignFile matches the same-name slot)
+  pair.rawError = null;
+  pair.blocked = false;    // a re-drop retries the decode (addRawPair matches the same-name card)
+  pair.targetError = null;
   invalidatePreparation(pair);
-  start.setNameDefault(defaultProfileName(file.name));
+  start.setNameDefault(defaultProfileName(state.pairs[0].rawFile.name));
   refreshPairsUI();
   rawQueue = rawQueue.then(async () => {
+    if (!inSession(pair) || pair.rawFile !== file) return;   // removed / re-dropped meanwhile
     const bytes = new Uint8Array(await file.arrayBuffer());
     try { pair.wbMult = wbMultipliers(bytes); } catch { pair.wbMult = null; }
     const image = await loader.open(bytes, { name: file.name, tag: { kind: "pair", pair } });
-    if (image === null && pair.raw === "pending") {
-      // Superseded by a newer editor load before it started: the slot stays pending
-      // for a re-drop (the user can also enter the editor from any ready pair).
+    if (image === null && pair.raw === "pending" && inSession(pair)) {
+      // Superseded by a newer editor load before it started: the card stays pending for a
+      // re-drop of the same RAW.
       setStatus(t("Decoding of {name} was interrupted — drop the file again", { name: file.name }));
     }
+    if (!inSession(pair)) return;
     refreshPair(pair);
     refreshPairsUI();
-    if (state.step === "more") autoPrepare();
+    autoPrepare();
   });
   return rawQueue;
 }
 
-async function addTargetFile(file) {
-  const pair = assignFile(state.pairs, "target", file);
-  if (state.selectedPairId == null) state.selectedPairId = pair.id;
+// The JPEG of one card (decision #7): only on a decoded RAW; add or replace. The card's
+// previous target, preparation and advice are dropped at once; a rejected JPEG leaves the
+// card without a target and the reason on the card.
+async function addTargetFile(pair, file) {
+  if (!inSession(pair) || !canAttachTarget(pair)) return;
+  pair.targetFile = file;
   pair.target = "pending";
+  pair.targetError = null;
   invalidatePreparation(pair);
+  refreshPair(pair);
   refreshPairsUI();
-  try {
-    const target = await decodeTarget(file);
-    // The stage-1 dimension guard (web/lib/session.js): a target whose aspect ratio does not
-    // match the RAW frame is rejected — real alignment and NCC arrive in stage 2.
-    if (isRawReady(pair) && !dimsCompatible(pair.raw.image, target)) {
-      pair.target = null;
-      pair.targetFile = null;
-      pruneEmpty(state.pairs);
-      setStatus(t("{name}: dimensions do not match the RAW frame — the target is skipped", { name: file.name }));
-      refreshPairsUI();
-      return;
-    }
-    pair.target = target;
-  } catch {
-    // Reject the file only: the pair (and the rest of the session) keeps its last valid state.
+  const reject = (msg) => {
     pair.target = null;
     pair.targetFile = null;
-    pruneEmpty(state.pairs);
-    setStatus(t("{name}: could not be read as a JPEG target — the file is skipped", { name: file.name }));
+    pair.targetError = msg;
+    setStatus(msg);
+  };
+  try {
+    const target = await decodeTarget(file);
+    if (!inSession(pair) || pair.targetFile !== file) return;   // removed / replaced meanwhile
+    // The stage-1 dimension guard (web/lib/session.js): a target whose aspect ratio does not
+    // match the RAW frame is rejected before the alignment.
+    if (!dimsCompatible(pair.raw.image, target)) {
+      reject(t("{name}: dimensions do not match the RAW frame — the target is skipped", { name: file.name }));
+    } else {
+      pair.target = target;
+    }
+  } catch {
+    if (!inSession(pair) || pair.targetFile !== file) return;
+    reject(t("{name}: could not be read as a JPEG target — the file is skipped", { name: file.name }));
   }
   refreshPair(pair);
   refreshPairsUI();
-  if (state.step === "more") autoPrepare();
+  autoPrepare();
 }
 
 // ---------- navigation: Start <-> the manual editor ----------
@@ -1218,7 +1233,8 @@ function routeFile(f) {
     if (state.step === "start" || state.step === "more") addRawFile(f);
     else editorOpenRaw(f);
   } else if (ext === "jpg" || ext === "jpeg") {
-    addTargetFile(f);
+    // RAW first (decision #7): a JPEG belongs to a card, not to the page
+    setStatus(t("{name}: add the JPEG on its RAW's card", { name: f.name }));
   } else {
     setStatus(t("Unsupported file: {name} — drop a NEF, DNG, JPG or NP3", { name: f.name }));
   }
@@ -1241,4 +1257,4 @@ window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, 
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne,
-                    more, enterMore, runRefit, removePair, useRecommended, computeAdvice };
+                    more, enterMore, runRefit, removePair, computeAdvice };

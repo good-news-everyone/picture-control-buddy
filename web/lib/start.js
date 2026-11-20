@@ -8,11 +8,15 @@
 // Pair data lives in state.pairs (the session shape, web/lib/session.js).
 // Stage 7: the same component renders the pair list of the More frames screen (step 3.2) —
 // a second instance over its own element ids (`ids`), in mode "more": no name field or Fit
-// button there, every card gets a Remove button, and `decorate(pair, box)` lets the More
-// view add the per-pair advice (verdict, reasons, the high-error hint). One pair list
-// implementation, one loading path (app.js addRawFile/addTargetFile) for both screens.
+// button there, and `decorate(pair, box)` lets the More view add the per-pair advice
+// (verdict, reasons, the high-error hint). One pair list implementation, one loading path
+// (app.js addRawFile/addTargetFile) for both screens.
+// Stage 9 (spec/ui.md decision #7): RAW first. The only zone takes RAW files; every card
+// offers "Add JPEG" (a picker or a drop onto the card, one file) once its RAW is decoded,
+// "Replace JPEG" afterwards, and "Remove from fit" always. No include checkbox, no Edit.
 import { t } from "./i18n.js";
-import { isValidProfileName, isRawReady, isTargetReady, isCompletePair } from "./session.js";
+import { isValidProfileName, isRawReady, isTargetReady, isCompletePair, canAttachTarget,
+         pickTargetFile } from "./session.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -67,38 +71,76 @@ function blockedText(p, reason) {
   }
 }
 
+// The card state (decision #7, the six states), as a code and as a short label.
+function stateCode(p, blocked) {
+  if (p.raw === "pending") return "decoding";
+  if (p.raw === "error") return "raw_error";
+  if (blocked || p.blocked) return "blocked";
+  if (p.target === "pending") return "jpeg_decoding";
+  if (!isTargetReady(p)) return "no_jpeg";
+  if (p.preparing || !p.prepared) return "preparing";
+  return "ready";
+}
+
+function stateText(p, blocked) {
+  switch (stateCode(p, blocked)) {
+    case "decoding": return t("Decoding the RAW…");
+    case "raw_error": return t("RAW error");
+    case "blocked": return t("Blocked — not fitted");
+    case "jpeg_decoding": return t("Decoding the JPEG…");
+    case "no_jpeg": return t("Waiting for the JPEG");
+    case "preparing": return t("Preparing the pair…");
+    default: return t("Ready to fit");
+  }
+}
+
+/** The fit-set summary under Fit / Refit (decision #7): how many pairs will be fitted and how
+ *  many are skipped — without a JPEG (a RAW-only card, or a RAW still decoding) and blocked. */
+export function fitCount(state) {
+  let n = 0, m = 0, k = 0;
+  for (const p of state.pairs) {
+    if (blockedReason(p) || p.blocked) k++;
+    else if (isCompletePair(p)) n++;
+    else if (!isTargetReady(p)) m++;
+  }
+  return { n, m, k };
+}
+
+export function fitCountText(state) {
+  const { n, m, k } = fitCount(state);
+  let s = t("{n} pair(s) will be fitted", { n });
+  if (m || k) s += "; " + t("{m} without a JPEG, {k} blocked — skipped", { m, k });
+  return s;
+}
+
 /**
  * state — the app state (session shape); callbacks:
- *   onAddRaws(files) / onAddTargets(files) — pair assembly (app.js decodes and validates);
- *   onEditPair(pair)  — enter the manual editor with the pair's RAW;
- *   onFit()           — the Fit button (preparation + the fit Worker live in app.js);
- *   setStatus(text)   — the shared status line (app.js owns it).
+ *   onAddRaws(files)          — new RAW cards (app.js decodes and validates);
+ *   onAddTarget(pair, file)   — the JPEG of one card (add or replace);
+ *   onRemovePair(pair)        — "Remove from fit": the pair leaves the session;
+ *   onFit()                   — the Fit button (preparation + the fit Worker live in app.js);
+ *   setStatus(text)           — the shared status line (app.js owns it).
  * Returns { refresh, setNameDefault }.
  */
 export const START_IDS = {
-  pairs: "pairs", name: "fit-name", nameErr: "fit-name-err", fit: "fit", toCompare: "to-compare",
-  rawZone: "raw-drop", targetZone: "target-drop", rawPicker: "raw-file", targetPicker: "target-file",
+  pairs: "pairs", name: "fit-name", nameErr: "fit-name-err", fit: "fit", fitCount: "fit-count",
+  toCompare: "to-compare", rawZone: "raw-drop", rawPicker: "raw-file",
 };
 
-export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit, setStatus,
-                              ids = START_IDS, mode = "start", onRemovePair = null,
-                              onIncludeChange = null, decorate = null }) {
-  const more = mode === "more";
+export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit = () => {},
+                              setStatus, ids = START_IDS, mode = "start", decorate = null }) {
   const pairsEl = $(ids.pairs);
   const nameInput = ids.name ? $(ids.name) : null;      // absent on the More screen
   const nameErr = ids.nameErr ? $(ids.nameErr) : null;
   const fitBtn = ids.fit ? $(ids.fit) : null;
+  const fitCountEl = ids.fitCount ? $(ids.fitCount) : null;
   const toCompareBtn = ids.toCompare ? $(ids.toCompare) : null;
   const rawZone = $(ids.rawZone);
-  const targetZone = $(ids.targetZone);
   const rawPicker = $(ids.rawPicker);
-  const targetPicker = $(ids.targetPicker);
 
-  // ---------- pickers and drag-and-drop zones ----------
+  // ---------- the RAW picker and drop zone ----------
   rawZone.addEventListener("click", () => rawPicker.click());
-  targetZone.addEventListener("click", () => targetPicker.click());
   rawPicker.addEventListener("change", () => { onAddRaws([...rawPicker.files]); rawPicker.value = ""; });
-  targetPicker.addEventListener("change", () => { onAddTargets([...targetPicker.files]); targetPicker.value = ""; });
 
   function bindZone(zone, accept, kinds, cb) {
     for (const ev of ["dragenter", "dragover"]) {
@@ -117,13 +159,15 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
       e.stopPropagation();              // the page-level router must not process the same files
       const good = [], bad = [];
       for (const f of [...e.dataTransfer.files]) (accept(f.name) ? good : bad).push(f);
-      for (const f of bad)
-        setStatus(t("Skipped {name}: this zone accepts {kinds} only", { name: f.name, kinds }));
+      for (const f of bad) {
+        setStatus(/\.(jpe?g)$/i.test(f.name)
+          ? t("{name}: add the JPEG on its RAW's card", { name: f.name })
+          : t("Skipped {name}: this zone accepts {kinds} only", { name: f.name, kinds }));
+      }
       if (good.length) cb(good);
     });
   }
   bindZone(rawZone, (n) => /\.(nef|dng)$/i.test(n), ".NEF/.DNG", onAddRaws);
-  bindZone(targetZone, (n) => /\.(jpe?g)$/i.test(n), ".JPG", onAddTargets);
 
   // ---------- profile name: immediate 1–19 ASCII validation (the np3.serialize rule) ----------
   function validateName() {
@@ -142,13 +186,14 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
   // ---------- Fit ----------
   // Stage 2: disabled while anything prepares. Stage 3: a blocked pair (a failed alignment,
   // a too-small target, an unreadable file) no longer locks Fit — it is excluded from the
-  // fit and its card reports the block; Fit needs at least one fittable included pair.
+  // fit and its card reports the block; Fit needs at least one fittable pair.
   // While a fit runs the status line shows the LM progress (iteration/cost) and the button
   // reads "Fitting…".
   function updateFit() {
     if (!fitBtn) return;
     const preparing = state.pairs.some((p) => p.preparing);
-    const fittable = state.pairs.some((p) => p.included && isCompletePair(p) && !blockedReason(p));
+    const fittable = fitCount(state).n > 0;
+    if (fitCountEl) fitCountEl.textContent = state.pairs.length ? fitCountText(state) : "";
     fitBtn.textContent = t(state.fitting ? "Fitting…" : "Fit");
     fitBtn.disabled = state.fitting || !isValidProfileName(state.profileName) || !fittable || preparing;
     // stage 4: the Comparison step needs a fitted version (from Fit or, later, a refit)
@@ -171,6 +216,27 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
     return row;
   }
 
+  // A card's JPEG input (picker or drop): exactly one JPEG, and only on a decoded RAW. A
+  // rejection is shown on the card and changes nothing else.
+  function takeTargets(p, files) {
+    if (!files.length) return;
+    if (!canAttachTarget(p) || p.target === "pending") {
+      p.targetError = p.raw === "error" ? t("The RAW is unreadable — remove this card")
+                                        : t("Wait until the RAW is decoded, then add its JPEG");
+      refresh();
+      return;
+    }
+    const pick = pickTargetFile(files);
+    if (pick.error) {
+      p.targetError = pick.error === "count" ? t("Drop one JPEG per card ({n} files dropped)", { n: files.length })
+                                             : t("{name} is not a JPEG — the card takes one .JPG", { name: files[0].name });
+      refresh();
+      return;
+    }
+    p.targetError = null;
+    onAddTarget?.(p, pick.file);
+  }
+
   function card(p) {
     const box = el("div", "pair");
     box.dataset.pairId = String(p.id);
@@ -180,36 +246,14 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
     const blocked = blockedReason(p);
 
     const top = el("div", "pair-top");
-    const inc = el("label", "pair-inc");
-    const incBox = document.createElement("input");
-    incBox.type = "checkbox";
-    incBox.className = "pair-inc-box";
-    incBox.checked = p.included && !p.blocked && !blocked;
-    incBox.disabled = p.blocked || !!blocked;
-    incBox.addEventListener("change", () => {
-      p.included = incBox.checked;
-      updateFit();
-      onIncludeChange?.(p);
-    });
-    const incLabel = el("span", null, t("Include in the fit"));
-    incLabel.dataset.i18n = "Include in the fit";
-    inc.append(incBox, incLabel);
-
-    const edit = el("button", "pair-edit", t("Edit"));
-    edit.dataset.i18n = "Edit";
-    edit.disabled = p.blocked || !isRawReady(p);
-    edit.addEventListener("click", () => onEditPair(p));
-    if (more) {
-      // step 3.2: removal from the session (the other pairs, their preparation and the
-      // versions are kept); the editor entry stays on the Start screen
-      const rm = el("button", "pair-remove", t("Remove"));
-      rm.dataset.i18n = "Remove";
-      rm.type = "button";
-      rm.addEventListener("click", () => onRemovePair?.(p));
-      top.append(inc, rm);
-    } else {
-      top.append(inc, edit);
-    }
+    const st = el("span", "pair-state", stateText(p, blocked));
+    st.dataset.state = stateCode(p, blocked);
+    // "Remove from fit" on every card, both screens: the pair leaves the session for good
+    const rm = el("button", "pair-remove", t("Remove from fit"));
+    rm.dataset.i18n = "Remove from fit";
+    rm.type = "button";
+    rm.addEventListener("click", () => onRemovePair?.(p));
+    top.append(st, rm);
     box.append(top);
 
     const dl = el("dl", "pair-meta");
@@ -234,6 +278,39 @@ export function createStart({ state, onAddRaws, onAddTargets, onEditPair, onFit,
       dl.append(...metaRow("Alignment", `NCC ${p.prepared.ncc.toFixed(3)}`));
     }
     box.append(dl);
+
+    // the JPEG slot: only once the RAW is decoded (decision #7) — "Add JPEG" / "Replace JPEG"
+    if (canAttachTarget(p) && p.target !== "pending") {
+      const slot = el("div", "pair-jpeg");
+      const replace = isTargetReady(p);
+      const btn = el("button", replace ? "pair-replace-jpeg" : "pair-add-jpeg",
+                     replace ? t("Replace JPEG") : t("Add JPEG"));
+      btn.dataset.i18n = replace ? "Replace JPEG" : "Add JPEG";
+      btn.type = "button";
+      const picker = document.createElement("input");
+      picker.type = "file";
+      picker.accept = ".jpg,.JPG,.jpeg,.JPEG";
+      picker.hidden = true;
+      picker.className = "pair-jpeg-file";
+      btn.addEventListener("click", () => picker.click());
+      picker.addEventListener("change", () => { takeTargets(p, [...picker.files]); picker.value = ""; });
+      slot.append(btn, picker);
+      if (!replace) slot.append(el("span", "hint", t("or drop the JPEG onto this card")));
+      box.append(slot);
+    }
+    if (p.targetError) box.append(el("div", "bad pair-target-err", p.targetError));
+
+    // a JPEG dropped anywhere on the card goes to this card (one file)
+    for (const ev of ["dragenter", "dragover"]) {
+      box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.add("over"); });
+    }
+    box.addEventListener("dragleave", () => box.classList.remove("over"));
+    box.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();                // the page-level router must not see these files
+      box.classList.remove("over");
+      takeTargets(p, [...(e.dataTransfer?.files || [])]);
+    });
 
     if (p.warnings.length) {
       const ul = el("ul", "pair-warn");
