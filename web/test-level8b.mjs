@@ -2,7 +2,7 @@
 // real page web/index.html. One sequential page flow over one fit and two refits:
 //   Start -> Fit -> Compare -> Manual (an edit, undo/redo) -> More (leave warning, discard,
 //   a second pair) -> Refit (cancel + immediate restart) -> select a version -> Save
-//   (single NP3 + the strength set),
+//   (single NP3; no strength set — spec/ui.md decision #10),
 // with the races (RAW decode, report, refit, version switches during LUT builds), the resource
 // bookkeeping (object URLs, page Workers, ImageBitmaps) and the locality rule checked along the
 // way. The other real pairs in _local/ (SKL_3024, SKL_3000, DSC_6550 — Python-valid) are
@@ -14,7 +14,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serialize } from "./lib/np3.js";
 import { scaled } from "./lib/strength.js";
-import { buildStrengthSet, setFileName } from "./lib/strength-set.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));   // web/
 const ROOT = path.dirname(HERE);                             // the project root
@@ -381,7 +380,7 @@ async function mainFlow({ browser, port, report, skip }) {
     }
   }
 
-  // ---------- 8. select a version -> Save (single NP3 + the strength set) ----------
+  // ---------- 8. select a version -> Save (single NP3; no strength-set control) ----------
   {
     await ev(() => window.__t8b.clickVersion("draft"));
     await ev(() => window.__t8b.setStrength(70));
@@ -403,17 +402,9 @@ async function mainFlow({ browser, port, report, skip }) {
            && single.bytes && eqBytes(Uint8Array.from(single.bytes), want),
       `8b save: #export writes "${single.name}" = serialize(scaled(draft, 70%)) byte for byte`);
 
-    await ev(() => document.getElementById("export-set").click());
-    await wf(`window.__t8b.res.downloads.length >= ${st.n0 + 5}`, 30000, 50);
-    const files = [];
-    for (let i = st.n0 + 1; i < st.n0 + 5; i++) files.push(await ev((j) => window.__t8b.downloadBytes(j), i));
-    const ref = buildStrengthSet(st.vctl);
-    const namesOk = files.map((f) => f.name).join(",") === ref.map((f) => f.fileName).join(",")
-      && [30, 50, 70, 100].every((p, i) => files[i].name === setFileName(st.vctl.name, p)
-                                           && files[i].name.endsWith(`-${p}.NP3`));
-    const bytesOk = files.every((f, i) => f.bytes && eqBytes(Uint8Array.from(f.bytes), ref[i].bytes));
-    report(namesOk && bytesOk,
-      `8b save: #export-set writes ${files.map((f) => f.name).join(", ")} = buildStrengthSet(base) byte for byte`);
+    const noSet = await ev(() => !document.getElementById("export-set")
+      && ![...document.querySelectorAll("button")].some((b) => /strength set/i.test(b.textContent)));
+    report(noSet, "8b save: no strength-set export control on the page (spec/ui.md decision #10)");
   }
 
   // ---------- 9. race (a): a new RAW dropped while the previous decode runs ----------

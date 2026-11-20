@@ -1137,64 +1137,11 @@ async function level5(ctx) {
   }
 }
 
-// ---------- level 1h: strength-set export and the undo/redo history (stage 6) ----------
-// The strength set (lib/strength-set.js) vs web/golden/strength-set/index.json from
-// web/make_strength_set_golden.py (strength.scaled + np3.serialize): byte-exact members,
-// file names, the base untouched, the internal name unchanged, rejected percent lists.
-// The history (lib/history.js) runs behind a tiny window/sessionStorage shim.
+// ---------- level 1h: the undo/redo history (stage 6) ----------
+// The history (lib/history.js) runs behind a tiny window/sessionStorage shim. (The strength-set
+// part of this level is gone with the export itself — spec/ui.md decision #10.)
 async function level1h(ctx) {
   const { report } = ctx;
-  const { buildStrengthSet, normalizePercents, DEFAULT_PERCENTS } = await import("./lib/strength-set.js");
-  const g = JSON.parse(await readFile(path.join(HERE, "golden/strength-set/index.json"), "utf8"));
-  const b64 = (s) => new Uint8Array(Buffer.from(s, "base64"));
-  const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-  const FIELDS = ["name", "comment", "sharpening", "mid_sharpening", "clarity", "contrast", "highlights",
-                  "shadows", "white", "black", "saturation", "blender", "grade", "blending", "balance", "curve"];
-  const fieldDiff = (want, got) => {
-    for (const k of FIELDS)
-      if (JSON.stringify(want[k]) !== JSON.stringify(got[k])) return `field ${k} differs`;
-    return "bytes differ, fields equal";
-  };
-
-  report(JSON.stringify(normalizePercents()) === JSON.stringify(g.default)
-         && JSON.stringify(DEFAULT_PERCENTS) === JSON.stringify(g.default),
-    `1h strength set default percents ${JSON.stringify(normalizePercents())}`);
-
-  const byBase = new Map();
-  for (const c of g.cases) {
-    const base = deserialize(b64(g.bases[c.base]));
-    const before = JSON.stringify(base);
-    let got, err = null;
-    try { got = buildStrengthSet(base, c.percents); } catch (e) { err = e.message; }
-    let bad = err;
-    if (!bad && got.length !== c.members.length) bad = `${got.length} members != ${c.members.length}`;
-    for (let i = 0; !bad && i < got.length; i++) {
-      const w = c.members[i], m = got[i];
-      if (m.percent !== w.percent) bad = `member ${i}: percent ${m.percent} != ${w.percent}`;
-      else if (m.fileName !== w.fileName) bad = `${w.percent}%: file ${m.fileName} != ${w.fileName}`;
-      else if (!sameBytes(m.bytes, b64(w.bytes)))
-        bad = `${w.percent}%: ${fieldDiff(deserialize(b64(w.bytes)), deserialize(m.bytes))}`;
-      else if (deserialize(m.bytes).name !== base.name) bad = `${w.percent}%: internal name changed`;
-    }
-    if (!bad && JSON.stringify(base) !== before) bad = "base MODIFIED";
-    const e = byBase.get(c.base) || { n: 0, members: 0, bad: [] , name: base.name };
-    e.n++; e.members += c.members.length;
-    if (bad) e.bad.push(`${JSON.stringify(c.percents)}: ${bad}`);
-    byBase.set(c.base, e);
-  }
-  for (const [key, e] of byBase)
-    report(e.bad.length === 0,
-      `1h strength set ${key} (${JSON.stringify(e.name)}): ${e.n} sets, ${e.members} files`
-      + (e.bad.length ? `, ${e.bad.join("; ")}` : " byte-exact vs strength.py, names ok"));
-
-  const base0 = deserialize(b64(Object.values(g.bases)[0]));
-  const notRejected = g.rejected.filter((ps) => {
-    try { buildStrengthSet(base0, ps); return true; } catch { return false; }
-  });
-  report(notRejected.length === 0,
-    `1h strength set rejections: ${g.rejected.length} invalid percent lists`
-    + (notRejected.length ? `, accepted ${JSON.stringify(notRejected)}` : " throw"));
-
   // ---- history: undo/redo over a counter state, in a shim ----
   const store = new Map();
   const listeners = [];

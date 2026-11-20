@@ -312,7 +312,9 @@ Tests: see ui-pages.md "Tests".
 
 ### Stage 12. Remove the strength-set export
 
-Spec: [ui.md](ui.md) decision #10 (2026-11-20). Not started. Supersedes the strength-set parts of stage 6.
+Spec: [ui.md](ui.md) decision #10 (2026-11-20). Supersedes the strength-set parts of stage 6.
+
+> **Status 2026-11-20: done.** Removed: `#export-set` from `index.html`, `exportSet`/`setBtn`/`setBusy` from `transfer.js`, `web/lib/strength-set.js`, `web/make_strength_set_golden.py`, `web/golden/strength-set/`. Level 1h keeps only the history checks; level 8b drops the byte-exact set export and checks that no strength-set control exists; the single `#export` at 70% stays byte-exact vs `serialize(scaled(...))`. `scaled()` itself stays covered by the `strength` golden of the manifest. Verified in headless Chromium (`NP3_BROWSER=chrome`).
 
 - Remove the "Save strength set" button and its i18n key (`index.html` / the wizard page, the editor pages, `mobile.html` if it has one), `exportSet` and its busy state in `transfer.js`, `web/lib/strength-set.js`, `web/make_strength_set_golden.py` and its golden files.
 - Tests: drop the strength-set level-1 checks and the byte-exact strength-set export of level 8b; add one check that no such control exists on any page. Single-NP3 export at a non-100% strength stays byte-exact against `strength.scaled`.
