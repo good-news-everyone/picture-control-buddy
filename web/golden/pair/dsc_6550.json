@@ -1,0 +1,107 @@
+{
+ "schemaVersion": 1,
+ "kind": "preparedPair",
+ "id": "dsc_6550",
+ "files": {
+  "raw": "DSC_6550.NEF",
+  "target": "DSC_6550.jpg"
+ },
+ "generation": {
+  "session": 0,
+  "pair": 0,
+  "task": 0
+ },
+ "cancelled": false,
+ "superseded": false,
+ "warnings": [],
+ "role": "good",
+ "h3": 170,
+ "w3": 256,
+ "size": {
+  "w": 768,
+  "h": 512
+ },
+ "ncc": 0.9769351482391357,
+ "transform": {
+  "crop": {
+   "hasCrop": false,
+   "left": 0.0,
+   "top": 0.0,
+   "right": 1.0,
+   "bottom": 1.0,
+   "angleDeg": 0.0,
+   "angleSign": 1
+  },
+  "orientation": 0,
+  "lensRadial": null,
+  "radialScale": 0.998,
+  "radialK": -0.003999999999999986,
+  "scale": 0.998,
+  "warpScale": 1.0,
+  "shiftX": 0.0,
+  "shiftY": 0.0
+ },
+ "vignette": {
+  "a": -0.3428601157379002,
+  "b": 1.0525374796929214
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "checks": {
+  "camera": "NIKON Z f",
+  "adl": "Normal",
+  "targetSize": [
+   6048,
+   4032
+  ],
+  "xmpHasLightroom": true,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 18.0,
+  "blocked": null
+ },
+ "analysis": {
+  "name": "DSC_6550",
+  "ncc": 0.977,
+  "adl": "Normal",
+  "groups": {
+   "greys": 0.06011029411764706,
+   "skin": 0.0009191176470588235,
+   "warm saturated": 0.0,
+   "warm muted": 0.016222426470588237,
+   "yellows": 0.04241727941176471,
+   "greens": 0.8737362132352942,
+   "teal/water": 0.004227941176470588,
+   "sky": 9.191176470588235e-05,
+   "dark blues": 0.00011488970588235294,
+   "purple": 0.0021599264705882354
+  },
+  "L": 34.203266757588835,
+  "dark": 0.06511948529411765,
+  "light": 0.0,
+  "clipped": 0.0,
+  "lift": -10.249874359581177,
+  "verdict": {
+   "state": "good",
+   "reasons": []
+  },
+  "warnings": [
+   "DSC_6550.jpg: grain from the preset has no place in NP3"
+  ]
+ },
+ "arrays": {
+  "x": "pair/dsc_6550.x.f32.br",
+  "y": "pair/dsc_6550.y.f32.br",
+  "masks": "pair/dsc_6550.masks.u8",
+  "maskPlanes": [
+   "clip",
+   "report",
+   "valid",
+   "nearWhite"
+  ]
+ }
+}

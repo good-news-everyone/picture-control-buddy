@@ -1,0 +1,178 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "jpg_icc.jpg",
+ "case": "JPEG, embedded non-sRGB ICC (np3-target-adobe v1.0)",
+ "image": {
+  "format": "JPEG",
+  "w": 384,
+  "h": 256,
+  "mode": "RGB",
+  "storedSize": [
+   384,
+   256
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": true,
+   "profile": "np3-target-adobe v1.0\n",
+   "treatedAsSrgb": false,
+   "normalizedTo": "sRGB (converted via the embedded profile)"
+  }
+ },
+ "xmp": {
+  "_masks": false
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   384,
+   256
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "jpg_icc.jpg: read only the 384x256 preview, better give a JPEG or TIFF",
+  "jpg_icc.jpg: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile"
+ ],
+ "content": {
+  "clippedShare": 0.0009
+ },
+ "ref": {
+  "file": "jpg_icc.ref.f32",
+  "gridW": [
+   0,
+   12,
+   24,
+   37,
+   49,
+   61,
+   74,
+   86,
+   98,
+   111,
+   123,
+   135,
+   148,
+   160,
+   172,
+   185,
+   197,
+   210,
+   222,
+   234,
+   247,
+   259,
+   271,
+   284,
+   296,
+   308,
+   321,
+   333,
+   345,
+   358,
+   370,
+   383
+  ],
+  "gridH": [
+   0,
+   11,
+   22,
+   33,
+   44,
+   55,
+   66,
+   77,
+   88,
+   99,
+   110,
+   121,
+   133,
+   144,
+   155,
+   166,
+   177,
+   188,
+   199,
+   210,
+   221,
+   232,
+   243,
+   255
+  ],
+  "source": "pairs.to_srgb",
+  "browserMaxLevels": 1.0,
+  "stored": "jpg_icc.stored.f32",
+  "mirrorMaxLevels": 0.527
+ },
+ "iccMatrix": {
+  "m": [
+   1.3982153225277736,
+   -0.3982037882911689,
+   -0.00013635830808539362,
+   -8.730224864397914e-06,
+   0.9999895342346552,
+   2.352864993215159e-05,
+   -8.45144123452074e-07,
+   -0.04295572308951136,
+   1.0433508833083025
+  ],
+  "trc": [
+   {
+    "x": 0,
+    "r": 0.0,
+    "g": 0.0,
+    "b": 0.0
+   },
+   {
+    "x": 0.1,
+    "r": 0.010025177386129548,
+    "g": 0.010025177386129548,
+    "b": 0.010025177386129548
+   },
+   {
+    "x": 0.25,
+    "r": 0.05088120851453422,
+    "g": 0.05088120851453422,
+    "b": 0.05088120851453422
+   },
+   {
+    "x": 0.5,
+    "r": 0.21404592965590907,
+    "g": 0.21404592965590907,
+    "b": 0.21404592965590907
+   },
+   {
+    "x": 0.75,
+    "r": 0.5225185015640498,
+    "g": 0.5225185015640498,
+    "b": 0.5225185015640498
+   },
+   {
+    "x": 0.9,
+    "r": 0.7874189364461738,
+    "g": 0.7874189364461738,
+    "b": 0.7874189364461738
+   },
+   {
+    "x": 1.0,
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.0
+   }
+  ]
+ },
+ "exercises": "ICC normalization to sRGB must run; the profile description must not contain 'sRGB'"
+}

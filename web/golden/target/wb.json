@@ -1,0 +1,9 @@
+{
+ "schemaVersion": 1,
+ "kind": "wbReference",
+ "file": "wb.DNG",
+ "multipliers": [
+  0.6931471805599453,
+  0.5108256237659907
+ ]
+}

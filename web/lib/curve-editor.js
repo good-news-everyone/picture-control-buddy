@@ -9,6 +9,8 @@
 import { t } from "./i18n.js";
 import { identityCurve } from "./np3.js";
 import { curveTable } from "./curve.js";
+import { neutralControl, sameField, resetKeys } from "./baseline.js";
+import { markButton, setChanged } from "./mark.js";
 
 const MAX_POINTS = 20;
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -33,6 +35,10 @@ const CSS = `
 .ce-pt { fill: #2c2c2c; stroke: var(--accent); stroke-width: 1.5; cursor: grab; }
 .ce-pt.sel { fill: var(--accent); }
 .ce-pt:focus { outline: none; stroke: var(--ok); }
+/* touch hit circles (r = 22 screen px, set from the SVG scale): they take pointer events only
+   while the last pointer was a finger or a pen, so the mouse keeps the exact desktop behavior */
+.ce-hit { fill: transparent; stroke: none; pointer-events: none; }
+.ce-svg.touch .ce-hit { pointer-events: all; }
 .ce-ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
 .ce-ctl label { display: flex; gap: 4px; align-items: center; color: var(--dim); }
 /* x/y — the same value inputs as the sliders: transparent until focused */
@@ -47,11 +53,17 @@ const CSS = `
 .ce-del:disabled { opacity: .35; cursor: not-allowed; }
 .ce-note { margin: 4px 0; }
 .ce-toggle { display: flex; gap: 6px; align-items: center; margin: 2px 0; user-select: none; }
+.ce-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 `;
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-export function createCurveEditor(slot, { state, onChange, panel, histogram = null }) {
+// getBaseline() — { control, fitted } (stage 6, web/lib/baseline.js): the curve tool has one
+// changed mark for the whole curve; activating it resets the curve to the baseline.
+// chartSlot (spec/ui-mobile-plan.md §2.9): when given (the mobile page), the SVG lives there
+// and the controls stay in `slot`.
+export function createCurveEditor(slot, { state, onChange, panel, histogram = null, chartSlot = null,
+                                          getBaseline = () => ({ control: neutralControl() }) }) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.append(style);
@@ -71,6 +83,10 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   labelTxt.dataset.i18n = L.toggle;
   labelTxt.textContent = t(L.toggle);
   label.append(toggle, labelTxt);
+  const head = document.createElement("div");
+  head.className = "ce-head";
+  const mark = markButton("Custom curve", () => resetCurve());
+  head.append(label, mark);
 
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${PAD * 2 + 255} ${PAD * 2 + 255}`);
@@ -84,8 +100,9 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   const histPath = el("path", { class: "ce-hist" });   // backdrop: the neutral luma histogram
   const idLine = el("line", { class: "ce-id", x1: PAD, y1: PAD + 255, x2: PAD + 255, y2: PAD });
   const curvePath = el("path", { class: "ce-curve" });
+  const gHit = el("g");   // invisible touch hit circles, behind the visible points
   const gPts = el("g");
-  svg.append(bg, histPath, idLine, curvePath, gPts);
+  svg.append(bg, histPath, idLine, curvePath, gHit, gPts);
 
   const ctl = document.createElement("div");
   ctl.className = "ce-ctl";
@@ -107,15 +124,18 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   const limitNote = document.createElement("div");
   limitNote.className = "hint ce-note";
   limitNote.dataset.i18n = L.limit;
+  limitNote.classList.add("ce-limit");
   limitNote.hidden = true;
   limitNote.textContent = t(L.limit);
 
-  slot.append(label, note, svg, ctl, limitNote);
+  if (chartSlot) { slot.append(head, note, ctl, limitNote); chartSlot.append(svg); }
+  else slot.append(head, note, svg, ctl, limitNote);
 
   // ---------- editor state ----------
   let points = [];       // working copy of control.curve.points
   let sel = -1;
   let circles = [];
+  let hits = [];
 
   // ---------- drawing ----------
   // The path always follows control.curve.raw: until the first edit it is the imported table
@@ -132,15 +152,33 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     curvePath.setAttribute("d", d);
   }
 
+  // the hit circle radius in SVG units: 22 screen px at the current scale of the chart
+  function hitR() {
+    const m = svg.getScreenCTM();
+    const s = m ? Math.hypot(m.a, m.b) : 0;
+    return s > 0.05 ? 22 / s : 22;
+  }
+
   function place(circle, i) {
     const [x, y] = points[i];
     circle.setAttribute("cx", PAD + x);
     circle.setAttribute("cy", PAD + 255 - y);
     circle.setAttribute("aria-label", t(L.pt, { n: i + 1 }));
+    hits[i]?.setAttribute("cx", PAD + x);
+    hits[i]?.setAttribute("cy", PAD + 255 - y);
   }
 
   function drawPoints() {
     gPts.replaceChildren();
+    gHit.replaceChildren();
+    const r = hitR();
+    hits = points.map((_, i) => {
+      const h = el("circle", { class: "ce-hit", r });
+      h.dataset.i = i;
+      h.addEventListener("pointerdown", onPointDown);
+      gHit.append(h);
+      return h;
+    });
     circles = points.map((_, i) => {
       const c = el("circle", { class: "ce-pt", r: 5, tabindex: 0 });
       c.dataset.i = i;
@@ -154,6 +192,12 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     });
     markSel();
   }
+  // the chart is scaled by CSS (a square over the photo on mobile.html): keep the hit circles at 22 screen px
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => { const r = hitR(); for (const h of hits) h.setAttribute("r", r); }).observe(svg);
+  // hit circles are active only for a finger or a pen; the last pointer type decides
+  svg.classList.toggle("touch", !!window.matchMedia?.("(pointer: coarse)").matches);
+  window.addEventListener("pointerdown", (ev) => svg.classList.toggle("touch", ev.pointerType !== "mouse"), true);
 
   function markSel() {
     circles.forEach((c, j) => c.classList.toggle("sel", j === sel));
@@ -209,6 +253,7 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
   function commit(live) {
     state.control.curve = curveTable(points);
     drawPath();
+    updateMark();
     onChange(live);
   }
 
@@ -222,7 +267,7 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     if (!state.control.curve) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const circle = ev.currentTarget;
+    const circle = ev.currentTarget;          // the visible point or its hit circle
     const i = Number(circle.dataset.i);
     select(i);
     // Synthetic events in tests do not provide an active pointer — fine:
@@ -233,7 +278,7 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
       if (!p) return;
       if (applyMove(i, p[0], p[1])) {
         commit(true);
-        place(circle, i);
+        place(circles[i], i);
         markSel();
       }
     };
@@ -296,9 +341,26 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     if (!p) return;
     addPoint(clamp(Math.round(p[0]), 0, 255), clamp(Math.round(p[1]), 0, 255));
   });
+  // Touch: a tap on an empty spot adds a point (the mouse keeps dblclick above). A tap is a pointerup of
+  // the same finger/pen within 10 px of its pointerdown; a pointerdown on a point never starts one.
+  let tap = null;
   svg.addEventListener("pointerdown", (ev) => {
+    // the histogram, the diagonal and the curve line lie over the background: for a finger they are
+    // all "an empty spot" (only a point or its hit circle is not)
+    const onPoint = ev.target.classList?.contains("ce-pt") || ev.target.classList?.contains("ce-hit");
     if (ev.target === svg || ev.target === bg) select(-1);
+    tap = ev.pointerType !== "mouse" && !onPoint ? { id: ev.pointerId, x: ev.clientX, y: ev.clientY } : null;
   });
+  svg.addEventListener("pointerup", (ev) => {
+    const t0 = tap;
+    tap = null;
+    if (!t0 || ev.pointerId !== t0.id || !state.control.curve) return;
+    if (Math.hypot(ev.clientX - t0.x, ev.clientY - t0.y) > 10) return;
+    const p = toTone(ev);
+    if (!p) return;
+    addPoint(clamp(Math.round(p[0]), 0, 255), clamp(Math.round(p[1]), 0, 255));
+  });
+  svg.addEventListener("pointercancel", () => { tap = null; });
 
   xIn.addEventListener("change", () => {
     if (sel <= 0 || sel >= points.length - 1) return;
@@ -346,6 +408,17 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     onChange(false);
   });
 
+  // ---------- the changed mark / reset to the baseline (stage 6) ----------
+  function updateMark() {
+    setChanged(head, !sameField(state.control, getBaseline().control, "curve"));
+  }
+  function resetCurve() {
+    if (!resetKeys(state.control, getBaseline().control, ["curve"]).size) return;
+    panel.refresh();          // the wrapped refresh also re-syncs this editor
+    sync();
+    onChange(false);
+  }
+
   /** Re-reads the editor from state.control (after an NP3 import / Reset / a new RAW). */
   function sync() {
     const on = state.control.curve !== null;
@@ -355,8 +428,10 @@ export function createCurveEditor(slot, { state, onChange, panel, histogram = nu
     sel = -1;
     redraw();
     drawHist();
+    updateMark();
   }
 
   sync();
-  return { sync, addPoint };   // addPoint — for tests
+  // addPoint — for tests; chart — the SVG (mobile.js, tests)
+  return { sync, addPoint, updateMark, resetCurve, chart: svg };
 }

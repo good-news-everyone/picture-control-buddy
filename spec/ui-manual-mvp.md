@@ -15,7 +15,7 @@ The second package of look edits (UI-2). Item statuses are in the log of [ui-man
 7. The **Details** and **Curve** groups swap places: the panel order is Profile, Basic, Curve, Details, Color Blender, Color Grading.
 8. By default only the **Profile** and **Basic** groups are open; the rest are collapsed.
 9. In the **Profile** group the Result name row is removed; the profile strength **does not affect the profile name** (the `-<percent>` suffix is no longer added either in the display or in the export file name); the **NP3 NAME** field is placed first inside the Profile group (before the Strength slider), no separate caption is shown at the field.
-10. At the bottom of the left panel (Files) — a hotkey legend: **space** (hold — view the neutral, before/after) and **Ctrl+Z** (undo the last change).
+10. At the bottom of the left panel (Files) — a hotkey legend: **space** (hold — view the neutral, before/after) and **Ctrl+Z** (undo the last change) and **Ctrl+Shift+Z / Ctrl+Y** (redo; added in stage 6 of [ui-plan.md](ui-plan.md)).
 11. **Double click on a slider** resets it to the default value (the tool's neutral; Strength — 100%).
 12. The numeric value to the right of a slider is an **editable input**: input applies on Enter/blur and is clamped to the slider range.
 
@@ -46,7 +46,7 @@ Base: the static application `web/index.html`, the existing `web/lib/raw.js`, `w
 - automatic fitting from RAW + JPEG, `match.py`, refitting and NX Studio;
 - loading a JPEG/TIFF target, alignment, dE, an error map and reports;
 - batch export of several strengths;
-- version history, a redo chain and session autosave (only Ctrl+Z — see "Edit history");
+- version history and session autosave (the redo chain was added later, in stage 6 of [ui-plan.md](ui-plan.md) — see "Edit history");
 - reading the active Picture Control from a NEF and substituting it into the editor (research: [nef-picture-control.md](nef-picture-control.md) — the data is in the file, the implementation decision is not made);
 - several RAWs or NP3s in one session and profile comparison;
 - writing to `out/`, building the SD card structure and any server-side computation;
@@ -146,7 +146,7 @@ Strength is a multiplier on top of the base profile, not a change of the panel v
 - **Ctrl+Z** reverts the last finished action with sliders, wheels, the curve and strength. A state snapshot (`control` + `strength`) is taken on every finished action: a slider `change`, a curve point/wheel release, the Reset button.
 - Up to **20 last states** are kept in the tab's sessionStorage (key `np3hist`) — the history survives a page reload within the tab.
 - **Changing the RAW or importing an NP3 resets the history** (the new base snapshot is the current profile).
-- There is no redo: a new action cuts off the undone steps. Ctrl+Z in the name text field is the native input undo, the profile history is not touched.
+- Redo (Ctrl+Shift+Z or Ctrl+Y; superseded the original "no redo" rule in stage 6 of [ui-plan.md](ui-plan.md)) re-applies undone steps; a new action still cuts off the undone steps. Ctrl+Z in the name text field is the native input undo, the profile history is not touched.
 
 ## Preview
 

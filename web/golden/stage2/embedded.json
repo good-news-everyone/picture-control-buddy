@@ -1,0 +1,178 @@
+{
+ "schemaVersion": 1,
+ "kind": "embeddedJpeg",
+ "file": "embedded.bin",
+ "generator": "web/make_stage2_golden.py",
+ "placed": [
+  {
+   "case": "real JPEG 160x120",
+   "offset": 257
+  },
+  {
+   "case": "real JPEG 320x240 (the expected best)",
+   "offset": 11904
+  },
+  {
+   "case": "SOF15 16-bit huge frame (the sensor-data false positive)",
+   "offset": 55124
+  },
+  {
+   "case": "SOF0 8-bit 3 layers 30000x30000 (decompression bomb)",
+   "offset": 55417
+  },
+  {
+   "case": "SOF3 16-bit lossless tile (a DNG tile)",
+   "offset": 55782
+  },
+  {
+   "case": "SOF0 8-bit 2 layers wide",
+   "offset": 56075
+  },
+  {
+   "case": "broken DQT before a wide SOF",
+   "offset": 56368
+  },
+  {
+   "case": "unknown marker FF01 right after SOI",
+   "offset": 56689
+  },
+  {
+   "case": "padding FFFF and junk bytes, 8-bit 1 layer 300x2 (opens)",
+   "offset": 56987
+  },
+  {
+   "case": "SOS before any SOF (no mode: 'not identified')",
+   "offset": 57281
+  },
+  {
+   "case": "SOF0 8-bit 3 layers 8000x0 (zero height: 'not identified')",
+   "offset": 57627
+  },
+  {
+   "case": "SOF0 8-bit 3 layers wide, then EOF-truncated DQT",
+   "offset": 57923
+  }
+ ],
+ "candidates": [
+  {
+   "offset": 257,
+   "size": [
+    160,
+    120
+   ]
+  },
+  {
+   "offset": 11904,
+   "size": [
+    320,
+    240
+   ]
+  },
+  {
+   "offset": 55124,
+   "size": null
+  },
+  {
+   "offset": 55417,
+   "size": null
+  },
+  {
+   "offset": 55782,
+   "size": null
+  },
+  {
+   "offset": 56075,
+   "size": null
+  },
+  {
+   "offset": 56368,
+   "size": null
+  },
+  {
+   "offset": 56689,
+   "size": null
+  },
+  {
+   "offset": 56987,
+   "size": [
+    300,
+    2
+   ]
+  },
+  {
+   "offset": 57281,
+   "size": null
+  },
+  {
+   "offset": 57627,
+   "size": null
+  },
+  {
+   "offset": 57923,
+   "size": null
+  }
+ ],
+ "best": {
+  "offset": 11904,
+  "size": [
+   320,
+   240
+  ]
+ },
+ "real": [
+  {
+   "path": "_local/_cloud_transfer/r_lr_test_DSC_6550.NEF",
+   "bytes": 28717119,
+   "offset": 1389056,
+   "size": [
+    6048,
+    4032
+   ]
+  },
+  {
+   "path": "_local/_cloud_transfer/r_check_DSC_6132.NEF",
+   "bytes": 29368905,
+   "offset": 1432064,
+   "size": [
+    6048,
+    4032
+   ]
+  },
+  {
+   "path": "_local/test1/DSC_5584.NEF",
+   "bytes": 28800317,
+   "offset": 1268736,
+   "size": [
+    6048,
+    4032
+   ]
+  },
+  {
+   "path": "_local/test2/SKL_3024.dng",
+   "bytes": 45194904,
+   "offset": 449070,
+   "size": [
+    1024,
+    683
+   ]
+  },
+  {
+   "path": "_local/test2/SKL_3000.dng",
+   "bytes": 39702734,
+   "offset": 447584,
+   "size": [
+    1024,
+    683
+   ]
+  },
+  {
+   "path": "_local/test2/SKL_3024.NEF",
+   "bytes": 32823296,
+   "offset": 1191424,
+   "size": [
+    8256,
+    5504
+   ]
+  }
+ ]
+}

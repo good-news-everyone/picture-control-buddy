@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>decodeTarget browser check</title>
+</head>
+<body>
+<script type="module">
+// Level 1c harness (spec/web-tests.md): decodeTarget (web/lib/target.js) in a real browser
+// against the PIL reference grid of web/golden/target/<case>.json (spec/web-schemas.md §7.1).
+// Launched by web/test.mjs; metrics land in window.__result, window.__done = true at the end.
+// There is no interface.
+import { decodeTarget } from "./lib/target.js";
+
+const cases = new URLSearchParams(location.search).get("cases").split(",");
+const result = [];
+window.__result = result;
+for (const c of cases) {
+  const j = await (await fetch(`golden/target/${c}.json`)).json();
+  const bytes = await (await fetch(`golden/target/${j.file}`)).arrayBuffer();
+  try {
+    const d = await decodeTarget(new File([bytes], j.file));
+    const grid = new Float32Array(await (await fetch(`golden/target/${j.ref.file}`)).arrayBuffer());
+    let gi = 0, max = 0;
+    for (const gy of j.ref.gridH)
+      for (const gx of j.ref.gridW)
+        for (let ch = 0; ch < 3; ch++, gi++) {
+          const diff = Math.abs(d.rgb[(gy * d.width + gx) * 3 + ch] - grid[gi]) * 255;
+          if (diff > max) max = diff;
+        }
+    result.push({ key: c, w: d.width, h: d.height, max });
+  } catch (e) {
+    result.push({ key: c, error: String(e && e.message || e) });
+  }
+}
+window.__done = true;
+</script>
+</body>
+</html>

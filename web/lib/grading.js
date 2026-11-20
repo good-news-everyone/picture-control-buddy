@@ -10,6 +10,9 @@
 // The Point Color tab is not implemented and not offered.
 import { t } from "./i18n.js";
 import { ZONES } from "./np3.js";
+import { neutralControl, zoneKeys, changedKeys, resetKeys } from "./baseline.js";
+import { markButton, resetButton, setChanged } from "./mark.js";
+import { onDoubleTap } from "./touch.js";
 
 const ZLABEL = { shadows: "Shadows", midtone: "Midtones", highlights: "Highlights" };
 // gradient and preview lightness by zone (shadows darker, highlights lighter)
@@ -36,6 +39,7 @@ const CSS = `
   border-radius: 4px; color: var(--text); padding: 2px 4px; font: inherit;
   font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
 .gr-divider { border-top: 1px solid var(--line); margin: 12px 0 8px; }
+.gr-zreset { display: flex; justify-content: flex-end; margin: 0 0 2px; }
 `;
 
 const hsl = (h, s, l) => `hsl(${((h % 360) + 360) % 360},${s}%,${l}%)`;
@@ -55,7 +59,8 @@ function el(tag, cls, text) {
 }
 
 /** A slider as in panels.js; returns {sync, box, input}. Double click — reset
- *  to opts.def; the numeric value is an editable input. */
+ *  to opts.base() (the baseline value, stage 6); the changed mark shows while the value
+ *  differs from it and resets it too; the numeric value is an editable input. */
 function slider(parent, label, min, max, step, get, set, opts = {}) {
   const input = document.createElement("input");
   input.type = "range";
@@ -66,32 +71,42 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
   }
   const val = el("input", "val");
   val.type = "number";
+  val.setAttribute("enterkeyhint", "done");
   val.min = min; val.max = max; val.step = step;
   const top = el("div", "top");
   const lbl = el("span", "lbl", t(label));
   lbl.dataset.i18n = label;
-  top.append(lbl, val);
+  let lastReset = -1e9;     // a double tap may be followed by a browser dblclick: one reset only
+  const resetTo = () => {
+    if (!opts.base || performance.now() - lastReset < 350) return;
+    lastReset = performance.now();
+    input.value = opts.base();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  top.append(lbl);
+  if (opts.base) top.append(markButton(label, resetTo));
+  top.append(val);
   const box = el("div", "ctl");
   box.append(top, input);
+  const mark = () => { if (opts.base) setChanged(box, Math.abs(get() - opts.base()) > 1e-9); };
   const paint = () => input.style.setProperty("--fill",
     `${(100 * (parseFloat(input.value) - min) / (max - min)).toFixed(1)}%`);
   const show = (v) => { val.value = String(v); };
-  const sync = () => { const v = get(); input.value = v; show(v); paint(); };
+  const sync = () => { const v = get(); input.value = v; show(v); paint(); mark(); };
   sync();
   input.addEventListener("input", () => {
     set(parseFloat(input.value));
     opts.syncPeers?.();          // the same zone channel in the other mode
     show(get());
     paint();
+    mark();
     opts.onLive?.();
   });
   input.addEventListener("change", () => opts.onDone?.());
-  input.addEventListener("dblclick", () => {
-    if (opts.def == null) return;
-    input.value = opts.def;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  // double click (mouse) and double tap (touch): one reset, one history snapshot (see panels.js)
+  input.addEventListener("dblclick", resetTo);
+  onDoubleTap(box, resetTo);
   val.addEventListener("change", () => {
     let v = parseFloat(val.value);
     if (Number.isNaN(v)) { show(get()); return; }
@@ -101,6 +116,7 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
     opts.syncPeers?.();
     show(get());
     paint();
+    mark();
     opts.onDone?.();
   });
   parent.append(box);
@@ -110,8 +126,13 @@ function slider(parent, label, min, max, step, get, set, opts = {}) {
 /**
  * slot — #grading-slot in the "Color Grading" group; state/onChange — from app.js.
  * sync() re-reads the values from state.control (after an NP3 import / Reset).
+ * getBaseline() — { control } (stage 6): resets and changed marks compare against it; a zone
+ * button carries the mark while any of the zone's three fields differs, "Reset zone" resets
+ * the selected zone (Blending/Balance have their own slider marks).
  */
-export function createGradingView(slot, { state, onChange, panel }) {
+export function createGradingView(slot, { state, onChange, panel,
+                                          getBaseline = () => ({ control: neutralControl() }) }) {
+  const B = () => getBaseline().control;
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.append(style);
@@ -133,6 +154,7 @@ export function createGradingView(slot, { state, onChange, panel }) {
     }
     for (const p of dotPlace) p();
     updatePreview();
+    updateZoneMarks();
   }
 
   // --- HSL / Color toggle group (first, ref spec/toggle) ---
@@ -165,17 +187,17 @@ export function createGradingView(slot, { state, onChange, panel }) {
     const l = ZONE_L[zone];
     syncs.push(slider(box, "Hue", 0, 359, 1,
       () => state.control.grade[zone][0], (v) => { state.control.grade[zone][0] = v; },
-      { track: hueTrack(l), def: 0, syncPeers: syncAll,
+      { track: hueTrack(l), base: () => B().grade[zone][0], syncPeers: syncAll,
         onLive: () => onChange(true), onDone: () => onChange(false) }).sync);
     const sat = slider(box, "Saturation", -100, 100, 1,
       () => state.control.grade[zone][1], (v) => { state.control.grade[zone][1] = v; },
-      { track: satTrack(l, 0), def: 0, syncPeers: syncAll,
+      { track: satTrack(l, 0), base: () => B().grade[zone][1], syncPeers: syncAll,
         onLive: () => onChange(true), onDone: () => onChange(false) });
     syncs.push(sat.sync);
     satInputs[zone] = sat.input;
     const lum = slider(box, "Luminance", -100, 100, 1,
       () => state.control.grade[zone][2], (v) => { state.control.grade[zone][2] = v; },
-      { track: lumTrack(0), def: 0, syncPeers: syncAll,
+      { track: lumTrack(0), base: () => B().grade[zone][2], syncPeers: syncAll,
         onLive: () => onChange(true), onDone: () => onChange(false) });
     syncs.push(lum.sync);
     lumInputs[zone] = lum.input;
@@ -216,7 +238,7 @@ export function createGradingView(slot, { state, onChange, panel }) {
     w.append(nums);
     const lum = slider(w, "Luminance", -100, 100, 1,
       () => state.control.grade[zone][2], (v) => { state.control.grade[zone][2] = v; },
-      { track: lumTrack(0), def: 0, syncPeers: syncAll,
+      { track: lumTrack(0), base: () => B().grade[zone][2], syncPeers: syncAll,
         onLive: () => onChange(true), onDone: () => onChange(false) });
     syncs.push(lum.sync);
     lumInputs["wheel_" + zone] = lum.input;
@@ -285,12 +307,17 @@ export function createGradingView(slot, { state, onChange, panel }) {
   bodyShared.append(el("div", "gr-divider"));
   syncs.push(slider(bodyShared, "Blending", 0, 100, 1,
     () => state.control.blending, (v) => { state.control.blending = v; },
-    { def: 50, syncPeers: syncAll, onLive: () => onChange(true), onDone: () => onChange(false) }).sync);
+    { base: () => B().blending, syncPeers: syncAll, onLive: () => onChange(true), onDone: () => onChange(false) }).sync);
   syncs.push(slider(bodyShared, "Balance", -100, 100, 1,
     () => state.control.balance, (v) => { state.control.balance = v; },
-    { def: 0, syncPeers: syncAll, onLive: () => onChange(true), onDone: () => onChange(false) }).sync);
+    { base: () => B().balance, syncPeers: syncAll, onLive: () => onChange(true), onDone: () => onChange(false) }).sync);
 
-  slot.append(modeRow, adjustRow, bodyHsl, bodyColor, bodyShared);
+  // the selected zone's reset (outside .gr-adjust: that row holds only the zone buttons)
+  const zoneResetRow = el("div", "gr-zreset");
+  const zoneReset = resetButton("Reset zone", () => resetZone(selZone));
+  zoneResetRow.append(zoneReset);
+
+  slot.append(modeRow, adjustRow, zoneResetRow, bodyHsl, bodyColor, bodyShared);
 
   // --- view state (does not land in NP3) ---
   for (const zone of ZONES) {
@@ -308,6 +335,22 @@ export function createGradingView(slot, { state, onChange, panel }) {
     preview.setAttribute("aria-label", `${t("Color preview")}: Hue ${z[0]}, Saturation ${sat}`);
   }
 
+  // ---------- changed marks / reset to the baseline (stage 6) ----------
+  function updateZoneMarks() {
+    if (!zoneBtns[selZone]) return;          // during construction
+    const diff = changedKeys(state.control, B(), ZONES.flatMap(zoneKeys));
+    for (const z of ZONES) {
+      const on = zoneKeys(z).some((k) => diff.has(k));
+      setChanged(zoneBtns[z], on);
+      if (z === selZone) zoneReset.disabled = !on;
+    }
+  }
+  function resetZone(zone) {
+    if (!resetKeys(state.control, B(), zoneKeys(zone)).size) return;
+    syncAll();
+    onChange(false);
+  }
+
   function selectZone(zone) {
     selZone = zone;
     for (const z of ZONES) {
@@ -316,6 +359,7 @@ export function createGradingView(slot, { state, onChange, panel }) {
       wheelZone[z].hidden = z !== zone;
     }
     updatePreview();
+    updateZoneMarks();
   }
 
   function setMode(next) {
@@ -333,5 +377,5 @@ export function createGradingView(slot, { state, onChange, panel }) {
   function sync() { syncAll(); }
 
   sync();
-  return { sync, setMode, selectZone };
+  return { sync, setMode, selectZone, resetZone };
 }

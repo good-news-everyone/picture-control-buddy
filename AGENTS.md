@@ -26,7 +26,11 @@ WebGL) that applies and exports NP3 profiles.
   `strength.py`, `make_pack.py` — development/rendering and packaging tools
 - `sweep.py` — exports/measures NX Studio response sweeps (training data prep)
 - `web/` — browser app (`lib/` JS pipeline, `raw/` Rust→WASM decoder,
-  `model/` exported weights, `golden/` reference fixtures for `test.mjs`)
+  `model/` exported weights, `golden/` reference fixtures for `test.mjs`). Pages
+  (`spec/ui-pages.md`): `index.html` (landing), `picture-control-jpg-fit.html` (fitting
+  wizard, `lib/fit-app.js`), `picture-control-editor.html` and
+  `picture-control-editor-mobile.html` (profile editor, `lib/editor-app.js`); both entries
+  build on `lib/editor-core.js`
 - `data/` — committed model weights (`*_model.npz`) and small fixtures
 - `spec/` — design docs and test rules
 

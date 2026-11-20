@@ -74,7 +74,7 @@ Spatial filters, they cannot be computed per pixel.
 
 The base exists: `web/bench.html` loads its own NEF/DNG and renders the neutral in the browser (WebAssembly + WebGL2); `ui.py` remains an internal Python viewer. The user interface is static, all computation runs in the browser.
 
-**2026-11-17, the manual-adjustment MVP is done:** `web/index.html` per `spec/ui-manual-mvp.md` — RAW loading in a Worker, NP3 import/export, all sliders, an SVG curve editor, strength 0-150%, before/after. Reference check: `node web/test.mjs`, level 8 is the end-to-end UI of the real page (plan: `spec/ui-manual-mvp-plan.md`). Not done from this milestone: auto-fitting from the interface and reports (that is the full-product scenario of `spec/ui.md`).
+**2026-11-17, the manual-adjustment MVP is done:** `web/index.html` (since 2026-11-20 `web/picture-control-editor.html`, spec/ui-pages.md) per `spec/ui-manual-mvp.md` — RAW loading in a Worker, NP3 import/export, all sliders, an SVG curve editor, strength 0-150%, before/after. Reference check: `node web/test.mjs`, level 8 is the end-to-end UI of the real page (plan: `spec/ui-manual-mvp-plan.md`). Not done from this milestone: auto-fitting from the interface and reports (that is the full-product scenario of `spec/ui.md`).
 
 - After fitting: our render next to the user's JPEG, a curtain, dE over the frame and an error map.
 - Sliders of all NP3 tools with a render recomputation: the profile is baked into a color table in a fraction of a second, a 1600 px frame computes in about a second.

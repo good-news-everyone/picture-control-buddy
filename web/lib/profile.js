@@ -407,10 +407,14 @@ export class Pixels {
     return this.m.tools ? npInterp(s, this.m.sat_levels, this.m.tools.sat) : 1.0;
   }
 
-  /** The result before the curve: the blender in CIELab (hue, chroma, lightness). Port of before_curve. */
-  beforeCurve(p) {
+  /**
+   * The result before the curve: the blender in CIELab (hue, chroma, lightness). Port of before_curve.
+   * toned — an optional precomputed this.toned(p) (the fit's staged Jacobian reuses it when only
+   * the blender/curve parameters move; the arrays are read, never written).
+   */
+  beforeCurve(p, toned = this.toned(p)) {
     const m = this.m, n = this.n;
-    const [rgb, inputs] = this.toned(p);
+    const [rgb, inputs] = toned;
     const { share, polar: [L0, C0, h0], flat } = inputs;
     const d = new Float64Array(n * 3);
     let any = false;
@@ -465,9 +469,12 @@ export class Pixels {
     return out;
   }
 
-  /** The full pass: grading -> Saturation -> blender -> curve, clipped to 0..1. */
-  apply(p) {
-    const out = applyCurveRows(this.beforeCurve(p), this.toneCurveOf(p), this.m.luma);
+  /**
+   * The full pass: grading -> Saturation -> blender -> curve, clipped to 0..1.
+   * before — an optional precomputed this.beforeCurve(p) (the staged Jacobian, see beforeCurve).
+   */
+  apply(p, before = this.beforeCurve(p)) {
+    const out = applyCurveRows(before, this.toneCurveOf(p), this.m.luma);
     for (let i = 0; i < out.length; i++) out[i] = clamp(out[i], 0, 1);
     return out;
   }

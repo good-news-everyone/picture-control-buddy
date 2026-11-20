@@ -124,6 +124,60 @@ export function labToSrgb(lab, out) {
   return out;
 }
 
+/**
+ * Matrices W (n, 9, row-major 3x3): |W.(lab_predicted - lab)| ~ dE2000 for a small difference,
+ * computed at the target color lab. Port of color.de2000_weights: lightness/chroma/hue rows
+ * with the SL/SC/SH denominators and the RT rotation for blues. kc < 1 is stricter on chroma;
+ * flatL drops SL (strict in shadows as in dE76).
+ */
+export function de2000Weights(lab, kc = 1.0, flatL = false) {
+  const n = lab.length / 3;
+  const out = new Float64Array(n * 9);
+  const P25_7 = 25 ** 7;
+  for (let i = 0; i < n; i++) {
+    const L = lab[i * 3], a = lab[i * 3 + 1], b = lab[i * 3 + 2];
+    const C0 = Math.hypot(a, b);
+    const C07 = C0 ** 7;
+    const G = 0.5 * (1 - Math.sqrt(C07 / (C07 + P25_7)));
+    const ap = (1 + G) * a;
+    const Cp = Math.hypot(ap, b);
+    const h = (Math.atan2(b, ap) * 180 / Math.PI % 360 + 360) % 360;
+    const T = 1 - 0.17 * Math.cos((h - 30) * Math.PI / 180) + 0.24 * Math.cos(2 * h * Math.PI / 180)
+      + 0.32 * Math.cos((3 * h + 6) * Math.PI / 180) - 0.20 * Math.cos((4 * h - 63) * Math.PI / 180);
+    const Sl = 1 + 0.015 * (L - 50) ** 2 / Math.sqrt(20 + (L - 50) ** 2);
+    const Sc = kc * (1 + 0.045 * Cp);
+    const Sh = 1 + 0.015 * Cp * T;
+    const Rt = -Math.sin((60 * Math.exp(-(((h - 275) / 25) ** 2))) * Math.PI / 180)
+      * 2 * Math.sqrt(Cp ** 7 / (Cp ** 7 + P25_7));
+    const grey = Cp < 1e-3;
+    const u0 = grey ? 1.0 : ap / Cp, u1 = grey ? 0.0 : b / Cp;
+    const r0 = u0 * (1 + G) / Sc, r1 = u1 / Sc;          // radial: (Da, Db) -> dC'/SC
+    const t0 = -u1 * (1 + G) / Sh, t1 = u0 / Sh;         // tangential: -> dH'/SH
+    const b9 = i * 9;
+    out[b9] = flatL ? 1 : 1 / Sl;
+    out[b9 + 4] = r0 + (Rt / 2) * t0;                    // the square of the sum yields the RT.dC.dH term
+    out[b9 + 5] = r1 + (Rt / 2) * t1;
+    const s = Math.sqrt(Math.max(1 - Rt ** 2 / 4, 0));
+    out[b9 + 7] = s * t0;
+    out[b9 + 8] = s * t1;
+  }
+  return out;
+}
+
+/** W.d per pixel for W (n, 9) row-major and d (n, 3). Port of color.weighted. */
+export function weightedRows(W, d) {
+  const n = d.length / 3;
+  const out = new Float64Array(d.length);
+  for (let i = 0; i < n; i++) {
+    const b9 = i * 9, b3 = i * 3;
+    const d0 = d[b3], d1 = d[b3 + 1], d2 = d[b3 + 2];
+    out[b3] = W[b9] * d0 + W[b9 + 1] * d1 + W[b9 + 2] * d2;
+    out[b3 + 1] = W[b9 + 3] * d0 + W[b9 + 4] * d1 + W[b9 + 5] * d2;
+    out[b3 + 2] = W[b9 + 6] * d0 + W[b9 + 7] * d1 + W[b9 + 8] * d2;
+  }
+  return out;
+}
+
 /** CIEDE2000 between LAB sets (n, 3). Port of color.de2000 (Sharma et al., 2005). */
 export function de2000(lab1, lab2, out) {
   const n = lab1.length / 3;

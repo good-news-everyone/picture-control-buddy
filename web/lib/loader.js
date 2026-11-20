@@ -6,10 +6,10 @@
 // interrupted operations finish silently. An error of a new file does not touch the previous
 // frame — the caller handles it (the UI keeps the old state).
 //
-// onUpdate events:
-//   { type: "busy",  gen, name }                                  — decoding started
-//   { type: "ready", gen, name, image: {w, h, rgb}, info, warn }  — warn: the camera is not a Z f
-//   { type: "error", gen, name, code, detail }                    — code: raw.js / wasm_failed
+// onUpdate events (every event carries the caller's `tag` from open(), null by default):
+//   { type: "busy",  gen, name, tag }                                  — decoding started
+//   { type: "ready", gen, name, image: {w, h, rgb}, info, warn, tag }  — warn: the camera is not a Z f
+//   { type: "error", gen, name, code, detail, tag }                    — code: raw.js / wasm_failed
 
 /** A warning for a camera other than the Nikon Z f (the neutral model was trained on it). */
 export function cameraWarn(info) {
@@ -34,20 +34,20 @@ export function createRawLoader({ worker: workerUrl = "lib/raw-worker.js", onUpd
     pending.delete(id);
     if (error) {
       if (p.gen === gen) {
-        onUpdate && onUpdate({ type: "error", gen: p.gen, name: p.name, code: error.code, detail: error.detail });
+        onUpdate && onUpdate({ type: "error", gen: p.gen, name: p.name, code: error.code, detail: error.detail, tag: p.tag });
         p.resolve(null);
       } else p.resolve(null);
       return;
     }
     if (p.gen !== gen) { p.resolve(null); return; }   // stale: it finished, we do not update the UI
     const image = { w, h, rgb };
-    onUpdate && onUpdate({ type: "ready", gen: p.gen, name: p.name, image, info, warn: cameraWarn(info) });
+    onUpdate && onUpdate({ type: "ready", gen: p.gen, name: p.name, image, info, warn: cameraWarn(info), tag: p.tag });
     p.resolve(image);
   };
   worker.onerror = (e) => {
     // the Worker itself failed: reject everything pending
     for (const [, p] of pending) {
-      if (p.gen === gen) onUpdate && onUpdate({ type: "error", gen: p.gen, name: p.name, code: "decode_failed", detail: e.message || "worker" });
+      if (p.gen === gen) onUpdate && onUpdate({ type: "error", gen: p.gen, name: p.name, code: "decode_failed", detail: e.message || "worker", tag: p.tag });
       p.resolve(null);
     }
     pending.clear();
@@ -56,17 +56,19 @@ export function createRawLoader({ worker: workerUrl = "lib/raw-worker.js", onUpd
   /**
    * source: File/Blob or Uint8Array; name — for Uint8Array.
    * Every call makes the previous results stale. Size — long, 0 — half the sensor.
+   * tag — an arbitrary caller token, echoed back in every onUpdate event for this open()
+   * (app.js routes pair-assembly decodes apart from editor loads by it).
    */
-  async function open(source, { name = null, long = 1600 } = {}) {
+  async function open(source, { name = null, long = 1600, tag = null } = {}) {
     gen++;
     const g = gen;
     name = name ?? (source instanceof Blob ? source.name : "buffer");
-    onUpdate && onUpdate({ type: "busy", gen: g, name });
+    onUpdate && onUpdate({ type: "busy", gen: g, name, tag });
     const bytes = source instanceof Blob ? new Uint8Array(await source.arrayBuffer()) : source;
     if (g !== gen) return null;   // stale by the time the read finished: do not send to the Worker (plan §5, P3)
     const id = ++seq;
     return await new Promise((resolve) => {
-      pending.set(id, { gen: g, name, resolve });
+      pending.set(id, { gen: g, name, resolve, tag });
       worker.postMessage({ id, bytes, long }, [bytes.buffer]);
     });
   }

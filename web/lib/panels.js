@@ -10,6 +10,9 @@
 // are replaced with Saturation/Luminance (the internal NP3 names do not change).
 import { t } from "./i18n.js";
 import { newProfile, COLORS, ZONES } from "./np3.js";
+import { neutralControl, GROUP_KEYS, ALL_KEYS, changedKeys, resetKeys } from "./baseline.js";
+import { markButton, resetButton, setChanged } from "./mark.js";
+import { onDoubleTap } from "./touch.js";
 
 const BASIC = [
   ["saturation", "Saturation"],
@@ -52,14 +55,25 @@ function h(tag, attrs = {}, ...kids) {
  * (always pinned to the bottom of the panel); state — the contract state (the panel writes state.control);
  * onChange(live): live=true — continuous movement (the render is throttled via rAF in app.js),
  * live=false — the action is finished, the final frame.
+ * getBaseline() — { control, fitted } (stage 6, web/lib/baseline.js): the control every
+ * reset returns to and the changed-field marks compare against — the selected fit version
+ * in the fitting flow (fitted=true), the neutral defaults in standalone editing.
  */
-export function createPanel(roots, { state, onChange, onNameValid }) {
+export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid,
+                                     getBaseline = () => ({ control: neutralControl(), fitted: false }) }) {
   const scroll = roots.scroll;
   const syncs = [];        // re-reading each field from state.control (for refresh)
+  const marks = [];        // per-slider mark refreshers
   const rowsByKey = new Map();
+  const groupUi = new Map();   // group key -> { details, reset }
+  const base = () => getBaseline().control;
+  // every panel edit also refreshes the group marks (cheap: ~45 field comparisons)
+  const onChange = (live) => { updateGroupMarks(); onChangeOuter(live); };
 
   // A slider bound to a getter/setter in state.control.
-  // opts.def — the default value: a double click on the slider resets to it.
+  // opts.base — the baseline value (a function): a double click or the changed mark resets
+  // to it, the mark shows while the value differs (stage 6); opts.def — a fixed default for
+  // a slider that is not a profile field (Strength).
   // The numeric value on the right is an editable input: input applies on Enter/blur.
   function slider(parent, label, min, max, step, get, set, key, opts = {}) {
     const input = h("input", { type: "range", min, max, step });
@@ -67,28 +81,41 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
       input.classList.add("grad");
       input.style.setProperty("--track", opts.track);
     }
-    const val = h("input", { type: "number", class: "val", min, max, step });
-    const box = h("div", { class: "ctl" },
-      h("div", { class: "top" }, h("span", { class: "lbl", "data-i18n": label }, t(label)), val), input);
+    // enterkeyhint: the on-screen keyboard shows "Done"; type=number without inputmode keeps the
+    // minus sign on the iOS keyboard (spec/ui-mobile.md "Number field")
+    const val = h("input", { type: "number", class: "val", min, max, step, enterkeyhint: "done" });
+    // a reset as one finished action; some browsers fire dblclick after a double tap too, so a
+    // second reset within 350 ms is ignored (it would push another history snapshot)
+    let lastReset = -1e9;
+    const resetTo = () => {
+      const d = opts.base ? opts.base() : opts.def;
+      if (d == null || performance.now() - lastReset < 350) return;
+      lastReset = performance.now();
+      input.value = d;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const markBtn = opts.base ? markButton(label, resetTo) : null;
+    const top = h("div", { class: "top" }, h("span", { class: "lbl", "data-i18n": label }, t(label)));
+    if (markBtn) top.append(markBtn);
+    top.append(val);
+    const box = h("div", { class: "ctl" }, top, input);
+    const mark = () => { if (opts.base) setChanged(box, Math.abs(get() - opts.base()) > 1e-9); };
     // Track fill up to the value: --fill in percent (styles — index.html),
     // the color/gradient can be overridden per input via --fill-color.
     const paint = () => input.style.setProperty("--fill",
       `${(100 * (parseFloat(input.value) - min) / (max - min)).toFixed(1)}%`);
     const show = (v) => { val.value = String(v); };
     const apply = (v, live) => {
-      set(v); show(get()); paint(); onChange(live);
+      set(v); show(get()); paint(); mark(); onChange(live);
     };
-    const sync = () => { const v = get(); input.value = v; show(v); paint(); };
+    const sync = () => { const v = get(); input.value = v; show(v); paint(); mark(); };
     sync();
     input.addEventListener("input", () => apply(parseFloat(input.value), true));
     input.addEventListener("change", () => onChange(false));
-    // double click — reset to the default value
-    input.addEventListener("dblclick", () => {
-      if (opts.def == null) return;
-      input.value = opts.def;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    // double click (mouse) and double tap (touch) — reset to the baseline (or the fixed default)
+    input.addEventListener("dblclick", resetTo);
+    onDoubleTap(box, resetTo);
     // manual number input: clamp to the range, apply as a finished action
     val.addEventListener("change", () => {
       let v = parseFloat(val.value);
@@ -98,18 +125,42 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
       apply(v, false);
     });
     syncs.push(sync);
+    marks.push(mark);
     if (key) { box.dataset.key = key; rowsByKey.set(key, box); }
     parent.append(box);
     return box;
   }
 
   // ---------- collapsible group ----------
+  // A group with profile fields (GROUP_KEYS) gets a reset control in its header (to the
+  // baseline) and a changed mark (class chg on the details) while any of its fields differ.
   function group(label, key, open = true) {
     const body = h("div");
-    const d = h("details", { class: "grp", "data-group": key }, h("summary", { "data-i18n": label }, t(label)), body);
+    const lbl = h("span", { "data-i18n": label }, t(label));
+    const summary = h("summary", {}, lbl);
+    const d = h("details", { class: "grp", "data-group": key }, summary, body);
+    if (GROUP_KEYS[key]) {
+      const reset = resetButton("Reset group", () => resetGroup(key));
+      summary.append(reset);
+      groupUi.set(key, { details: d, reset });
+    }
     if (open) d.open = true;
     scroll.append(d);
     return body;
+  }
+
+  /** Resets one group's fields to the baseline (a finished action: history + final render). */
+  function resetGroup(key) {
+    const changed = resetKeys(state.control, base(), GROUP_KEYS[key]);
+    if (!changed.size) return;
+    api.refresh();          // in app.js refresh is wrapped: it also syncs the editors
+    onChange(false);
+  }
+
+  function updateGroupMarks() {
+    const diff = changedKeys(state.control, base());
+    for (const [key, { details, reset }] of groupUi)
+      setChanged(details, GROUP_KEYS[key].some((k) => diff.has(k)), reset);
   }
 
   // ---------- 1. Profile (the very top): name, strength, clipping ----------
@@ -117,7 +168,8 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
   const gStrength = group("Profile", "strength");
 
   // --- NP3 name (the first field) ---
-  const nameInput = h("input", { type: "text", maxlength: 19, spellcheck: "false", value: state.control.name });
+  const nameInput = h("input", { type: "text", id: "p-name", maxlength: 19, spellcheck: "false",
+    autocapitalize: "off", autocomplete: "off", autocorrect: "off", enterkeyhint: "done", value: state.control.name });
   const nameErr = h("div", { class: "bad", id: "p-name-err", hidden: "" },
     t("Name must be 1–19 ASCII characters"));
   function syncName() { nameInput.value = state.control.name; checkName(); }
@@ -158,14 +210,14 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
   for (const [field, label] of BASIC)
     slider(gBasic, label, -100, 100, 1,
       () => state.control[field], (v) => { state.control[field] = v; }, field,
-      { def: 0, ...(field === "saturation" ? { track: rainbowTrack() } : {}) });   // UI-2: grey -> rainbow as in LR
+      { base: () => base()[field], ...(field === "saturation" ? { track: rainbowTrack() } : {}) });   // UI-2: grey -> rainbow as in LR
   // CD: when the curve is on, the tonal sliders are locked by the curve editor;
   // the explanation lives only at the curve editor (next to the checkbox)
   function setTonalLocked(locked) {
     for (const [key, el] of rowsByKey) {
       if (!TONAL.has(key)) continue;
-      // a row has two inputs: the slider and the numeric value — lock both
-      for (const inp of el.querySelectorAll("input")) inp.disabled = locked;
+      // a row has two inputs: the slider and the numeric value — lock both (and its mark)
+      for (const inp of el.querySelectorAll("input, button.mark")) inp.disabled = locked;
     }
   }
 
@@ -176,9 +228,10 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
 
   // ---------- 4. Details ----------
   const gDetail = group("Details", "details", false);
-  for (const [field, label, min, max, def] of DETAIL)
+  for (const [field, label, min, max] of DETAIL)
     slider(gDetail, label, min, max, 0.25,
-      () => state.control[field], (v) => { state.control[field] = v; }, field, { def });
+      () => state.control[field], (v) => { state.control[field] = v; }, field,
+      { base: () => base()[field] });
 
   // ---------- 5. Color Blender (LR style — blending.js, UI-2 package) ----------
   const gBlender = group("Color Blender", "blender", false);
@@ -221,9 +274,14 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
   }
 
   // ---------- Reset (the very bottom of the panel) ----------
-  // Neutral — the np3.Control default values, as in a new profile.
+  // Fitting flow (stage 6): every profile field returns to the selected fit version; the
+  // strength (a session setting shared with Compare, not a field of the version) is kept.
+  // Standalone editing: neutral — the np3.Control default values, as in a new profile,
+  // strength 100% (the manual-MVP behavior).
   // The name and comment are not edited by sliders and are not subject to reset.
   function resetAll() {
+    const b = getBaseline();
+    if (b.fitted) { resetKeys(state.control, b.control, ALL_KEYS); return; }
     const fresh = newProfile();
     for (const c of COLORS) fresh.blender[c] = [0, 0, 0];
     for (const z of ZONES) fresh.grade[z] = [0, 0, 0];
@@ -244,7 +302,10 @@ export function createPanel(roots, { state, onChange, onNameValid }) {
 
   const api = {
     /** Re-reads all fields from state.control (after an NP3 import or Reset). */
-    refresh() { for (const s of syncs) s(); syncStrength(); },
+    refresh() { for (const s of syncs) s(); syncStrength(); updateGroupMarks(); },
+    /** Re-evaluates every changed mark against the baseline (e.g. after a baseline change). */
+    updateMarks() { for (const m of marks) m(); updateGroupMarks(); },
+    resetGroup,
     updateClip,
     syncStrength,
     setTonalLocked,          // CD: locking of the five tonal sliders by the curve editor

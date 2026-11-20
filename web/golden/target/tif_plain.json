@@ -1,0 +1,54 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "tif_plain.tif",
+ "case": "TIFF, no XMP, no ICC",
+ "image": {
+  "format": "TIFF",
+  "w": 208,
+  "h": 160,
+  "mode": "RGB",
+  "storedSize": [
+   208,
+   160
+  ],
+  "exifOrientation": null,
+  "pilAutoAppliesOrientation": false,
+  "icc": {
+   "embedded": false,
+   "profile": null,
+   "treatedAsSrgb": true,
+   "normalizedTo": "sRGB (assumed)"
+  }
+ },
+ "xmp": {
+  "_masks": false
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   208,
+   160
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "tif_plain.tif: read only the 208x160 preview, better give a JPEG or TIFF",
+  "tif_plain.tif: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile"
+ ],
+ "content": {
+  "clippedShare": 0.0
+ },
+ "exercises": "TIFF decoding without metadata; the no-Lightroom-settings warning"
+}

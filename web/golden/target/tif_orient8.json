@@ -1,0 +1,54 @@
+{
+ "schemaVersion": 1,
+ "kind": "targetInput",
+ "file": "tif_orient8.tif",
+ "case": "TIFF, EXIF Orientation 8 (TIFF tag 274)",
+ "image": {
+  "format": "TIFF",
+  "w": 160,
+  "h": 208,
+  "mode": "RGB",
+  "storedSize": [
+   208,
+   160
+  ],
+  "exifOrientation": 8,
+  "pilAutoAppliesOrientation": true,
+  "icc": {
+   "embedded": false,
+   "profile": null,
+   "treatedAsSrgb": true,
+   "normalizedTo": "sRGB (assumed)"
+  }
+ },
+ "xmp": {
+  "_masks": false
+ },
+ "gain": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "gainNote": null,
+ "check": {
+  "camera": null,
+  "adl": "?",
+  "targetSize": [
+   160,
+   208
+  ],
+  "xmpHasLightroom": false,
+  "xmpMasks": false,
+  "xmpVignetteAmount": 0.0,
+  "xmpGrainAmount": 0.0,
+  "blocked": null
+ },
+ "warnings": [
+  "tif_orient8.tif: read only the 160x208 preview, better give a JPEG or TIFF",
+  "tif_orient8.tif: no Lightroom settings in XMP: WB, exposure and masks are invisible, they will land in the profile"
+ ],
+ "content": {
+  "clippedShare": 0.0
+ },
+ "exercises": "orientation read from the TIFF IFD, not a JPEG EXIF segment"
+}

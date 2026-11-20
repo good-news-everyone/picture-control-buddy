@@ -75,14 +75,14 @@ python3 render.py frame.NEF name|file.NP3 [a.jpg]  # a single frame to a file
 python3 compare.py                                 # data/compare/index.html: prediction vs NX renders
 ```
 
-### The browser NP3 editor (MVP, a static application)
+### The browser application (static pages)
 
 ```
-# serve the project root with any static server and open /web/index.html
-python3 -m http.server 8000                        # then http://127.0.0.1:8000/web/index.html
+# serve the project root with any static server
+python3 -m http.server 8000                        # then http://127.0.0.1:8000/web/
 ```
 
-`web/index.html` is a visual NP3 editor per `spec/ui-manual-mvp.md`: loading NEF/DNG (Worker + WebAssembly), NP3 import/export, all sliders, a curve editor, strength 0-150%, before/after. All computation runs in the browser, the server only serves statics; Python is not needed. Checks: `node web/test.mjs` (level 8 — the end-to-end UI of the real page in headless Firefox). The stands `web/bench.html` (neutral vs reference) and `web/test.html` (the test executor) are internal, not the UI.
+Pages (spec/ui-pages.md): `web/index.html` — the landing with two links; `web/picture-control-jpg-fit.html` — the fitting wizard (RAW + JPEG pairs → fit → compare → manual adjustment → more frames, desktop only, spec/ui.md); `web/picture-control-editor.html` — the NP3 profile editor (spec/ui-manual-mvp.md: NEF/DNG in a Worker + WebAssembly, NP3 import/export/share link, all tools, strength 0-150%, before/after) with its phone twin `web/picture-control-editor-mobile.html` (spec/ui-mobile.md; the two editor pages redirect to each other at load). Legacy `…/web/?np3=` links are forwarded by the landing to the editor. All computation runs in the browser, the server only serves statics; Python is not needed. Checks: `node web/test.mjs` (level 8 — the wizard, 8b — its full flow and races, 8e — the editor page and the landing, 9m — the mobile levels 9a-9d; `NP3_BROWSER=chrome CHROME=<path>` runs them in Chromium). The stands `web/bench.html` (neutral vs reference) and `web/test.html` (the test executor) are internal, not the UI.
 
 ### Profile model data without manual assignment
 

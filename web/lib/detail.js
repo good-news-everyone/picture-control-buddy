@@ -396,6 +396,16 @@ export function applyDetailGL(gl, d, rgba, w, h, control, { scale = null, srcTex
   }
 
   // combine: rgb + sum value*table(Y)*(Y - blur)
+  // The renderer rebinds units 0/4/5/7 between renders (its profile output, the final frame,
+  // the neutral) — the passes above rebind the blur units as they write them, but the reuse
+  // path (the same LUT/detail plan, reuseLuma/reuseBlurs) skips them, so rebind the combine
+  // inputs explicitly: without this the reuse path read the renderer's textures as blurs.
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, c.tex.y);
+  for (let i = 0; i < 4; i++) {
+    gl.activeTexture(gl.TEXTURE4 + i);
+    gl.bindTexture(gl.TEXTURE_2D, c.tex["b" + i]);
+  }
   gl.useProgram(c.combine);
   gl.uniform1i(U(c.combine, "uImg"), 0);
   gl.uniform1i(U(c.combine, "uY"), 1);
