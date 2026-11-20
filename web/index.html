@@ -118,7 +118,7 @@ html.i18n-pending body { visibility: hidden; }
 
 /* ---------- hero ---------- */
 .hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 56px; align-items: center; padding: 40px 0 80px; }
-.hero h1 { hyphens: auto; overflow-wrap: break-word; font-size: clamp(42px, 6.6vw, 92px); line-height: .95; font-weight: 800; }
+.hero h1 { overflow-wrap: break-word; font-size: clamp(42px, 6.6vw, 92px); line-height: .95; font-weight: 800; }
 .photo-word { background-size: 320%; background-position: 4% 33%; -webkit-background-clip: text; background-clip: text; color: transparent;
   -webkit-text-fill-color: transparent; background-color: var(--accent); }
 .hero .lede { font-size: 20px; color: var(--muted); max-width: 30ch; margin-top: 24px; }
@@ -155,6 +155,9 @@ html.i18n-pending body { visibility: hidden; }
 section.block { padding: 88px 0; border-top: 1px solid var(--line); }
 .kicker { display: inline-block; font: 600 14px var(--body); color: var(--accent-text); margin-bottom: 14px; }
 .block h2 { font-size: clamp(36px, 5vw, 60px); line-height: 1; font-weight: 800; max-width: 16ch; }
+.block h2.wide { max-width: none; }
+/* German compounds outgrow the hero column: only they get hyphenated */
+.hero h1:lang(de) { hyphens: auto; }
 .block .intro { font-size: 19px; color: var(--muted); max-width: 52ch; margin-top: 18px; }
 .fn { color: var(--accent-text); text-decoration: none; font-weight: 700; padding: 0 2px; }
 .footnote { font-size: 14px; color: var(--muted); max-width: 64ch; margin-top: 10px; }
@@ -425,7 +428,7 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
 
   <section class="block" id="camera">
     <span class="kicker" data-i18n="Into the camera">Into the camera</span>
-    <h2 data-i18n="From file to camera in three steps.">From file to camera in three steps.</h2>
+    <h2 class="wide" data-i18n="From file to camera in three steps.">From file to camera in three steps.</h2>
     <div class="card-path">
       <div><span class="mono">MY LOOK.NP3</span><b data-i18n="Save the file">Save the file</b><span data-i18n="A tiny file, about a kilobyte.">A tiny file, about a kilobyte.</span></div>
       <div><span class="mono">NIKON / CUSTOMPC /</span><b data-i18n="Copy it to the memory card">Copy it to the memory card</b><span data-i18n="Put the card back into the camera.">Put the card back into the camera.</span></div>
