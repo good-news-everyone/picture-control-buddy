@@ -8,7 +8,7 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 | Page | Flow | Devices | Router |
 |---|---|---|---|
-| `web/index.html` | **Landing**: leads to the wizard or the editor. Content and design: to be discussed later | any | forwards legacy `?np3=` links (below) |
+| `web/index.html` | **Landing**: what the tools do, with real samples; leads to the wizard or the editor. EN / RU / DE / FR | any | forwards legacy `?np3=` links (below) |
 | `web/picture-control-jpg-fit.html` | **Fitting wizard**: [ui.md](ui.md) steps 1 → 2 → 3.1 → 3.2 (Start, Compare, manual adjustment with the report, More frames), versions, NP3 export | desktop only | none |
 | `web/picture-control-editor.html` | **Profile editor, desktop**: open a RAW, import/edit/export/share an NP3 | desktop, laptop, tablet | `view-route.js` → mobile on phones |
 | `web/picture-control-editor-mobile.html` | **Profile editor, mobile**: the same editor in the [ui-mobile.md](ui-mobile.md) layout | phones | `view-route.js` → desktop elsewhere |
@@ -19,6 +19,18 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 - Step 3.1 stays inside the wizard. It is not the profile editor page: it edits a fitted version against its targets (report, reset to the fitted version, back to refitting). There is no "Open in the editor" hand-off; a user who wants the standalone editor saves the NP3 and imports it there.
 - **No NP3 import** in the wizard: profiles enter it only through a fit. The page-level drop router accepts only RAW files (cards) and JPEGs dropped on a card.
 - **Share link** stays in step 3.1 (decided 2026-11-20): it copies the editor link `picture-control-editor.html?np3=…` with the current profile (see "Share links"), never a wizard link — the wizard has no URL state. The link opens the profile in the standalone editor; the pairs, versions and report are not part of it.
+- **Languages** (decided 2026-11-20): EN / RU / DE / FR, the rules of "Profile editor" → "Languages".
+  `lib/fit-app.js` registers the editor dictionaries (the shared modules, the quick editor) and
+  `lib/i18n-fit-{ru,de,fr}.js` (the wizard's own strings, no editor key repeated). The globe sits
+  right of the GitHub icon at the title of the Start screen only (the menu opens downwards; Compare
+  has none, decided 2026-11-20). A switch re-translates the static texts,
+  re-renders the Start cards, the Compare strip, the coverage, the Refit button, the canvas labels
+  and the report; the session, a running fit and the quick editor are untouched. The colour groups
+  of the coverage and the report table are translated (keys = `analyze.GROUPS`; the narrow tables
+  show a `"<group>|short"` name kept on one line, e.g. RU «тёпл. насыщ.», the full one as the
+  tooltip; a context key without a translation falls back to its plain key's), so are the report
+  parameter rows ("Red Hue" …). Plural strings ("{n} pairs will be fitted", the Refit sub-label)
+  use `{ one, few, many, other }` translations.
 - **Desktop only.** No mobile layout, no router. On a phone (the router's auto rule: `pointer: coarse` and the short screen side < 600 px) the page opens as is with a non-blocking banner: "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory." The banner can be closed; nothing is stored.
 
 ## Profile editor (`picture-control-editor.html` / `-mobile.html`)
@@ -27,6 +39,34 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 - **No pairs, no JPEG targets, no fit, no report, no versions.** The page has no Start screen: it opens straight into the editor with the empty state ("Open a RAW to see the profile"); an NP3 can be imported and edited before any RAW is opened, as today.
 - A dropped JPEG gets the status "JPEG targets are used by the fitting wizard" with a link to `picture-control-jpg-fit.html`.
 - The mobile page is the M0–M3 implementation of [ui-mobile-plan.md](ui-mobile-plan.md) (branch `mobile`, `_local/_cloud_transfer/mobile.bundle`) **without its Start screen**: the "Start screen on mobile" section of ui-mobile.md and the Start parts of level 9b are dropped.
+
+### Languages
+
+Decided 2026-11-20. The editor pages speak the landing's languages: English, Russian, German, French.
+
+- **Dictionaries:** `lib/i18n-editor-{ru,de,fr}.js` (one key set), registered by `lib/editor-app.js`
+  before the editor core builds the panel. They cover both pages and every editor module they load
+  (the panel, curve, Color Blender, Color Grading, before/after, transfer, marks, the mobile shell).
+  The wizard registers them too, with its own `lib/i18n-fit-*` (see "Fitting wizard").
+- **Choice:** the landing's rule — the stored `lang` (shared with the landing), otherwise the
+  browser's first known preference (`navigator.languages`), otherwise English (`i18n.js initLang`;
+  an automatic pick is not stored). `lib/i18n-boot.js` hides the page until it is applied.
+- **Picker:** a globe icon button right of the GitHub icon (both icons only, no captions; their
+  names are the tooltip and the aria-label) — desktop at the bottom of the left column, mobile in the
+  Info sheet above "Desktop version". It opens a menu of the endonyms, the current one checked, as
+  on the landing (`lib/lang-select.js`; arrows, Escape, a click outside closes). A switch is stored
+  and applied at once, without a reload (the opened RAW and the history stay): every text carries
+  `data-i18n*` (with `data-i18n-title` and `data-i18n-vars` for titles and `{var}` strings) and is
+  re-translated in place; the status line is re-translated too when it is one t() output (i18n.js
+  remembers the key and vars of its recent outputs); a status glued from several parts (a file
+  name + a decoder error) keeps its language until the next one. The language styles (the hidden
+  page, the icons, the menu) are `css/i18n.css`, linked by all three app pages.
+- **Wording:** RU «ты», DE «du», FR «vous», as on the landing. The NX Studio panel names Basic,
+  Curve, Color Blender, Color Grading (and the mobile tool bar's Blender, Grading) stay English;
+  the slider labels inside them are translated. A label that needs a shorter word in one place uses
+  a context key (`"Reset|toolbar"`: the mobile tool bar's Reset; English shows "Reset").
+- **Tests:** level 1k (`web/test-node-i18n.mjs`) checks the key sets and that every key the pages
+  use is translated; the browser levels pin the browser language to English.
 
 ### Redirect between the two editor pages
 
@@ -45,7 +85,29 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 
 ## Landing (`index.html`)
 
-Decided 2026-11-20: for now only the title and two links — "Fit a profile to JPEGs" → `picture-control-jpg-fit.html`, "Edit an NP3 profile" → `picture-control-editor.html`. Plus the invisible legacy `?np3=` forward above (no UI). No model download, no WASM, no workers on this page. A richer landing may come later.
+Decided 2026-11-20 (supersedes the "title and two links" stage of the same day). A one-page landing
+for photographers, not engineers: plain words, few of them.
+
+- **Sections:** hero (headline, the two entry CTAs, a neutral / profile before-after curtain);
+  "From your edits" (three steps and a frame picker: the source NEF, then a curtain NEF + NP3 vs the
+  target JPEG with the frame's dE2000 from the wizard report); "By hand" (a carousel of real editor
+  screenshots, desktop and phone, and the four tool groups); "Into the camera" (save, copy to
+  `NIKON/CUSTOMPC/`, load via Manage Picture Control); FAQ; the author block (GitHub, Ko-fi); the
+  trademark notice.
+- **Entry links:** `#to-fit` → `picture-control-jpg-fit.html`, `#to-editor` → `picture-control-editor.html`.
+- **Wording:** "NEF", not "RAW"; "any NEF" carries a footnote that High Efficiency NEFs (HE / HE★)
+  must be converted to DNG without JPEG XL first.
+- **Samples:** `web/landing/` (600×900 frames, editor screenshots). They come from one wizard fit
+  ("SA") over 8 NEF + Lightroom JPEG pairs; the per-frame dE2000 is a constant in the page.
+- **Languages:** English, Russian, German and French. The strings go through
+  `lib/i18n.js` (`data-i18n`, `data-i18n-aria`, `data-i18n-alt`, `t()`); the dictionaries
+  `lib/i18n-landing-{ru,de,fr}.js` (one key set) are registered by the landing alone (the editor
+  pages have their own, see "Profile editor" → "Languages" and "Fitting wizard" → "Languages"). A globe button next to the GitHub icon opens the language menu (endonyms,
+  the current one checked); the choice is stored as `lang`. With no stored choice the browser's
+  first known preference (`navigator.languages`) wins. The page is hidden until the language is
+  applied (no English flash). Numbers follow the language (2.1 / 2,1).
+- **Weight:** no model download, no WASM, no workers, no third-party requests (system fonts only).
+- The invisible legacy `?np3=` forward above runs first, before anything renders.
 
 ## Code structure
 
@@ -74,5 +136,5 @@ See [ui-plan.md](ui-plan.md) stage 11. In short: split `app.js` into the editor 
 
 ## Open questions
 
-1. ~~Landing content~~ For now two links only (2026-11-20); a richer design later.
+1. ~~Landing content~~ Resolved 2026-11-20: see "Landing" above.
 2. ~~Whether the wizard's step 3.1 keeps "Share link"~~ Resolved 2026-11-20: it stays and leads to the editor.

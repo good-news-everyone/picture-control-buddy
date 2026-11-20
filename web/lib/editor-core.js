@@ -19,7 +19,7 @@ import { fetchModel } from "./profile.js";
 import { fetchDetail } from "./detail.js";
 import { Renderer } from "./renderer.js";
 import { createRawLoader } from "./loader.js";
-import { t, applyI18n } from "./i18n.js";
+import { t, applyI18n, i18nSet } from "./i18n.js";
 import { createPanel } from "./panels.js";
 import { createCurveEditor } from "./curve-editor.js";
 import { createBlendingView } from "./blending.js";
@@ -288,14 +288,14 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
     const info = $("info");
     if (info) {
       info.innerHTML =
-        `<dt>${t("File")}</dt><dd>${st.name}</dd>` +
-        `<dt>${t("Camera")}</dt><dd>${i.make} ${i.model}${i.dng ? ", DNG" : ""}</dd>` +
-        `<dt>${t("Frame")}</dt><dd>${st.image.w}×${st.image.h}</dd>`;
+        `<dt data-i18n="File">${t("File")}</dt><dd>${st.name}</dd>` +
+        `<dt data-i18n="Camera">${t("Camera")}</dt><dd>${i.make} ${i.model}${i.dng ? ", DNG" : ""}</dd>` +
+        `<dt data-i18n="Frame">${t("Frame")}</dt><dd>${st.image.w}×${st.image.h}</dd>`;
     }
     const warn = $("warn");
     if (warn) {
       warn.hidden = !st.warn;
-      if (st.warn) warn.textContent = t("Camera is not Nikon Z f: development is approximate");
+      if (st.warn) i18nSet(warn, "text", "Camera is not Nikon Z f: development is approximate");
     }
     beforeAfter.update();        // before/after is available only after a successful development
     setStatus(t("Ready"));

@@ -6,7 +6,7 @@
 //    of the selected color.
 // The NP3 key does not change: blender[color] = [hue, sat, lum]; Chroma/Brightness are shown
 // as Saturation/Luminance. Refs: spec/color-blending/hsl.png, mixer.png.
-import { t } from "./i18n.js";
+import { t, i18nSet } from "./i18n.js";
 import { COLORS } from "./np3.js";
 import { neutralControl, colorKeys, changedKeys, resetKeys } from "./baseline.js";
 import { markButton, resetButton, setChanged } from "./mark.js";
@@ -153,7 +153,9 @@ export function createBlendingView(slot, { state, onChange, panel,
   bodyHsl.append(tabRow);
   const sections = TRACKS.map((trackFn, i) => {
     const sec = el("div");
-    sec.append(el("div", "sub", t(TABS[i])));
+    const sub = el("div", "sub", t(TABS[i]));
+    sub.dataset.i18n = TABS[i];
+    sec.append(sub);
     const rowSyncs = [];
     for (const color of COLORS) {
       const { sync, box } = slider(sec, cap(color), -100, 100, 1,
@@ -174,15 +176,16 @@ export function createBlendingView(slot, { state, onChange, panel,
   const dots = el("div", "bl-dots");
   const dotBtns = {};
   let selColor = "red";
-  const cname = el("div", "bl-cname", cap(selColor));
+  const cname = el("div", "bl-cname");
+  i18nSet(cname, "text", cap(selColor));
   const colorSyncs = [];
   const colorInputs = [];
   for (const color of COLORS) {
     const b = el("button", "bl-dot");
     b.type = "button";
     b.style.background = hsl(HUES[color], GSAT, 55);
-    b.title = cap(color);
-    b.setAttribute("aria-label", cap(color));
+    i18nSet(b, "title", cap(color));
+    i18nSet(b, "aria", cap(color));
     b.addEventListener("click", () => selectColor(color));
     dots.append(b);
     dotBtns[color] = b;
@@ -229,7 +232,7 @@ export function createBlendingView(slot, { state, onChange, panel,
 
   function selectColor(color) {
     selColor = color;
-    cname.textContent = cap(color);
+    i18nSet(cname, "text", cap(color));
     for (const c of COLORS) dotBtns[c].classList.toggle("sel", c === color);
     // the sliders rebind through the selColor closure; the track is the gradient of the selected color
     for (let i = 0; i < 3; i++) colorInputs[i].style.setProperty("--track", TRACKS[i](HUES[color]));

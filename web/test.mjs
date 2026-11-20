@@ -2,7 +2,7 @@
 //
 //     node web/test.mjs [--only 1f,9] [--skip 8]
 //
-// The Node levels (1, 1a, 1b, 1d, 1e, 1f, 1g, 1h, 1i, 1j, 9, 4, 5) run in parallel child
+// The Node levels (1, 1a, 1b, 1d, 1e, 1f, 1g, 1h, 1i, 1j, 1k, 9, 4, 5) run in parallel child
 // processes — one process per level, each loads its own fixtures. The browser
 // levels run as concurrent pages of one headless Firefox: web/test.html runs
 // the shader levels (2, 2a, 6, 7 and the browser-side 1a checks, one page per
@@ -33,10 +33,10 @@ const only = argList("--only");
 const skipSet = new Set(argList("--skip") || []);
 const selected = (l) => (!only || only.includes(l)) && !skipSet.has(l);
 
-const NODE_LEVELS = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "9", "4", "5"];
+const NODE_LEVELS = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "1k", "9", "4", "5"];
 const PAGE_LEVELS = ["2", "2a", "1a", "6", "7"];   // web/test.html sections (the 1a entry is the browser-side decoding-rejection check)
 // the canonical output order of the level reports (identical to the old sequential runner)
-const ORDER = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "9", "4", "5",
+const ORDER = ["1", "1a", "1b", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "1k", "9", "4", "5",
                "2", "2a", "1ab", "6", "7", "1c", "8", "8b", "8e", "9m"];
 const PAGE_KEY = { "1a": "1ab" };                  // the browser-side 1a checks report under their own key
 
@@ -144,10 +144,12 @@ if (PAGE_LEVELS.some(selected) || ["1c", "8", "8b", "8e", "9m"].some(selected)) 
   // throttling) — the level-8/8b assertions observe in-page timers while their page is not the
   // active tab (spec/web-tests.md). The *_without_budget_throttling clamp applies once the
   // budget throttling is off, so both minimums are lowered.
+  // The browser language is pinned to English: the editor pages pick a translation from
+  // navigator.languages (lib/i18n.js initLang), and the levels assert the English strings.
   const browser = BROWSER === "chrome"
     ? await puppeteer.launch({ browser: "chrome", executablePath: process.env.CHROME, headless: true,
         protocolTimeout: 900000,
-        args: ["--no-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist",
+        args: ["--no-sandbox", "--lang=en-US", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist",
                "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
                "--disable-backgrounding-occluded-windows"] })
     : await puppeteer.launch({ browser: "firefox", executablePath: firefox,
@@ -156,6 +158,7 @@ if (PAGE_LEVELS.some(selected) || ["1c", "8", "8b", "8e", "9m"].some(selected)) 
                                              "dom.min_background_timeout_value": 4,
                                              "dom.min_background_timeout_value_without_budget_throttling": 4,
                                              "dom.timeout.enable_budget_timer_throttling": false,
+                                             "intl.accept_languages": "en-US, en",
                                            } });
   // newPage from parallel tasks serially (BiDi)
   let newPageChain = Promise.resolve();

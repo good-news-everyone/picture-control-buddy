@@ -18,7 +18,14 @@
 // Ownership: this file orchestrates; web/lib/session.js — pure pair/name rules,
 // web/lib/start.js — the Start screen, web/lib/compare-view.js — the Comparison screen,
 // web/lib/report-view.js — the report, web/lib/coverage-view.js — the color-coverage advice.
-import { t } from "./i18n.js";
+import { t, register, initLang, reTranslate } from "./i18n.js";
+import { mountLangMenu } from "./lang-select.js";
+import EDITOR_RU from "./i18n-editor-ru.js";
+import EDITOR_DE from "./i18n-editor-de.js";
+import EDITOR_FR from "./i18n-editor-fr.js";
+import FIT_RU from "./i18n-fit-ru.js";
+import FIT_DE from "./i18n-fit-de.js";
+import FIT_FR from "./i18n-fit-fr.js";
 import { createEditorCore, $, rawErrorText } from "./editor-core.js";
 import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
@@ -31,6 +38,14 @@ import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetRe
 import { isDirty } from "./baseline.js";
 import { decodeTarget, editGain, editWarningCodes, wbMultipliers, MIN_TARGET } from "./target.js";
 import { scaled } from "./strength.js";
+
+// ---------- language (spec/ui-pages.md "Languages") ----------
+// The wizard speaks the editor pages' languages: the editor dictionaries cover the shared
+// modules (the panel, the quick editor), i18n-fit-* the wizard's own screens. Picked before
+// anything is built, so every widget is created in it; a later switch: see the bottom.
+for (const [code, ...dicts] of [["ru", EDITOR_RU, FIT_RU], ["de", EDITOR_DE, FIT_DE], ["fr", EDITOR_FR, FIT_FR]])
+  for (const d of dicts) register(code, d);
+initLang();
 
 // ---------- the editor core + the session ----------
 const core = await createEditorCore({
@@ -1024,6 +1039,23 @@ function routeFile(f) {
 
 syncStep();
 setStatus(t("Add RAW files to assemble pairs"));
+
+// A language switch (the globe at the Start title) is applied in place: the data-i18n*
+// texts re-translate (i18n.js), the screens built from state re-render, a plain status is
+// re-translated; the session, the fit and the opened frames are untouched.
+let shownLang = document.documentElement.lang;
+function onLangChange(lang) {
+  const s = reTranslate(state.status, shownLang);
+  shownLang = lang;
+  if (s !== state.status) {
+    state.status = s;
+    for (const id of ["status", "start-status", "cmp-status"]) if ($(id)) $(id).textContent = s;
+  }
+  start.refresh();
+  if (onHub()) { compareView.refreshPairs(); compareView.draw(); }
+  reportView.refresh();
+}
+if ($("lang-btn")) mountLangMenu($("lang-btn"), $("lang-menu"), onLangChange);
 
 // The session lives in this tab's memory only (decisions #4/#12): closing or reloading the tab
 // with pairs loaded asks first (UX review, decision #15). Browsers show their own text and

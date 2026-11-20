@@ -5,8 +5,20 @@
 // semantics). No pairs, JPEG targets, fit, report or versions — those live in the fitting
 // wizard (picture-control-jpg-fit.html). The page opens straight into the editor; an NP3 can
 // be imported and edited before any RAW is opened; a ?np3= share link is applied at start.
-import { t } from "./i18n.js";
+import { t, register, initLang, reTranslate } from "./i18n.js";
+import { mountLangMenu } from "./lang-select.js";
+import DICT_RU from "./i18n-editor-ru.js";
+import DICT_DE from "./i18n-editor-de.js";
+import DICT_FR from "./i18n-editor-fr.js";
 import { createEditorCore, $ } from "./editor-core.js";
+
+// The editor pages are translated (EN / RU / DE / FR, the landing's languages): the language is
+// picked before the core builds the panel, so every widget is created in it. A switch made later
+// re-translates the data-i18n* texts in place; the status line follows below.
+register("ru", DICT_RU);
+register("de", DICT_DE);
+register("fr", DICT_FR);
+initLang();
 
 const core = await createEditorCore({ extraState: { step: "edit" } });
 const { state, setStatus, renderer, loader, panel, hist, curveEditor, blendingView, gradingView,
@@ -47,6 +59,18 @@ function routeFile(f) {
 }
 
 setStatus(t("Open a RAW to see the profile"));
+
+// ---------- language ----------
+// A status written before the switch is re-translated when it is a plain string of the
+// dictionaries ("Ready", "Open a RAW to see the profile"); one with a file name or an error
+// stays as written until the next status. Written in place, not through setStatus: the mobile
+// page would show the same status again as a toast.
+let shownLang = document.documentElement.lang;
+if ($("lang-btn")) mountLangMenu($("lang-btn"), $("lang-menu"), (lang) => {
+  state.status = reTranslate(state.status, shownLang);
+  shownLang = lang;
+  if ($("status")) $("status").textContent = state.status;
+});
 transfer.importFromUrl(); // the ?np3= share parameter, if any
 
 // For the end-to-end tests and lib/mobile.js: the state and the entry points. `mobile` and

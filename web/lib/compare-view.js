@@ -636,11 +636,12 @@ export function createCompare({ state, renderSide, onStrength,
       const have = new Set((v?.pairIds ?? []).map(String));
       const added = ids.filter((id) => !have.has(String(id))).length;
       const removed = [...have].filter((id) => !ids.some((x) => String(x) === id)).length;
+      const changes = [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ");
+      const n = added + removed;
       refitBtn.dataset.sub = !ids.length ? t("No pairs")
         : preparing ? t("Preparing…")
         : same ? t("Up to date")
-        : [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ")
-          + " " + (added + removed === 1 ? t("pair") : t("pairs"));
+        : n === 1 ? t("{changes} pair", { changes, n }) : t("{changes} pairs", { changes, n });
     }
     const { m, k } = fitCount(state);
     let txt = same ? t("The profile is already fitted on these pairs") : "";
@@ -662,8 +663,8 @@ export function createCompare({ state, renderSide, onStrength,
       const b = $(id);
       if (!b) continue;
       b.disabled = editing;
-      b.dataset.title0 ??= b.title;           // the button's own tooltip, restored after editing
-      b.title = editing ? why : b.dataset.title0;
+      // the button's own tooltip (data-i18n-title, in the current language) is restored after editing
+      b.title = editing ? why : (b.dataset.i18nTitle ? t(b.dataset.i18nTitle) : "");
     }
     strengthInput.disabled = editing;
   }

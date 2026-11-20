@@ -4,15 +4,15 @@
 // it keeps its box when hidden (visibility, no layout jump) and is a real button, so it is
 // reachable from the keyboard — activating it resets that field to the baseline.
 // Styles: index.html (.mark, .grp-reset, .chg).
-import { t } from "./i18n.js";
+import { i18nSet } from "./i18n.js";
 
 /** The per-field mark; `label` is the English field label (translated here). */
 export function markButton(label, onReset) {
   const b = document.createElement("button");
   b.type = "button";
   b.className = "mark";
-  b.title = t("Changed — click to reset");
-  b.setAttribute("aria-label", t("Reset {name}", { name: t(label) }));
+  i18nSet(b, "title", "Changed — click to reset");
+  i18nSet(b, "aria", "Reset {name}", { name: label });
   b.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -26,8 +26,8 @@ export function resetButton(label, onReset) {
   const b = document.createElement("button");
   b.type = "button";
   b.className = "grp-reset";
-  b.title = t(label);
-  b.setAttribute("aria-label", t(label));
+  i18nSet(b, "title", label);
+  i18nSet(b, "aria", label);
   b.disabled = true;
   b.addEventListener("click", (e) => {
     e.preventDefault();          // inside a <summary>: do not toggle the group

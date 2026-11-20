@@ -170,8 +170,8 @@ export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid
   // --- NP3 name (the first field) ---
   const nameInput = h("input", { type: "text", id: "p-name", maxlength: 19, spellcheck: "false",
     autocapitalize: "off", autocomplete: "off", autocorrect: "off", enterkeyhint: "done", value: state.control.name });
-  const nameErr = h("div", { class: "bad", id: "p-name-err", hidden: "" },
-    t("Name must be 1–19 ASCII characters"));
+  const nameErr = h("div", { class: "bad", id: "p-name-err", hidden: "",
+    "data-i18n": "Name must be 1–19 ASCII characters" }, t("Name must be 1–19 ASCII characters"));
   function syncName() { nameInput.value = state.control.name; checkName(); }
   function checkName() {
     const n = state.control.name;
@@ -191,7 +191,8 @@ export function createPanel(roots, { state, onChange: onChangeOuter, onNameValid
   gStrength.append(h("div", { "data-group": "name" }, nameInput, nameErr));
 
   // --- strength ---
-  const sClip = h("div", { class: "clip-warn", hidden: "" },
+  const sClip = h("div", { class: "clip-warn", hidden: "",
+    "data-i18n": "Some values are clipped to the NP3 range at this strength" },
     t("Some values are clipped to the NP3 range at this strength"));
   const sBox = slider(gStrength, "Strength", 0, 150, 5,
     () => state.strength, (v) => { state.strength = v; syncStrength(); },

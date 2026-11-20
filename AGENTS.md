@@ -5,7 +5,10 @@
 Everything in this repository is written in **English**: code, comments,
 docstrings, commit messages, specs and UI strings. Write all new code and
 comments in English only — no Russian (or other non-English) text, including
-printouts and error messages.
+printouts and error messages. The one exception is UI translation dictionaries for
+`web/lib/i18n.js` (today `web/lib/i18n-landing-{ru,de,fr}.js`, the landing translations, and
+`web/lib/i18n-editor-{ru,de,fr}.js`, the profile editor translations, and
+`web/lib/i18n-fit-{ru,de,fr}.js`, the fitting wizard's own strings).
 
 ## Project
 
@@ -27,9 +30,11 @@ WebGL) that applies and exports NP3 profiles.
 - `sweep.py` — exports/measures NX Studio response sweeps (training data prep)
 - `web/` — browser app (`lib/` JS pipeline, `raw/` Rust→WASM decoder,
   `model/` exported weights, `golden/` reference fixtures for `test.mjs`). Pages
-  (`spec/ui-pages.md`): `index.html` (landing), `picture-control-jpg-fit.html` (fitting
-  wizard, `lib/fit-app.js`), `picture-control-editor.html` and
-  `picture-control-editor-mobile.html` (profile editor, `lib/editor-app.js`); both entries
+  (`spec/ui-pages.md`): `index.html` (landing, EN / RU / DE / FR via `lib/i18n-landing-*.js`), `picture-control-jpg-fit.html` (fitting
+  wizard, `lib/fit-app.js`, EN / RU / DE / FR via `lib/i18n-editor-*.js` + `lib/i18n-fit-*.js`),
+  `picture-control-editor.html` and
+  `picture-control-editor-mobile.html` (profile editor, `lib/editor-app.js`, EN / RU / DE / FR via
+  `lib/i18n-editor-*.js`); both entries
   build on `lib/editor-core.js`
 - `data/` — committed model weights (`*_model.npz`) and small fixtures
 - `spec/` — design docs and test rules
@@ -46,6 +51,7 @@ present locally; a fresh clone only supports the tests below.
 ## Tests
 
 - `python3 test_np3.py` — NP3 round-trip against official samples (always runs)
+- `cd web && node test.mjs --only 1k` — the UI translation dictionaries (Node, instant)
 - `cd web && node test.mjs` — full browser pipeline suite (needs Firefox and
   `puppeteer-core` from `web/node_modules`); levels 1/1a/8 additionally need
   the raw files in `_local/` and are skipped otherwise
