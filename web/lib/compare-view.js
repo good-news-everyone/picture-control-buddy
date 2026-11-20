@@ -613,6 +613,15 @@ export function createCompare({ state, renderSide, onStrength,
       && ids.every((id) => (v.pairIds ?? []).includes(String(id)));
     const preparing = state.pairs.some((p) => p.preparing || p.raw === "pending" || p.target === "pending");
     refitBtn.dataset.pairIds = ids.join(",");
+    if (state.step === "edit") {
+      // the quick editor (decision #16): the layout stays, the hub actions wait for Done / Cancel
+      refitBtn.textContent = t("Refit");
+      refitBtn.dataset.sub = t("Editing");
+      refitBtn.disabled = true;
+      refitBtn.classList.remove("running");
+      refitBtn.title = t("Finish the manual adjustments first (Done or Cancel)");
+      return;
+    }
     if (state.fitting) {
       refitBtn.textContent = t("Cancel");                // a one-word label fits the square (decision #15)
       refitBtn.dataset.sub = t("Refitting…");
@@ -644,8 +653,24 @@ export function createCompare({ state, renderSide, onStrength,
     refitBtn.title = txt;                                // the reason it is off / skipped pairs: tooltip only
   }
 
+  // The hub actions are disabled in the quick editor (decision #16): the layout does not change,
+  // the state is unambiguous — the panel's Done / Cancel lead out first.
+  function syncActions() {
+    const editing = state.step === "edit";
+    const why = editing ? t("Finish the manual adjustments first (Done or Cancel)") : "";
+    for (const id of ["cmp-manual", "cmp-download", "cmp-share"]) {
+      const b = $(id);
+      if (!b) continue;
+      b.disabled = editing;
+      b.dataset.title0 ??= b.title;           // the button's own tooltip, restored after editing
+      b.title = editing ? why : b.dataset.title0;
+    }
+    strengthInput.disabled = editing;
+  }
+
   /** Re-renders the strip, the coverage and the refit button (pair changes, advice, fits). */
   function refreshPairs() {
+    syncActions();
     // the strip is rebuilt: a focused tile keeps the keyboard focus across the rebuild
     const focused = stripEl.contains(document.activeElement)
       ? document.activeElement.closest(".cmp-th")?.dataset.pairId ?? (document.activeElement.id || null) : null;

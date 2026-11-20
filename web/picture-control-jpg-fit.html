@@ -299,16 +299,27 @@
   body.step-compare { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
   body.step-compare #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; }
   body.step-compare #files, body.step-compare #view, body.step-compare #panel { display: none; }
-  /* the quick editor (decision #16): Compare with the parameter panel in place of the report;
-     the coverage/actions column, Refit and the duplicate strength slider step aside */
+  /* the quick editor (decision #16): Compare with the parameter panel in place of the report —
+     the same layout (no jump): the strip, Refit, the strength bar and the coverage column stay,
+     their controls are disabled until Done / Cancel */
   body.step-edit { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
   body.step-edit #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; grid-row: 1; }
   body.step-edit #panel { grid-column: 2; grid-row: 1; min-height: 0; }
-  body.step-edit #files, body.step-edit #view, body.step-edit #report,
-  body.step-edit #cmp-sidepanel, body.step-edit #cmp-refit-box, body.step-edit #cmp-strength-box { display: none; }
-  body.step-edit #cmp-box { margin-right: 14px; }
+  body.step-edit #files, body.step-edit #view, body.step-edit #report { display: none; }
+  body.step-edit #cmp-strength-box { opacity: .45; }
+  /* the quick editor stands out: a darker panel that slides in from the right edge
+     (the report it replaces fades back in on Done / Cancel) */
+  body.step-edit #panel { background: #161616; border-left-color: #4a4a4a;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, .35); animation: panel-in .24s cubic-bezier(.2, .7, .2, 1); }
+  body.step-edit #panel-foot { background: #161616; }
+  body.step-compare #report { animation: fade-in .2s ease-out; }
+  @keyframes panel-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    body.step-edit #panel, body.step-compare #report { animation: none; }
+  }
   #panel-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 14px;
-    border-bottom: 1px solid var(--line); }
+    border-bottom: 1px solid var(--line); background: #121212; }
   #panel-head span { flex: 1; color: var(--accent); font-weight: 600; }
   #cmp-share { font-size: 12px; padding: 5px 8px; }
   #cmp-strip { display: flex; gap: 8px; padding: 10px 14px 0; flex-wrap: wrap; }
@@ -390,10 +401,14 @@
 
   @media (max-width: 980px) { body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto auto; }
     body.step-start { grid-template-rows: 1fr; }
-    body.step-compare { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+    body.step-compare, body.step-edit { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
     #files { border-right: 0; border-bottom: 1px solid var(--line); }
     #panel { border-left: 0; border-top: 1px solid var(--line); }
     #report { border-left: 0; border-top: 1px solid var(--line); max-height: 45vh; }
+    /* narrow: the report and the quick editor's panel take the same row of one height, so
+       entering the editor does not move the viewer (decision #16) */
+    body.step-compare #report, body.step-edit #panel { height: 45vh; max-height: 45vh; }
+    body.step-edit #panel { grid-column: 1; grid-row: 2; }
     .zones { grid-template-columns: 1fr; } }
 </style>
 </head>

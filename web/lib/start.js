@@ -118,14 +118,59 @@ export function fitCountText(state) {
   return s;
 }
 
-// The pair-preparation stages of pair-worker.js in user words (the codes are data).
-const PREP_STAGES = {
-  queued: "queued", decode: "reading the RAW", vignette: "lens corrections",
-  crop: "geometry", orient: "geometry", radial: "lens corrections",
-  align: "aligning with the JPEG", shrink: "finishing",
-};
-function prepStageText(stage) {
-  return t(PREP_STAGES[stage] ?? "working");
+// The pair-preparation stages of pair-worker.js (pair-prepare.js onProgress order) in user
+// words, with the bar span of each stage: [code, label, from, to, expected ms]. The spans follow
+// the measured share of each stage (2026-11-20, a Z f NEF + JPEG in Chromium: align ~65% of the
+// time, orient ~14%, radial ~10%); "queued" waits for the previous pair (one serialized chain).
+const PREP_STEPS = [
+  ["queued", "Waiting for the previous pair", 0, 0.03, 600],
+  ["decode", "Reading the RAW", 0.03, 0.07, 500],
+  ["vignette", "Lens correction: vignetting", 0.07, 0.13, 800],
+  ["crop", "Geometry: crop", 0.13, 0.14, 100],
+  ["orient", "Geometry: orientation", 0.14, 0.28, 2000],
+  ["radial", "Lens correction: distortion", 0.28, 0.38, 1400],
+  ["align", "Aligning with the JPEG", 0.38, 0.97, 9000],
+  ["shrink", "Finishing", 0.97, 1, 100],
+];
+const PREP_COUNT = PREP_STEPS.length - 1;          // "queued" is not a step
+
+/** A spinner whose rotation survives the card rebuilds (the phase follows the clock). */
+export function spinner() {
+  const s = document.createElement("span");
+  s.className = "spin";
+  s.setAttribute("aria-hidden", "true");
+  s.style.animationDelay = `-${Math.round(performance.now() % 800)}ms`;
+  return s;
+}
+
+/** The preparation progress of a card (decision #16): a bar that moves through the stage spans
+ *  — inside a stage it eases toward the stage end over the expected time, continuing across card
+ *  rebuilds (a negative animation delay from the stage start) — and "Step n of 7 · <stage>". */
+function prepProgress(p) {
+  const i = Math.max(0, PREP_STEPS.findIndex(([code]) => code === (p.prepStage ?? "queued")));
+  const [code, label, from, to, ms] = PREP_STEPS[i];
+  const box = document.createElement("div");
+  box.className = "pair-prog";
+  box.dataset.stage = code;
+  const bar = document.createElement("div");
+  bar.className = "pair-prog-bar";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", "100");
+  bar.setAttribute("aria-valuenow", String(Math.round(from * 100)));
+  const fill = document.createElement("i");
+  fill.style.setProperty("--from", `${from * 100}%`);
+  fill.style.setProperty("--to", `${to * 100}%`);
+  fill.style.animationDuration = `${ms}ms`;
+  const since = p.prepStageAt != null ? performance.now() - p.prepStageAt : 0;
+  fill.style.animationDelay = `-${Math.round(Math.max(0, since))}ms`;
+  bar.append(fill);
+  const txt = document.createElement("div");
+  txt.className = "pair-prog-text";
+  txt.append(spinner(), document.createTextNode(code === "queued" ? t(label)
+    : t("Step {n} of {total} · {stage}", { n: i, total: PREP_COUNT, stage: t(label) })));
+  box.append(bar, txt);
+  return box;
 }
 
 /**
@@ -282,6 +327,9 @@ export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit
     const top = el("div", "pair-top");
     const st = el("span", "pair-state", stateText(p, blocked));
     st.dataset.state = stateCode(p, blocked);
+    // a spinner before a running state: decoding the RAW / the JPEG, preparing (decision #16)
+    // (preparing: the spinner sits on the stage line under the bar instead)
+    if (["decoding", "jpeg_decoding"].includes(st.dataset.state)) st.prepend(spinner());
     // "Remove from fit" on every card, both screens: the pair leaves the session for good
     const rm = el("button", "pair-remove", t("Remove from fit"));
     rm.dataset.i18n = "Remove from fit";
@@ -304,13 +352,12 @@ export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit
     }
     // Active D-Lighting is not shown: the browser RAW metadata does not expose it, and a
     // permanent "?" on every card was noise (UX review, decision #15)
-    // stage 2: preparation progress and the aligned NCC
-    if (p.preparing) {
-      dl.append(...metaRow("Preparing", t("{stage}…", { stage: prepStageText(p.prepStage ?? "queued") })));
-    } else if (p.prepared && !blocked) {
+    // stage 2: the aligned NCC; the preparation progress is the bar under the list (decision #16)
+    if (!p.preparing && p.prepared && !blocked) {
       dl.append(...metaRow("Alignment", `NCC ${p.prepared.ncc.toFixed(3)}`));
     }
     box.append(dl);
+    if (p.preparing) box.append(prepProgress(p));
 
     // the JPEG slot: only once the RAW is decoded (decision #7) — "Add JPEG" / "Replace JPEG"
     if (canAttachTarget(p) && p.target !== "pending") {

@@ -700,6 +700,7 @@ export async function runLevel8({ browser, port, report, skip }) {
       // the quick editor (decision #16) is reached from Compare and applies the profile control:
       // Compare stays (the viewer with the target, the strip), the panel replaces the report
       await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
+      const boxBefore = await ev(() => JSON.stringify(document.getElementById("cmp-box").getBoundingClientRect()));
       await ev(() => document.getElementById("cmp-manual").click());
       await page.waitForFunction(
         `window.__np3app.state.step === "edit" && !window.__np3app.state.renderPending`,
@@ -708,20 +709,30 @@ export async function runLevel8({ browser, port, report, skip }) {
         const ed = await ev(() => {
           const A = window.__np3app;
           const shown = (id) => getComputedStyle(document.getElementById(id)).display !== "none";
+          const off = (id) => document.getElementById(id).disabled;
           return {
             controlSame: JSON.stringify(A.state.control) === JSON.stringify(A.state.versions[0].control),
             strength: A.state.strength,
             layout: shown("compare") && shown("panel") && shown("cmp-strip") && !shown("report")
-              && !shown("view") && !shown("files") && !shown("cmp-refit-box"),
+              && !shown("view") && !shown("files") && shown("cmp-refit-box") && shown("cmp-sidepanel"),
+            disabled: ["cmp-manual", "cmp-download", "cmp-share", "cmp-refit", "cmp-strength"].every(off),
+            box: JSON.stringify(document.getElementById("cmp-box").getBoundingClientRect()),
             name: A.state.control.name,
           };
         });
         report(ed.controlSame && ed.strength === 100 && ed.layout,
           `8 fit: Manual adjustments opens the quick editor on Compare with the profile control (${ed.name}); the panel replaces the report`);
+        report(ed.disabled && ed.box === boxBefore,
+          `8 fit: the quick editor keeps the Compare layout (the viewer does not move); Refit, the strength bar and the actions are disabled (${ed.disabled}; ${boxBefore} -> ${ed.box})`);
       }
-      // Cancel without edits: straight back to Compare, the profile untouched
+      // Cancel without edits: straight back to Compare, the profile untouched, the actions enabled
       await ev(() => document.getElementById("adj-cancel").click());
       await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
+      {
+        const on = await ev(() => ["cmp-manual", "cmp-download", "cmp-share", "cmp-strength"]
+          .every((id) => !document.getElementById(id).disabled));
+        report(on, "8 fit: after Cancel the Compare actions are enabled again");
+      }
       // Copy link moved from step 3.1 to Compare: it leads to the profile editor page
       // (spec/ui-pages.md "Share links")
       {
