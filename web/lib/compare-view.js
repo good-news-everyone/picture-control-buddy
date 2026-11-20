@@ -74,6 +74,34 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
     return c;
   }
 
+  // The target canvases, built once per decoded target (keyed by the target object): the
+  // display canvas (capped at TARGET_LONG px on the long side — a 24-MP float→RGBA conversion
+  // on every pair switch and every refresh cost ~0.5 s per pair, the strip rebuilt all of them)
+  // and the strip thumbnail. A re-dropped target is a new object, so the cache follows it.
+  const TARGET_LONG = 4096;
+  const targetCache = new WeakMap();
+  function targetCanvases(tg) {
+    let c = targetCache.get(tg);
+    if (c) return c;
+    const full = toCanvas({ data: tg.rgb, w: tg.width, h: tg.height });
+    const fit = (cv, long) => {
+      const s = Math.min(1, long / Math.max(cv.width, cv.height));
+      if (s === 1) return cv;
+      const o = document.createElement("canvas");
+      o.width = Math.max(1, Math.round(cv.width * s));
+      o.height = Math.max(1, Math.round(cv.height * s));
+      const ox = o.getContext("2d");
+      ox.imageSmoothingEnabled = true;
+      ox.imageSmoothingQuality = "high";
+      ox.drawImage(cv, 0, 0, o.width, o.height);
+      return o;
+    };
+    const display = fit(full, TARGET_LONG);
+    c = { display, thumb: fit(display, 72) };
+    targetCache.set(tg, c);
+    return c;
+  }
+
   // ---------- the render request (generation-checked, the loader.js rule) ----------
   function scheduleRender() {
     const p = pair(), v = version();
@@ -296,6 +324,14 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   });
   window.addEventListener("mouseup", () => { drag = null; });
   window.addEventListener("resize", () => draw());
+  // The box also changes size without a window resize — the step switch (editor -> compare)
+  // lays the screen out after the first draw, the report panel fills in, a scrollbar comes or
+  // goes. A canvas buffer sized for the old box is then stretched by CSS (the image shows
+  // shrunk/offset until the next interaction); redraw whenever the box itself changes.
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => { if (canvas.getBoundingClientRect().width > 0) draw(); })
+      .observe(canvas.parentElement);
+  }
 
   // the hold-key swap (Space) — before/after in the editor is guarded to the edit step,
   // so the key is free here. Ignored while a form control has the focus.
@@ -345,25 +381,10 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
     const blocked = !compareUsable(p);
     if (blocked) box.classList.add("blocked");
     if (p.id === state.selectedPairId) box.classList.add("selected");
-    const tw = p.target.width, th = p.target.height;
+    const src = targetCanvases(p.target).thumb;
     const c = document.createElement("canvas");
-    const s = 72 / Math.max(tw, th);
-    c.width = Math.max(1, Math.round(tw * s));
-    c.height = Math.max(1, Math.round(th * s));
-    const cx = c.getContext("2d");
-    const im = cx.createImageData(tw, th);
-    const rgb = p.target.rgb;
-    for (let i = 0, j = 0; i < im.data.length; i += 4, j += 3) {
-      im.data[i] = Math.round(255 * Math.min(1, Math.max(0, rgb[j])));
-      im.data[i + 1] = Math.round(255 * Math.min(1, Math.max(0, rgb[j + 1])));
-      im.data[i + 2] = Math.round(255 * Math.min(1, Math.max(0, rgb[j + 2])));
-      im.data[i + 3] = 255;
-    }
-    const full = document.createElement("canvas");
-    full.width = tw; full.height = th;
-    full.getContext("2d").putImageData(im, 0, 0);
-    cx.imageSmoothingEnabled = true;
-    cx.drawImage(full, 0, 0, c.width, c.height);
+    c.width = src.width; c.height = src.height;
+    c.getContext("2d").drawImage(src, 0, 0);
     box.append(c);
     box.title = p.rawFile ? p.rawFile.name : (p.targetFile ? p.targetFile.name : "");
     if (blocked) {
@@ -414,7 +435,7 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
     const p = pair();
     if (p && isTargetReady(p)) {
       targetBitmap = { data: p.target.rgb, w: p.target.width, h: p.target.height };
-      targetCv = toCanvas(targetBitmap);
+      targetCv = targetCanvases(p.target).display;
     } else {
       targetBitmap = null; targetCv = null;
     }

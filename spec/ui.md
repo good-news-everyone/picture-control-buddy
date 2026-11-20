@@ -38,7 +38,12 @@ On steps 2 and 3.1 there is a **profile strength** slider (see the "Profile stre
    - Active D-Lighting is left "as shot" ([memory/adl-as-shot.md](memory/adl-as-shot.md));
    - the more different colors in the frame the better: greys, skin, greenery, sky, saturated warm colors;
    - more than 6 frames usually does not help the fit (`MAX_FRAMES`).
-3. Pair loading: a RAW field (`.NEF`, `.DNG`) and a target field (`.JPG`). Drag-and-drop or file pickers, several files at once. **TIFF targets are not accepted in the browser interface** (decision 2026-11-19: nobody loads TIFFs into the browser; TIFF pairs remain fully supported by the Python CLI). Pairing rule (implemented in stage 1): a RAW and a JPEG with the same base name form one pair; the remaining files are matched in the order they arrived — a file joins the first pair that has the other kind of file and lacks its own; with no candidate a new pair is created (possibly a single-file pair, completed later). Re-dropping a RAW with the same name as a not-yet-ready slot retries that pair. Until real pair preparation arrives (stage 2), a target whose aspect ratio does not match the RAW frame (either orientation, ±2%) is rejected as a crop/rotation hint — a documented stage-1 guard, not the alignment check.
+3. Pair loading, **RAW first** (decision #7, 2026-11-20; replaces the earlier two-zone pairing rule):
+   - One drop zone / picker for RAW files (`.NEF`, `.DNG`), several at once. There is no global JPEG zone.
+   - Every RAW gets a card at once, with decode progress. Only after the RAW is decoded does the card offer an **"Add JPEG"** slot: a click opens a picker for one `.JPG`, or a JPEG is dropped onto the card. The user decides which JPEG belongs to which RAW; base names are not matched.
+   - Every card has an explicit **"Remove from fit"** button. There is no include checkbox and no "Edit" button.
+   - **TIFF targets are not accepted in the browser interface** (decision 2026-11-19: nobody loads TIFFs into the browser; TIFF pairs remain fully supported by the Python CLI).
+   - Details and edge cases: "Decisions" #7.
 4. Profile name. This is the `name` field in NP3: 1 to 19 ASCII characters (`np3.serialize`). By default the name is taken from the RAW, as in `match.py`. Invalid characters are highlighted right away, before the run.
 5. A "Fit" button.
 
@@ -59,7 +64,7 @@ On steps 2 and 3.1 there is a **profile strength** slider (see the "Profile stre
 
 **Screen**
 
-- The "RAW + NP3" render next to the original JPEG. Modes: side by side, a curtain, switching by a key. Zoom and pan are shared by both halves.
+- The "RAW + NP3" render next to the original JPEG. Modes: side by side and a curtain (the key-toggle mode is removed, decision #8). Zoom and pan are shared by both halves; a double click on the image returns to the fitted view (there is no "Reset view" button).
 - If there are several pairs, a strip of thumbnails on top. The report is shown for the selected pair and aggregated over all.
 - The report (see below).
 - The profile strength slider. The render and the report are recomputed on a strength change.
@@ -91,15 +96,16 @@ The starting values are taken from the selected profile version.
 - Tools the browser render does not understand yet (an analog of `Renderer.unrendered`) are visible and marked.
 - Undo and redo. Reset of a field, a group or the whole profile to the fitted values. Changed fields get a mark.
 - "Save NP3": the browser creates and downloads the file without contacting the server. Strength is already applied in the file.
-- "Save a strength set": several NP3s at once, e.g. 30, 50, 70 and 100%. The computation matches `strength.py name 30 50 70` but runs in the browser; file names are derived from the base name and are unique (no field of the NP3 itself is renamed).
+- ~~"Save a strength set": several NP3s at once.~~ Removed by decision #10: the user saves NP3s at the strengths they need one by one.
 - One can return to step 2 and continue fitting. Manual edits are not carried over in that case, a warning is needed.
 
 ## Step 3.2. More frames
 
 - Loading one or more new pairs with the same checks as at step 1.
 - A hint on which colors are missing: coverage of groups over the already loaded pairs (`analyze.coverage`, `analyze.suggest`). Example: "little skin and sky".
-- If more candidates are loaded than needed, a set is recommended (`analyze.recommend`), the user can change it.
-- A pair that interferes can be removed from the fit: e.g. the one whose error is much higher than the others.
+- Loading follows the same RAW-first flow as step 1 (decision #7).
+- If more candidates are loaded than needed, a set is recommended (`analyze.recommend`). Pairs outside it are marked "not recommended"; nothing is removed automatically, the user removes pairs with "Remove from fit".
+- A pair that interferes can be removed from the fit: e.g. the one whose error is much higher than the others (only a hint, see decision #7).
 - "Refit": fitting over all selected pairs, the result into the next version (`next_name`: `_r1`, `_r2`...). Then back to step 2.
 
 This is not `match.py --refine`: that one corrects a profile against an NX render, and here NX is not needed. Fitting in the interface is a new fit over the extended pair set. An open question: whether to start it from the previous version instead of zero.
@@ -108,12 +114,46 @@ This is not `match.py --refine`: that one corrects a profile against an NX rende
 
 Fixed 2026-11-19 at the start of the full-flow implementation ([ui-plan.md](ui-plan.md) section 2). Where an earlier section of this document disagrees, this section wins.
 
-1. **Strength UI.** No preset buttons (30/50/70/100%) — a slider only. The profile and file name do not change at any strength: no `-70`-style suffix, no truncation. The strength-set export (several NP3s at once) stays; its files get valid unique names derived from the base name. This keeps the manual-MVP behavior; the older preset-button/suffix requirements above are superseded.
-2. **Reset semantics.** In the fitting flow (steps 2, 3.1, 3.2) reset of a field, a group or the whole profile returns to the selected fitted version. Standalone manual editing (the current single-RAW editor) keeps the neutral-default reset. Changed-field marks and undo/redo use the fitted baseline.
+1. **Strength UI.** No preset buttons (30/50/70/100%) — a slider only. The profile and file name do not change at any strength: no `-70`-style suffix, no truncation. ~~The strength-set export (several NP3s at once) stays; its files get valid unique names derived from the base name.~~ The strength-set export is removed (decision #10). This keeps the manual-MVP behavior; the older preset-button/suffix requirements above are superseded.
+2. **Reset semantics.** In the fitting flow (steps 2, 3.1, 3.2) reset of a field, a group or the whole profile returns to the selected fitted version. ~~Standalone manual editing (the current single-RAW editor) keeps the neutral-default reset.~~ The standalone editor is removed by decision #7. Changed-field marks and undo/redo use the fitted baseline.
 3. **Refit initialization.** A refit is a new deterministic fit from the same zero initialization as `match.py`, over all selected pairs. The previous version is kept unchanged. Warm-start from the previous control or from manual edits is a separate quality experiment, not UI behavior.
 4. **Versions and persistence.** Fit versions are immutable and live in tab memory only: `draft`, `_r1`, `_r2`, ... Versions store controls and fit metadata, not pixel buffers. Nothing is written to `out/`, there is no server storage. Session export/autosave is out of scope.
 5. **Strength.** 0-150%, applied after every fit/refit (fitting always runs at 100%); no separate color/curve strengths. Single and batch exports always scale from the base control, never from an already scaled result.
 6. **Open product items.** The disclaimer stays a `DISCLAIMER` stub until approved. Hold-out validation is not part of the first full-flow delivery. No version-retention limit until memory measurements justify one.
+
+7. **Pair assembly: RAW first (2026-11-20).** Supersedes the stage-1 pairing rule (same base name, then arrival order), the global JPEG zone, the include checkbox, the per-card "Edit" button and the standalone editor entry. Applies to Start (step 1) and More frames (step 3.2) alike — one card component, one loading path.
+   - **RAW zone.** The only drop zone / picker on the screen; accepts `.NEF` and `.DNG`, several files at once. A dropped JPEG or any other file is skipped with a status message (for a JPEG: "Add the JPEG on its RAW's card"). A RAW whose base name matches a card that is still decoding or failed retries that card (the old re-drop rule stays); a RAW whose name matches a ready card is skipped as a duplicate with a status message.
+   - **Card states.**
+     1. *Decoding* — file name and progress; only "Remove from fit".
+     2. *RAW error* — the decode error; only "Remove from fit". Such a card never fits.
+     3. *RAW ready, no JPEG* — camera, frame size, the camera warning; an **"Add JPEG"** slot (a button-styled drop target inside the card) and "Remove from fit".
+     4. *JPEG decoding / preparing* — target name and progress (decode, then pair preparation: alignment, NCC, warnings).
+     5. *Pair ready* — the current card content (RAW, Target, Camera, Frames, ADL, Alignment, warnings, More-screen advice) plus "Replace JPEG" and "Remove from fit".
+     6. *Pair blocked* — as 5 with the blocking reason (low NCC, too small target, preparation failure).
+   - **Adding a JPEG.** Allowed only in state 3 (and as "Replace JPEG" in 5/6). The slot accepts exactly one `.JPG`/`.JPEG`: by click (a file picker with `multiple` off) or by drop onto any part of the card. Several files dropped onto a card, or a non-JPEG, are rejected with a message on that card; the card state does not change. A JPEG dropped onto the page outside any card is skipped with the status message above. Names are not compared: a JPEG with another base name is accepted without a warning.
+   - **Target checks** run on the card as before (decode, XMP/edit warnings, the aspect/orientation guard, then preparation and NCC). A rejected JPEG leaves the card in state 3 with the reason shown on the card until the next JPEG is added.
+   - **Replacing a JPEG** cancels the pair's running preparation and drops its preparation, advice record and cached worker data; the pair is prepared again as new. Existing versions are not touched.
+   - **"Remove from fit"** removes the pair from the session **permanently**: files, decoded data, preparation, advice and worker caches are released, its running decode/preparation is cancelled, and a running fit or refit that includes the pair is cancelled (as any selection change does now). No confirmation dialog; to get the pair back the user loads the RAW again. Versions are kept unchanged (they store controls and `pairIds`; an id that no longer exists is simply not shown in the Compare strip). If the removed pair was selected, the selection moves to the next pair, or to none.
+   - **What is fitted.** No inclusion state remains in the UI (the session `included` flag is removed). Fit/refit uses every pair with both files decoded, prepared and not blocked, in card order. Under the Fit/Refit button: "{n} pairs will be fitted" and, when non-zero, "{m} without a JPEG, {k} blocked — skipped". Fit is disabled when n = 0.
+   - **Recommended set (More frames).** "Use the recommended selection" is removed (it toggled inclusion). Pairs outside `analyze.recommend` get a "not recommended" mark with the reason; the high-error hint stays a flag. The user removes pairs by hand; nothing is removed automatically.
+   - **No standalone editor in the wizard.** The "Edit" button and the editor entry from Start are gone: inside the wizard the manual editor is reached only from Compare ("Looks good — manual adjustment") on a fitted version, with the fitted baseline. The standalone editor (neutral reset, its own RAW drop, NP3 import, `?np3=` links) moves to its own pages — decision #9.
+   - **Profile name default** comes from the first RAW card, as before.
+
+8. **Compare screen and report panel (2026-11-20, user review of step 2).**
+   - **Modes:** "Side by side" and "Curtain" only. The "Key toggle" mode, its Space-hold swap and its mention in the hint under the buttons are removed.
+   - **No "Reset view" button.** A double click on the image (either half) returns zoom and pan to the fitted view; the hint under the buttons says so ("Wheel — zoom to the cursor, drag — pan, double click — fit to the screen; in the curtain mode drag the divider").
+   - **Strength value follows the slider.** The number next to the Compare strength slider shows the current strength (`state.strength`) live while dragging, not a fixed "100%". Bug at the time of writing: `compare-view.js` repaints the label only in `refresh()`, not on the slider's `input` event. The same check for every strength label (Compare, editor, report summary): one value, updated on every change.
+   - **No "Download report".** The button is removed from the report panel; the report stays on screen only ("This pair" / "All pairs" remain).
+   - **Curve thumbnail** in "NP3 parameters":
+     - square (1:1), full width of the report panel column, both axes 0..255 as in the curve editor; a thin identity diagonal as the reference;
+     - the curve drawn is the result at the current strength (as now);
+     - backdrop: the Y' luma histogram of the neutral development (without a profile), the same as the curve editor's backdrop (`renderer.lumaHistogram` semantics: detail.YW weights, 256 bins, peak = 1, filled, muted). "This pair" — the selected pair; "All pairs" — the sum of the fitted pairs' histograms, normalized to the peak;
+     - the source is the report worker's cached neutral of each pair (the report grid), so no extra develop is needed; the histogram comes with the report DTO;
+     - with the curve off: the same square with the histogram and the identity diagonal, and the "off" label.
+
+9. **Separate pages (2026-11-20).** The fitting wizard (this document: steps 1, 2, 3.1, 3.2) lives on `web/picture-control-jpg-fit.html`, desktop only. The standalone NP3 editor lives on `web/picture-control-editor.html` with the mobile twin `web/picture-control-editor-mobile.html` (the redirect between the two is inside them). `web/index.html` becomes a landing (to be discussed) that also forwards legacy `?np3=` links to the editor. Step 3.1 stays in the wizard: manual adjustment of a fitted version and editing an NP3 on a RAW are different flows. The wizard has no NP3 import. Details: [ui-pages.md](ui-pages.md).
+
+10. **No strength-set export (2026-11-20).** The "Save strength set (30/50/70/100%)" button is removed from every page (wizard step 3.1 and both editor pages). A user who wants several strengths moves the slider and saves each NP3 with "Save NP3". Decision #5 stays for the single export: it always scales from the base control. Code to remove: the button and its i18n key, `transfer.exportSet`, `web/lib/strength-set.js`, `make_strength_set_golden.py` and its golden fixture with the level-1/8/8b checks that use them; `strength.py` (CLI) is not affected.
 
 ## Profile strength
 
@@ -129,7 +169,7 @@ Strength sets what part of the way from the Nikon neutral to the profile to go. 
 - Above 100% the profile is strengthened. Fields that hit ±100 and get clipped are highlighted, a warning next to them.
 - Fitting (steps 1 and 3.2) always runs at 100%. The chosen strength is kept after it and applied to the new version.
 - The report states the strength it is computed at. NP3 parameters are shown in two columns: profile and result with strength.
-- The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions"). Only the strength-set files differ: `<name>-<percent>.NP3` (the NP3 inside keeps the base name).
+- The name in the NP3 and in the downloaded file is always the base profile name, at any strength (see "Decisions"). ~~Only the strength-set files differ: `<name>-<percent>.NP3`.~~ (strength sets removed, decision #10)
 
 ## Report
 
@@ -147,16 +187,16 @@ It is produced after every step: after a fit, after a refit and after every chan
 
 **3. Error map.** dE2000 per pixel, overlaid on the image or next to it. A sequential scale with a legend (0, 2, 5, 10+). Overexposed and unaligned pixels are painted with a separate neutral color. There is a "dE / dL / dC / dh" switch, where dL, dC and dh have a diverging scale.
 
-**4. NP3 parameters.** All fields of the current version in the same groups as at step 3.1, with a curve thumbnail. Zero fields are muted. At step 2 after a refit the difference from the previous version is shown.
+**4. NP3 parameters.** All fields of the current version in the same groups as at step 3.1, with a square curve thumbnail over a histogram backdrop (decision #8). Zero fields are muted. At step 2 after a refit the difference from the previous version is shown.
 
-The report can be downloaded as a JSON file: summary, table, parameters, file names.
+~~The report can be downloaded as a JSON file: summary, table, parameters, file names.~~ Removed by decision #8: there is no "Download report" button.
 
 ## What remains to be done in code
 
 - A browser analog of `match.py`: fitting with progress in a Worker, without server-side computation. The Python code remains the quality reference.
 - The static application `web/`: local file loading via the File API, background tasks, session state (pairs, versions), a report with an error map.
 - A browser render with an arbitrary `np3.Control`, including the curve and detail. Strength is applied by a local analog of `strength.scaled`.
-- Local download of a single NP3 or a strength set via Blob, without writing to the server.
+- Local download of a single NP3 via Blob, without writing to the server.
 - A browser analog of `analyze.region_sums`: the table needs mean Lab of the target and the render by groups, not only sums.
 
 ## Open questions
@@ -167,3 +207,4 @@ The report can be downloaded as a JSON file: summary, table, parameters, file na
 4. ~~How many versions to keep and where~~ Resolved: immutable versions in tab memory, no retention limit for now (see "Decisions").
 5. ~~The upper strength bound~~ Resolved: 150% (see "Decisions").
 6. ~~A separate strength for color and curve~~ Resolved: no (see "Decisions").
+7. ~~Where NP3 import and `?np3=` share links land without the standalone editor~~ Resolved: on the separate editor pages (decision #9, [ui-pages.md](ui-pages.md)).

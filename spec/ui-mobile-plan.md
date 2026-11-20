@@ -1,5 +1,7 @@
 # Work plan: mobile version (`web/mobile.html`)
 
+> **2026-11-20: rebase pending.** M0–M3 are done on branch `mobile` (`_local/_cloud_transfer/mobile.bundle`, based on `main` 6ac6189 + a 2026-11-19 snapshot of the fitting work). Before M4 the branch is ported onto the page split of [ui-pages.md](ui-pages.md) ([ui-plan.md](ui-plan.md) stage 11): `index.html` → `picture-control-editor.html`, `mobile.html` → `picture-control-editor-mobile.html`, the router only in those two pages, the canonical share URL → `picture-control-editor.html`, the mobile Start screen and its 9b checks dropped, the core hooks moved from `app.js` into `editor-core.js` / `editor-app.js`.
+
 Requirements, layout and acceptance criteria: [ui-mobile.md](ui-mobile.md). This plan splits the work into stages for sequential agent development: every stage has a goal, fixed inputs, tasks by file, tests, a "done when" gate and a hand-off. The contracts in section 2 are fixed before M0 starts and are not changed by the stages (see "Changing a contract").
 
 ## 0. Rules for agents

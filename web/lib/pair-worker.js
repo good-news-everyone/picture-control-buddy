@@ -57,6 +57,9 @@ self.onmessage = (e) => {
     try {
       const prepared = await preparePair({
         linear: m.linear, lw: m.lw, lh: m.lh,
+        unrotate: m.unrotate,     // the decoder's EXIF turn undone (app.js DECODER_TURNS) — without it
+                                  // the XMP crop/vignette run in the wrong frame and the compare render
+                                  // (warpToView, which does apply it) comes out rotated
         targetRgb: m.targetRgb, targetU8: m.targetU8, tw: m.tw, th: m.th,
         xmp: m.xmp, rawBytes: m.rawBytes,
         gain: m.gain, gainNote: m.gainNote,

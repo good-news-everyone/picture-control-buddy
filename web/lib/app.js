@@ -33,7 +33,7 @@ import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { createMore, computeAdvice, frameOf } from "./more-view.js";
-import { warpToView } from "./pair-prepare.js";
+import { viewRemap, applyRemap } from "./pair-prepare.js";
 import { assignFile, pruneEmpty, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion } from "./session.js";
@@ -251,7 +251,7 @@ const beforeAfter = createBeforeAfter($("ba-slot"), { state, renderCurrent });
 
 // ---------- the Comparison screen (stage 4, spec/ui.md step 2) ----------
 // The render side: the developed frame through the renderer (neutral + profile LUT + detail),
-// then warpToView() applies the pair's fitted transform chain (the same parameters
+// then the warpToView() geometry (as a cached viewRemap map) applies the pair's fitted transform chain (the same parameters
 // pair-prepare computed, devignette included — the prepared x is devignetted, the renderer's
 // frame is not). It covers the same image-space rectangle as the H3×W3 report grid (0..W, 0..H
 // of the working size) but sampled at up to the developed frame's own resolution (≤ 2048 px
@@ -260,13 +260,62 @@ const beforeAfter = createBeforeAfter($("ba-slot"), { state, renderCurrent });
 // Generation-checked: a result for a superseded request resolves null and never applies; while
 // its LUT builds, the previous good frame stays on the screen.
 let compareFramePair = null;    // which pair the renderer frame belongs to
+let compareFramePrep = null;    // …and which preparation (its edit gain)
+const compareMaps = new WeakMap();   // preparation -> its viewRemap (the compare geometry)
+
+// The compare frame: the pair's linear RAW frame times the preparation's edit gain — the same
+// x * gain the fit and the report develop (the target's XMP exposure/WB edits compensated),
+// so the screen compares what the error map measures. Without it a target edited by -0.9 EV
+// showed a render ~0.9 EV brighter than the target. The editor keeps the ungained frame.
+function gainedFrame(pair) {
+  const img = pair.raw.image, g = pair.prepared?.gain;
+  if (!g || (g[0] === 1 && g[1] === 1 && g[2] === 1)) return img;
+  const rgb = new Float32Array(img.rgb.length);
+  for (let i = 0; i < rgb.length; i += 3) {
+    rgb[i] = img.rgb[i] * g[0]; rgb[i + 1] = img.rgb[i + 1] * g[1]; rgb[i + 2] = img.rgb[i + 2] * g[2];
+  }
+  return { ...img, rgb };
+}
+
+// A small LRU of finished render sides: (pair preparation, version, strength) fully determine
+// the image (versions are immutable), so going back to a pair or a strength already seen
+// skips the GPU develop + readback (most of a pair switch on a slow GPU).
+const compareRenders = new Map();
+const COMPARE_RENDERS_MAX = 6;
 
 async function renderCompareSide(pair, version, strength, gen) {
   if (!compareUsable(pair)) return null;
-  if (compareFramePair !== pair || !renderer.frame) {
-    pendingFrame = pair.raw.image;
+  const memoKey = compareRenderKey(pair, version, strength);
+  const memo = compareRenders.get(memoKey);
+  if (memo) {
+    compareRenders.delete(memoKey); compareRenders.set(memoKey, memo);   // most recent last
+    return memo;
+  }
+  const side = await renderCompareSideUncached(pair, version, strength, gen);
+  if (side) {
+    compareRenders.set(memoKey, side);
+    while (compareRenders.size > COMPARE_RENDERS_MAX) compareRenders.delete(compareRenders.keys().next().value);
+  }
+  return side;
+}
+
+const compareObjIds = new WeakMap();   // object identity -> a number (preparations, versions)
+let compareObjSeq = 0;
+const objId = (o) => {
+  let id = compareObjIds.get(o);
+  if (!id) { id = ++compareObjSeq; compareObjIds.set(o, id); }
+  return id;
+};
+function compareRenderKey(pair, version, strength) {
+  return `${objId(pair.prepared)}|${objId(version)}|${strength}`;
+}
+
+async function renderCompareSideUncached(pair, version, strength, gen) {
+  if (compareFramePair !== pair || compareFramePrep !== pair.prepared || !renderer.frame) {
+    pendingFrame = gainedFrame(pair);
     renderer.setFrame(null);              // one develop per pair — strength/version changes reuse it
     compareFramePair = pair;
+    compareFramePrep = pair.prepared;
   }
   const ctl = scaled(version.control, strength);
   renderer.setProfile(ctl);
@@ -283,7 +332,15 @@ async function renderCompareSide(pair, version, strength, gen) {
     rgb[i] = rgba[j]; rgb[i + 1] = rgba[j + 1]; rgb[i + 2] = rgba[j + 2];
   }
   const unrotate = (4 - (DECODER_TURNS[pair.raw.info.orientation] ?? 0)) % 4;
-  return warpToView({ data: rgb, w: img.w, h: img.h }, pair.prepared, unrotate);
+  // the warpToView geometry as one cached inverse map (built once per preparation; a pair
+  // switch or a strength/version change is a ~30 ms gather instead of ~1 s of resampling)
+  let map = compareMaps.get(pair.prepared);
+  if (!map || map.fw !== img.w || map.fh !== img.h || map.unrotate !== unrotate) {
+    map = viewRemap(pair.prepared, img.w, img.h, unrotate);
+    map.unrotate = unrotate;
+    compareMaps.set(pair.prepared, map);
+  }
+  return applyRemap({ data: rgb, w: img.w, h: img.h }, map);
 }
 
 const compareView = createCompare({ state,

@@ -249,7 +249,73 @@ Update `web-tests.md`, `tools.md`, `stages.md` and the relevant UI specification
 > **Status 2026-11-20: done (stage 8), pending the user's Firefox run of level 8b.** The full flow is covered by the new browser level **8b** (`web/test-level8b.mjs`, after level 8): Start -> Fit -> Compare -> Manual -> More -> Refit -> Save with byte-exact single and strength-set exports, redo in the real page, the race scenarios (report generations, version switches during LUT builds, cancel-then-refit, a RAW dropped during a decode), resource accounting (object URLs, page Workers, ImageBitmaps) and locality (static GET only) — instrumented from the test, no app hooks. The user's Firefox run of levels 1–8 (2026-11-20) was green before this stage. **Two real stage-2 bugs were found while probing the other local pairs and fixed (every browser, not Chromium-only):** (1) `extractEmbeddedJpeg` accepted a fake "48382×15468 SOF15" byte run inside DSC_6550/DSC_6132 sensor data as the widest preview → "The source image could not be decoded."; the candidate check is now a port of PIL's `Image.open` acceptance (full marker walk, 8-bit precision, 1/3/4 components, quantization tables, size limits), matching Python's pick on all 34 local RAWs (DSC_6550 NCC 0.974 vs golden 0.9737). (2) The target ICC path in `web/lib/target.js` inverted the matrix, mis-evaluated parametric curve types 3/4 and returned linear light — every Display-P3 target came out white (SKL_3024/SKL_3000 NCC 0.000); now ICC-spec curves, profile → D50 → D65 (Bradford) → sRGB, `srgbEncode` — ≤ 0.59 levels vs littleCMS, SKL_3024 NCC 0.851 = Python 0.8514. The level-1c ICC reference was a mirror of the same JS formulas and is now the real `pairs.to_srgb`; regression level **1j** fails 15 checks against the old code. Remaining notes: Jacobian helper Workers inside `fit-worker.js` are not observable from the page; in Firefox (BiDi) request bodies cannot be read, so locality there is method + host only; levels 8 and 8b both fit in the page concurrently (higher CPU on the test machine); the level-1j real-RAW list points at `_local/_cloud_transfer/` copies of DSC_6550/DSC_6132 and skips if they are removed.
 >
 > **Follow-up 2026-11-20 (user report: the compare render looked very low-res).** The stage-4 render side was the H3×W3 report grid itself — 256 px on the long side, upscaled to the canvas next to a full-resolution target. `warpToView` (web/lib/pair-prepare.js) now runs the same transform chain into the same working rectangle at k× the working size (k = min(2048 / long side, the developed frame's extent / the working size) — about 1600 px for the 1600-px RAW develop), with the stored align shift scaled by k and no 3×3 shrink; `warpToWorking` (the report grid) is unchanged and is literally its k = 1 path + the shrink. The overlays still land on the same image-space pixels. Level 1e checks the bit-identity at k = 1 and the k = 2 alignment (6×6-shrunk mean |Δ| ≤ 5e-4; measured 1.2–1.7e-4, an unscaled shift gives 1.67e-3); the level-8 geometry check now asserts the render side covers the working rectangle at ≥ the working resolution. Cost: ~280 ms per render-side update in Node for a 1600-px frame (was ~160 ms). The render side is still bounded by the 1600-px develop, the target by its own resolution.
+>
+> **Follow-up 2026-11-20 (user reports: a portrait pair compared rotated by 90°; slow pair switches; a brighter render than the target).** (1) `pair-worker.js` never passed `unrotate` to `preparePair` — the preparation ran in the decoder's (EXIF-rotated) frame while the compare render undid the turn: every camera-rotated RAW compared rotated by 90°, and with an XMP crop (defined in the sensor frame) the alignment failed outright (SKL_3024 NCC 0.05 in the page vs 0.851 in Node/Python — the "Chromium-only NCC 0" of stage 7 was this). Fixed; level 8b now prepares SKL_3024/SKL_3000/DSC_6550 through the page and asserts NCC ≥ 0.6 plus `warpToWorking(page frame, app unrotate)` ≈ prepared x (luminance correlation > 0.98). (2) The compare render now develops `x · gain` (the target's XMP exposure/WB compensation) like the fit and the report — a −0.88 EV target showed a render ~0.9 EV brighter. (3) Pair switches: the strip rebuilt every thumbnail from the full-resolution float target on each refresh (~0.5 s per pair) and the render side ran warpToView's seven passes (~1–1.4 s). Now the target display canvas (≤ 4096 px) and thumbnail are built once per target, the warpToView geometry is one cached inverse map per preparation (`viewRemap` + `applyRemap`, ~30 ms gather; level 1e: ≤ 2 % mean |Δ| vs warpToView, measured ≤ 1.1 %), and an LRU of 6 finished render sides keyed by (preparation, version, strength) makes revisits instant. Measured in headless Chromium/SwiftShader: a first visit 1.7 s (software GPU develop + readback), revisits ~130 ms (was 2.3–4.3 s). (4) The compare canvas redraws on a ResizeObserver of its box (a step switch could leave a buffer sized for an old layout, stretched by CSS).
 
+
+### Stage 9. RAW-first pair assembly
+
+Spec: [ui.md](ui.md) decision #7 (2026-11-20, user review of the Start screen). Not started.
+
+Tasks:
+
+- `web/lib/session.js`: drop the stage-1 pairing rule (`same base name`, then arrival order) and the `included` flag; a pair is created only by a RAW; `attachTarget(pair, file)` / `replaceTarget(pair, file)` for one card; `refitPairIds` = every decoded, prepared, unblocked pair in card order; the duplicate-RAW rule (retry a decoding/failed card, skip a ready one).
+- `web/lib/start.js`: the six card states; the "Add JPEG" slot (button + card drop target, one file, rejection on the card); "Replace JPEG"; "Remove from fit" on every card in both modes; no checkbox, no "Edit"; the "{n} pairs will be fitted / {m} without a JPEG, {k} blocked — skipped" line under Fit.
+- The wizard page (`web/index.html` until stage 11, then `picture-control-jpg-fit.html`): remove `#target-drop` / `#target-file`; one RAW zone. The mobile page has no Start screen (stage 11), nothing to change there. The global `drop` router: a JPEG outside a card is skipped with a status message.
+- `web/lib/app.js`: `addTargetFile` takes the card's pair; removal releases decode/preparation/advice/worker caches and cancels a fit/refit that uses the pair; replacement cancels and restarts the pair's preparation; remove `enterEditor` from Start, the editor's own RAW drop and the standalone (neutral-baseline) path; selection moves on removal.
+- `web/lib/more-view.js`: remove "Use the recommended selection" and `onIncludeChange`; mark pairs outside `recommend` as "not recommended".
+- i18n: new strings ("Add JPEG", "Replace JPEG", "Remove from fit", "Add the JPEG on its RAW's card", the fit-count line); remove "Include in the fit", "Edit", "Drop JPEG targets here or click to choose".
+- Resolve [ui.md](ui.md) open question #7 (NP3 import and `?np3=` links without the standalone editor) before removing the editor's import path.
+
+Tests (level 8 / 8b rewrite, no new golden data):
+
+- RAW-only drop: cards appear in decoding state, no JPEG slot until decoded; a RAW error card offers only removal.
+- JPEG via picker and via drop on a card; several files or a non-JPEG on a card are rejected without a state change; a JPEG dropped outside cards is skipped; a JPEG with a different base name is accepted.
+- Replace JPEG during and after preparation: the old preparation is discarded, the new NCC is reported, versions unchanged.
+- Remove from fit: during decode, during preparation, during a fit/refit (cancelled), after a fit (versions kept, Compare strip without the pair); resources released (object URLs, worker cache entries).
+- Fit count line and the disabled Fit with only RAW-only/blocked cards; refit uses exactly the remaining ready pairs.
+- More frames: "not recommended" marks, no automatic removal; the editor is reachable only via Compare.
+
+### Stage 10. Compare screen and report panel cleanup
+
+Spec: [ui.md](ui.md) decision #8 (2026-11-20, user review of step 2). Not started.
+
+Tasks:
+
+- `web/index.html` / `web/lib/compare-view.js`: remove the `toggle` mode button, its Space handler and state; remove `#cmp-reset`, bind `dblclick` on the compare canvas to the existing fit-view reset; update the hint string (i18n key changes).
+- `web/lib/compare-view.js`: `paintStrength()` on the slider's `input` event (the label shows the live value); audit the other strength labels for the same bug.
+- `web/lib/report-view.js`: remove the "Download report" button and its Blob/URL code; `web-schemas.md` §4.4 and the `report/report_download.json` golden become unused — remove them with their test checks.
+- Curve thumbnail: square SVG (viewBox 0..255 + padding), identity diagonal, histogram path under the curve; `report-worker.js` adds a 256-bin normalized luma histogram of the cached neutral per pair to the report DTO (`web-schemas.md` §4.3 gains `neutralHist: number[256]`), the aggregate is the sum of the fitted pairs' bins re-normalized; same visual classes as the curve editor's `ce-hist`.
+
+Tests (level 8 additions):
+
+- The mode buttons are exactly side-by-side and curtain; Space does nothing on Compare.
+- Double click restores the fitted view after a zoom/pan; no `#cmp-reset`.
+- Dragging the strength slider to 40 / 130 shows "40%" / "130%" next to it before any re-render finishes.
+- No "Download report" control; no object URL is created by the report panel.
+- The curve thumbnail is square; the histogram path exists with and without a curve; switching "This pair" / "All pairs" changes it; the histogram matches `renderer.lumaHistogram` of the same neutral within binning tolerance (Node, on the report grid).
+
+### Stage 11. Page split: wizard, editor, mobile editor, landing
+
+Spec: [ui-pages.md](ui-pages.md), [ui.md](ui.md) decision #9 (2026-11-20). Not started. Best done before stages 9–10 land in markup, or together with them, so the wizard markup is written once.
+
+Tasks, in order:
+
+1. **Split `app.js`** on `feature/np3-fit`: `lib/editor-core.js` (renderer, loader, panels, curve, blender, grading, history, before/after, transfer, `renderCurrent`, `setStatus`), `lib/fit-app.js` (session, Start, Compare, report, More, workers, versions, baseline, step 3.1 mounting the core), `lib/editor-app.js` (one RAW, NP3 import/export/share, neutral reset, drop router with the JPEG hint). Behavior unchanged except what ui-pages.md lists.
+2. **Pages:** `picture-control-jpg-fit.html` (today's `index.html` without the standalone-editor entry and without NP3 import; the phone banner), `picture-control-editor.html` (today's editor column layout without Start/Compare/report/More). Level 8/8b → the wizard page; the standalone-editor checks → a new level on the editor page. Green before step 3.
+3. **Port the mobile branch** (M0–M3 of [ui-mobile-plan.md](ui-mobile-plan.md)): `common.css`, `mobile.css`, `mobile.js`, `touch.js`, `icons.js`, `view-route.js` with the new `PAGES`, the `history.js`/`before-after.js`/`curve-editor.js`/`panels.js`/`transfer.js` hooks — into `editor-core.js`/`editor-app.js` instead of `app.js`; `mobile.html` → `picture-control-editor-mobile.html` without the Start screen; levels 9a–9d on the new pages (9b without Start checks). Then M4 (devices) as planned.
+4. **Share URL** → `picture-control-editor.html?np3=` from every page.
+5. **Landing** `index.html`: for now the minimal version of ui-pages.md (two links + the legacy `?np3=` forward, no heavy assets); the real landing after the content is agreed.
+6. Docs: `spec/tools.md` / `README.md` run instructions (which page to open), `web-tests.md` page per level.
+
+Tests: see ui-pages.md "Tests".
+
+### Stage 12. Remove the strength-set export
+
+Spec: [ui.md](ui.md) decision #10 (2026-11-20). Not started. Supersedes the strength-set parts of stage 6.
+
+- Remove the "Save strength set" button and its i18n key (`index.html` / the wizard page, the editor pages, `mobile.html` if it has one), `exportSet` and its busy state in `transfer.js`, `web/lib/strength-set.js`, `web/make_strength_set_golden.py` and its golden files.
+- Tests: drop the strength-set level-1 checks and the byte-exact strength-set export of level 8b; add one check that no such control exists on any page. Single-NP3 export at a non-100% strength stays byte-exact against `strength.scaled`.
 
 ## 5. Delivery milestones
 

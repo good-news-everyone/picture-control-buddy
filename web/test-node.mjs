@@ -344,6 +344,29 @@ async function level1e(ctx) {
         + ` k=2 6×6-shrunk mean |Δ| ${mad.toExponential(2)} (tol ${VIEW_TOL}), default k ${def.k.toFixed(3)}`
         + ` -> ${def.w}×${def.h}`);
     }
+    // the fast compare path (viewRemap + applyRemap, what app.js draws): one bilinear gather
+    // through the composed inverse map vs the seven-pass warpToView — same size, the same
+    // fill, mean |Δ| ≤ 2 % of the mean level (measured ≤ 1.1 %; bilinear vs the box/bicubic
+    // kernels). A wrong turn, crop offset or shift misplaces the content and fails.
+    {
+      const frame = { data: new Float32Array(linB.buffer, linB.byteOffset, linB.byteLength / 4),
+                      w: inj.inputs.linear.w, h: inj.inputs.linear.h };
+      const unr = inj.inputs.linear.unrotate;
+      const ref = P.warpToView(frame, prep, unr);
+      const fast = P.applyRemap(frame, P.viewRemap(prep, frame.w, frame.h, unr));
+      let s = 0, lv = 0, n = 0, fill = 0;
+      for (let i = 0; i < ref.data.length; i += 3) {
+        const rz = ref.data[i] + ref.data[i + 1] + ref.data[i + 2] === 0;
+        const fz = fast.data[i] + fast.data[i + 1] + fast.data[i + 2] === 0;
+        if (rz !== fz) { fill++; continue; }
+        for (let c = 0; c < 3; c++) { s += Math.abs(ref.data[i + c] - fast.data[i + c]); lv += ref.data[i + c]; n++; }
+      }
+      const rel = s / Math.max(1e-12, lv);
+      const fillPct = 100 * fill / (ref.data.length / 3);
+      report(fast.w === ref.w && fast.h === ref.h && rel <= 0.02 && fillPct <= 0.5,
+        `1e ${key} view remap: ${fast.w}×${fast.h}, mean |Δ| ${(100 * rel).toFixed(2)} % of the level`
+        + ` (tol 2 %), fill mismatch ${fillPct.toFixed(2)} % (tol 0.5 %) vs warpToView`);
+    }
   }
 
   // extractEmbeddedJpeg: a pure port of the pairs.embedded_jpeg PIL scan (two candidates,

@@ -879,3 +879,139 @@ function alignedAt(o, prepared, OW, OH) {
   const m = [sc, 0, OW / 2 - sc * (OW / 2 + sx), 0, sc, OH / 2 - sc * (OH / 2 + sy)];
   return warpAffine(aR, OW, OH, OW, OH, m, "bilinear", { dtype: "f32", channels: 3 }).data;
 }
+
+
+// ------------------------------------------------------------------ the fast compare remap
+// warpToView runs seven full-frame resampling passes (unrotate, devignette, lens radial, the
+// bicubic XMP-crop rotation, orientation, the box resize, radial, affine) — ~1–1.4 s per pair
+// switch in the browser, most of it the crop rotation. For the screen the same geometry is one
+// inverse map: every output pixel is traced back through the chain to a frame coordinate (and
+// the devignette gain at the intermediate position), then one bilinear gather. The map depends
+// only on the preparation, the frame size and the output size, so it is built once per pair and
+// every strength/version change is a gather (~20 ms). Not bit-identical to warpToView (point
+// bilinear instead of the box/bicubic kernels): display only — the report keeps warpToWorking.
+// Level 1e checks it against warpToView. Outside the source (the align/crop fill) -> sx = NaN.
+export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null } = {}) {
+  const tr = prepared.transform;
+  const W = prepared.size.w, H = prepared.size.h;
+  const unr = ((unrotate ?? 0) % 4 + 4) % 4;
+  // sizes along the chain
+  const w1 = unr % 2 ? fh : fw, h1 = unr % 2 ? fw : fh;          // A: unrotated frame (= B)
+  let cw = w1, ch = h1, x0 = 0, y0 = 0, rot = null;               // C: the crop
+  if (tr.crop && tr.crop.hasCrop) {
+    const c = tr.crop;
+    const ang = c.angleDeg * c.angleSign;
+    const cx = (c.left + c.right) / 2 * w1, cy = (c.top + c.bottom) / 2 * h1;
+    const a = ang * Math.PI / 180;
+    const dx = (c.right - c.left) * w1, dy = (c.bottom - c.top) * h1;
+    const cwf = Math.abs(dx * Math.cos(a) + dy * Math.sin(a));
+    const chf = Math.abs(dy * Math.cos(a) - dx * Math.sin(a));
+    x0 = Math.trunc(cx - cwf / 2); y0 = Math.trunc(cy - chf / 2);
+    cw = Math.trunc(cx + cwf / 2) - x0; ch = Math.trunc(cy + chf / 2) - y0;
+    if (Math.abs(ang) > 1e-3) {
+      const angle = ((ang % 360) + 360) % 360;
+      const ra = -angle * Math.PI / 180;
+      const r15 = (v) => Number(v.toFixed(15));
+      const a0 = r15(Math.cos(ra)), a1 = r15(Math.sin(ra)), a3 = r15(-Math.sin(ra)), a4 = r15(Math.cos(ra));
+      rot = [a0, a1, a0 * -cx + a1 * -cy + cx, a3, a4, a3 * -cx + a4 * -cy + cy];
+    }
+  }
+  const r2 = ((tr.orientation % 4) + 4) % 4;
+  const wd = r2 % 2 ? ch : cw, hd = r2 % 2 ? cw : ch;              // D: oriented
+  const kk = k ?? Math.max(1 / BOX, Math.min(maxLong / Math.max(W, H), wd / W, hd / H));
+  const OW = Math.max(1, Math.round(W * kk)), OH = Math.max(1, Math.round(H * kk));
+  // the align affine (transform semantics) and the radial at OW×OH
+  const sc = 1 / tr.warpScale;
+  const shx = tr.shiftX * (OW / W), shy = tr.shiftY * (OH / H);
+  const m0 = sc, m2 = OW / 2 - sc * (OW / 2 + shx), m4 = sc, m5 = OH / 2 - sc * (OH / 2 + shy);
+  const denE = OW * OW / 4 + OH * OH / 4;
+  const lens = tr.lensRadial;
+  const denB = w1 * w1 / 4 + h1 * h1 / 4;
+  const denV = Math.hypot(w1 / 2, h1 / 2);
+  const va = prepared.vignette.a, vb = prepared.vignette.b;
+  const n = OW * OH;
+  const sx = new Float32Array(n), sy = new Float32Array(n), g = new Float32Array(n);
+  for (let y = 0, i = 0; y < OH; y++) {
+    for (let x = 0; x < OW; x++, i++) {
+      // G -> F (affine, center coords -> index coords)
+      const xin = m0 * (x + 0.5) + m2, yin = m4 * (y + 0.5) + m5;
+      if (xin < 0 || xin >= OW || yin < 0 || yin >= OH) { sx[i] = NaN; continue; }
+      let px = xin - 0.5, py = yin - 0.5;
+      // F -> E (devpairs.radial, clamped)
+      {
+        const xx = px - OW / 2, yy = py - OH / 2;
+        const d = (1 + (tr.radialK * (xx * xx + yy * yy)) / denE) / tr.radialScale;
+        px = Math.min(OW - 1.001, Math.max(0, xx * d + OW / 2));
+        py = Math.min(OH - 1.001, Math.max(0, yy * d + OH / 2));
+      }
+      // E -> D (the box resize: pixel centers)
+      px = (px + 0.5) * (wd / OW) - 0.5;
+      py = (py + 0.5) * (hd / OH) - 0.5;
+      // D -> C (undo r2 counter-clockwise turns: one turn maps C(col = Cw-1-y, row = x))
+      {
+        let cwi = wd, chi = hd;
+        for (let t = 0; t < r2; t++) {
+          // the image before this turn has width chi, height cwi
+          const nx = chi - 1 - py, ny = px;
+          px = nx; py = ny;
+          const tmp = cwi; cwi = chi; chi = tmp;
+        }
+      }
+      // C -> rotated (crop offset) -> B (the PIL rotation inverse map)
+      px += x0; py += y0;
+      if (rot) {
+        if (px < -0.5 || px >= w1 - 0.5 || py < -0.5 || py >= h1 - 0.5) { sx[i] = NaN; continue; }
+        const xr = rot[0] * (px + 0.5) + rot[1] * (py + 0.5) + rot[2];
+        const yr = rot[3] * (px + 0.5) + rot[4] * (py + 0.5) + rot[5];
+        if (xr < 0 || xr >= w1 || yr < 0 || yr >= h1) { sx[i] = NaN; continue; }
+        px = xr - 0.5; py = yr - 0.5;
+      }
+      if (px < -0.5 || px > w1 - 0.5 || py < -0.5 || py > h1 - 0.5) { sx[i] = NaN; continue; }
+      // B -> A (the embedded-JPEG lens radial, clamped)
+      if (lens) {
+        const xx = px - w1 / 2, yy = py - h1 / 2;
+        const d = (1 + (lens.k * (xx * xx + yy * yy)) / denB) / lens.scale;
+        px = Math.min(w1 - 1.001, Math.max(0, xx * d + w1 / 2));
+        py = Math.min(h1 - 1.001, Math.max(0, yy * d + h1 / 2));
+      }
+      // the devignette gain at A
+      {
+        const rr = Math.hypot(px + 0.5 - w1 / 2, py + 0.5 - h1 / 2) / denV;
+        const q = rr * rr;
+        g[i] = Math.pow(2, va * q + vb * q * q);
+      }
+      // A -> frame (undo the unrotate turns)
+      {
+        let aw = w1, ah = h1;
+        for (let t = 0; t < unr; t++) {
+          const nx = ah - 1 - py, ny = px;
+          px = nx; py = ny;
+          const tmp = aw; aw = ah; ah = tmp;
+        }
+      }
+      sx[i] = px; sy[i] = py;
+    }
+  }
+  return { sx, sy, g, w: OW, h: OH, fw, fh, k: kk };
+}
+
+/** One bilinear gather of an RGB frame through a viewRemap map (edges clamped, NaN -> 0). */
+export function applyRemap(frame, map) {
+  const { data, w: fw, h: fh } = frame;
+  const { sx, sy, g } = map;
+  const out = new Float32Array(map.w * map.h * 3);
+  for (let i = 0, j = 0; i < sx.length; i++, j += 3) {
+    const u = sx[i];
+    if (u !== u) continue;                         // NaN: outside the source
+    const v = sy[i];
+    const x0 = Math.max(0, Math.min(fw - 1, Math.floor(u))), y0 = Math.max(0, Math.min(fh - 1, Math.floor(v)));
+    const x1 = Math.min(fw - 1, x0 + 1), y1 = Math.min(fh - 1, y0 + 1);
+    const fx = Math.max(0, Math.min(1, u - x0)), fy = Math.max(0, Math.min(1, v - y0));
+    const a = (y0 * fw + x0) * 3, b = (y0 * fw + x1) * 3, c = (y1 * fw + x0) * 3, d = (y1 * fw + x1) * 3;
+    const w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy, gg = g[i];
+    out[j] = (data[a] * w00 + data[b] * w01 + data[c] * w10 + data[d] * w11) * gg;
+    out[j + 1] = (data[a + 1] * w00 + data[b + 1] * w01 + data[c + 1] * w10 + data[d + 1] * w11) * gg;
+    out[j + 2] = (data[a + 2] * w00 + data[b + 2] * w01 + data[c + 2] * w10 + data[d + 2] * w11) * gg;
+  }
+  return { data: out, w: map.w, h: map.h };
+}

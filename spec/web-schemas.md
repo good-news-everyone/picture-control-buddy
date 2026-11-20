@@ -272,6 +272,9 @@ report: {
 
 ### 4.4 JSON download format
 
+> **2026-11-20: removed from the UI** ([ui.md](ui.md) decision #8, [ui-plan.md](ui-plan.md) stage 10). The format below is kept only until stage 10 deletes the serializer and its golden fixture.
+
+
 Versioned, self-contained, file-name only (matches ui.md "summary, table, parameters,
 file names"):
 

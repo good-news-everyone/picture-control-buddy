@@ -5,8 +5,9 @@
 //   (single NP3 + the strength set),
 // with the races (RAW decode, report, refit, version switches during LUT builds), the resource
 // bookkeeping (object URLs, page Workers, ImageBitmaps) and the locality rule checked along the
-// way. A separate, never-failing diagnostics probe records how the stage-2 preparation behaves
-// on the other real pairs in _local/ (decode / NCC), one page per pair.
+// way. The other real pairs in _local/ (SKL_3024, SKL_3000, DSC_6550 — Python-valid) are
+// prepared through the page, one page per pair: they must align and the compare geometry must
+// reproduce the prepared frame (missing files skip).
 // Level 8 stays as it is; 8b runs on its own page (spec/web-tests.md).
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -110,7 +111,7 @@ export async function runLevel8b({ browser, port, report, skip }) {
   } else {
     await mainFlow({ browser, port, report, skip });
   }
-  await probe({ browser, port, skip });
+  await probe({ browser, port, report, skip });
 }
 
 async function mainFlow({ browser, port, report, skip }) {
@@ -473,11 +474,15 @@ async function mainFlow({ browser, port, report, skip }) {
   await page.close();
 }
 
-// ---------- diagnostics probe (never fails): stage-2 preparation on the other real pairs ----------
-// Records decode / alignment for each pair present in _local/: whether the RAW and the target
-// decode, the aligned NCC, a blocked code or a preparation error. The lines are "skip" lines
-// (info), so a browser difference shows up in the log without failing the suite.
-async function probe({ browser, port, skip }) {
+// ---------- stage-2 preparation on the other real pairs (Python-valid, so they must align) ----------
+// Each pair present in _local/ is prepared through the real page path (the pair Worker). Python
+// (devpairs.build) aligns all three, so the NCC must reach the block threshold (0.6). The second
+// check is the orientation contract between the Worker and the compare render side: the page's
+// RAW frame put through warpToWorking with the app's unrotate (render.TURNS undone, as
+// renderCompareSide does) must reproduce the prepared x — a Worker that drops `unrotate`
+// (2026-11-20: portrait NEF/DNG compared rotated by 90°, SKL_3024 NCC 0.05) fails both checks.
+// Missing files skip.
+async function probe({ browser, port, report, skip }) {
   const cases = [
     { stem: "SKL_3024", raw: "test2/SKL_3024.dng", target: "test2/SKL_3024.jpg" },
     { stem: "SKL_3000", raw: "test2/SKL_3000.dng", target: "test2/SKL_3000.jpg" },
@@ -485,7 +490,7 @@ async function probe({ browser, port, skip }) {
   ];
   for (const c of cases) {
     if (!rootFile(c.raw) || !rootFile(c.target)) {
-      skip(`8b probe ${c.stem}: no files (${c.raw}, ${c.target})`);
+      skip(`8b pairs ${c.stem}: no files (${c.raw}, ${c.target})`);
       continue;
     }
     const t0 = Date.now();
@@ -510,19 +515,45 @@ async function probe({ browser, port, skip }) {
                  target: p.target?.width ? `${p.target.width}x${p.target.height}` : `none ("${s.status}")`,
                  ready: !!p.raw?.image && !!p.target?.width };
       });
-      let prep = "not prepared";
-      if (pre.ready) {
-        prep = await page.evaluate(async () => {
-          const p = window.__np3app.state.pairs[0];
-          await window.__np3app.prepareOne(p);
-          if (p.prepError) return `prepError "${p.prepError}"`;
-          if (!p.prepared) return "no result";
-          return `NCC ${p.prepared.ncc.toFixed(3)}${p.prepared.blocked ? `, blocked ${p.prepared.blocked.code}` : ""}`;
-        });
+      if (!pre.ready) {
+        report(false, `8b pairs ${c.stem}: RAW ${pre.raw}, target ${pre.target} — the pair did not decode`);
+        continue;
       }
-      skip(`8b probe ${c.stem} (info): RAW ${pre.raw}, target ${pre.target}, ${prep} — ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+      const r = await page.evaluate(async () => {
+        const A = window.__np3app, p = A.state.pairs[0];
+        await A.prepareOne(p);
+        if (p.prepError) return { err: `prepError "${p.prepError}"` };
+        if (!p.prepared) return { err: "no result" };
+        const P = await import("./lib/pair-prepare.js");
+        const TURNS = { 3: 2, 6: 3, 8: 1 };               // render.TURNS (app.js DECODER_TURNS)
+        const unr = (4 - (TURNS[p.raw.info.orientation] ?? 0)) % 4;
+        const img = p.raw.image;
+        const g = P.warpToWorking({ data: img.rgb, w: img.w, h: img.h }, p.prepared, unr).data;
+        const x = p.prepared.x;
+        if (g.length !== x.length) return { ncc: p.prepared.ncc, blocked: p.prepared.blocked?.code, corr: null,
+                                            orient: p.raw.info.orientation };
+        // luminance correlation (gain-free)
+        let sa = 0, sb = 0, n = g.length / 3;
+        const la = new Float64Array(n), lb = new Float64Array(n);
+        for (let i = 0, j = 0; i < n; i++, j += 3) {
+          la[i] = g[j] + g[j + 1] + g[j + 2]; lb[i] = x[j] + x[j + 1] + x[j + 2]; sa += la[i]; sb += lb[i];
+        }
+        sa /= n; sb /= n;
+        let ab = 0, aa = 0, bb = 0;
+        for (let i = 0; i < n; i++) { const a = la[i] - sa, b = lb[i] - sb; ab += a * b; aa += a * a; bb += b * b; }
+        return { ncc: p.prepared.ncc, blocked: p.prepared.blocked?.code, corr: ab / Math.sqrt(aa * bb),
+                 orient: p.raw.info.orientation };
+      });
+      const secs = ((Date.now() - t0) / 1000).toFixed(0);
+      if (r.err) { report(false, `8b pairs ${c.stem}: ${r.err} — ${secs}s`); continue; }
+      report(r.ncc >= 0.6 && !r.blocked,
+        `8b pairs ${c.stem}: RAW ${pre.raw} (EXIF orientation ${r.orient}), target ${pre.target} aligns, NCC ${r.ncc.toFixed(3)}` +
+        `${r.blocked ? `, blocked ${r.blocked}` : ""} — ${secs}s`);
+      report(r.corr !== null && r.corr > 0.98,
+        `8b pairs ${c.stem}: the compare geometry reproduces the prepared frame (luminance correlation ` +
+        `${r.corr === null ? "n/a — size mismatch" : r.corr.toFixed(4)})`);
     } catch (e) {
-      skip(`8b probe ${c.stem} (info): probe error ${e.message}`);
+      report(false, `8b pairs ${c.stem}: error ${e.message}`);
     } finally {
       await page?.close().catch(() => {});
     }

@@ -1,5 +1,7 @@
 # Mobile layout of the NP3 profile editor
 
+> **2026-11-20: pages renamed and the Start screen dropped** ([ui-pages.md](ui-pages.md), [ui.md](ui.md) decision #9). Read `index.html` in this document as `picture-control-editor.html` and `mobile.html` as `picture-control-editor-mobile.html`. The mobile page is the standalone editor only: no Start screen, no pairs, no fitting (the fitting wizard `picture-control-jpg-fit.html` is desktop only). The router is included only in the two editor pages; `index.html` is a landing. Where this document disagrees, ui-pages.md wins.
+
 Draft from 2026-11-19, revised the same day (separate page + redirect, Reset confirmation, Web Share export). Status: specification, not implemented. Base: the manual editor of [ui-manual-mvp.md](ui-manual-mvp.md) (including the UI-2 package) and the session shell of [ui-plan.md](ui-plan.md) (Start screen, `state.step`).
 
 ## Goal
@@ -12,13 +14,13 @@ The mobile version is a **separate page** `web/mobile.html` with its own markup 
 
 ### Included
 
-- `web/mobile.html`: the editor step (top bar, viewer, tool panel, tool bar, info sheet, status toasts) and the Start screen.
+- `web/mobile.html` (now `picture-control-editor-mobile.html`): the editor (top bar, viewer, tool panel, tool bar, info sheet, status toasts). ~~And the Start screen~~ — dropped 2026-11-20.
 - The redirect between `index.html` and `mobile.html` and a manual version switch.
 - A landscape-phone variant of the same layout.
 - Touch equivalents of every desktop-only interaction: Space-hold (before/after), Ctrl+Z (undo), double-click reset, drag-and-drop, hover tooltips.
 - Touch-friendly sizes for all controls of the six panel groups, including the curve editor, the Color Blender and the Color Grading wheel.
 - Mobile behavior of the file pickers, NP3 export and the share link.
-- A touch-friendly Start screen in `mobile.html`.
+- ~~A touch-friendly Start screen in `mobile.html`.~~ Dropped 2026-11-20 (the fitting wizard is desktop only).
 - NP3 export through the system share sheet on phones.
 - Tests: a mobile level in `web/test.mjs` and a manual checklist on real devices.
 
@@ -60,7 +62,7 @@ If the current page is not the chosen one, `location.replace()` goes to the othe
 
 ### Share links
 
-`Copy link` (and the share sheet) always builds the link on the **canonical directory URL** (`new URL("./", location.href)`, i.e. `index.html`), not on the current page. A link copied on a phone and opened on a PC opens the desktop editor directly; opened on a phone, the router sends it to `mobile.html` with `?np3=` intact.
+`Copy link` (and the share sheet) always builds the link on **`picture-control-editor.html`** in the current directory (changed 2026-11-20 from the directory URL; [ui-pages.md](ui-pages.md) "Share links" — the landing forwards old `/web/?np3=` links), not on the current page. A link copied on a phone and opened on a PC opens the desktop editor directly; opened on a phone, the router sends it to `mobile.html` with `?np3=` intact.
 
 ### Input
 
@@ -240,11 +242,13 @@ The curve chart moves over the photo, the way phone editors usually show a tone 
 
 ## Start screen on mobile
 
-`mobile.html` has its own Start screen with the ids `start.js` and `app.js` use (`#raw-drop`, `#raw-file`, `#target-drop`, `#target-file`, `#pairs`, `#start-status`, `#fit-name`, `#fit-name-err`, `#fit`).
+> **Dropped 2026-11-20:** the mobile page is the standalone editor without a Start screen ([ui-pages.md](ui-pages.md)). The text below is kept for history; M0–M1 parts that served it (`#start-info` rendering, mobile Start ids) are not ported.
+
+`mobile.html` has its own Start screen with the ids `start.js` and `app.js` use (`#raw-drop`, `#raw-file`, `#pairs`, `#start-status`, `#fit-name`, `#fit-name-err`, `#fit`).
 
 - One column; the disclaimer and pair recommendations collapsed into a "Before you start" disclosure (open on the first visit).
-- Zones read "Tap to choose RAW files" / "Tap to choose JPEG targets" (new i18n strings); min height 88 px.
-- Pair-card buttons (Edit, the Include row) min 44 px; the name field and Fit button follow the mobile font and target rules.
+- One zone, "Tap to choose RAW files" (new i18n string); min height 88 px. The JPEG is added per card ("Add JPEG", a picker — no drag-and-drop on touch). There is no `#target-drop` / `#target-file` (ui.md decision #7).
+- Pair-card buttons ("Add JPEG" / "Replace JPEG", "Remove from fit"; the RAW-first cards of [ui.md](ui.md) decision #7) min 44 px; the name field and Fit button follow the mobile font and target rules.
 - **One copy of the static texts:** the disclaimer and recommendation lists move from `index.html` markup into `start.js` (rendered into a `#start-info` container on both pages), so the two pages cannot drift apart.
 - Safe-area padding and `100dvh` as in the editor. No other changes until the fitting stages of [ui-plan.md](ui-plan.md) land.
 
