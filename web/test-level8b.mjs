@@ -200,9 +200,15 @@ async function mainFlow({ browser, port, report, skip }) {
     const miss1 = await reportAt("draft:1", 85);
     await sleep(1500);                         // a stale result would land after the latest one
     const landed = await ev(() => { clearInterval(window.__t8b.reportPoll); return window.__t8b.landed; });
-    const after = landed.slice(1);             // [0] is the report present when the race started
-    report(!miss1 && after.length >= 1 && after.every((k) => k === "draft:1@85"),
-      `8b race: rapid strength changes — only the latest report lands (${after.join(" -> ")})${miss1 ? " — " + miss1 : ""}`);
+    // the guarantee the code gives (app.js requestReport / reportWorker.onmessage): a
+    // superseded request never posts to the worker and a stale result is discarded on
+    // arrival, so after the burst only the latest key ("draft:1@85") can land at all.
+    // Intermediates may be observed or not depending on where the supersession happens —
+    // assert the strict invariant: the final key is observed and no different key lands
+    // after it (not "exactly what a 10 ms poll happens to see").
+    const from85 = landed.slice(Math.max(0, landed.indexOf("draft:1@85")));
+    report(!miss1 && landed.includes("draft:1@85") && from85.every((k) => k === "draft:1@85"),
+      `8b race: rapid strength changes — only the latest report lands (${landed.slice(1).join(" -> ")})${miss1 ? " — " + miss1 : ""}`);
     // a mixed version + strength burst ends on draft at 90%
     await ev(() => {
       const T = window.__t8b, s = window.__np3app.state;
@@ -219,7 +225,9 @@ async function mainFlow({ browser, port, report, skip }) {
     const miss2 = await reportAt("draft:1", 90);
     await sleep(1500);
     const landed2 = await ev(() => { clearInterval(window.__t8b.reportPoll); return window.__t8b.landed; });
-    report(!miss2 && landed2.slice(1).every((k) => k === "draft:1@90"),
+    // the same invariant as the first burst: the final key lands, nothing different after it
+    const from90 = landed2.slice(Math.max(0, landed2.indexOf("draft:1@90")));
+    report(!miss2 && landed2.includes("draft:1@90") && from90.every((k) => k === "draft:1@90"),
       `8b race: a second burst (55 -> 90) — only the latest report lands (${landed2.slice(1).join(" -> ")})${miss2 ? " — " + miss2 : ""}`);
     await ev(() => window.__t8b.setStrength(100));
     await mustReport("draft:1", 100, "race");

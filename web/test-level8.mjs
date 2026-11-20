@@ -1361,11 +1361,14 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(ui.thumbs.length === 2 && !ui.thumbs[0].blocked && ui.thumbs[1].blocked
                  && ui.selected === 1,
             "8 compare: the pair strip with a blocked marker on the excluded pair");
+          // the render side covers the working rectangle at ≥ the working resolution (not the
+          // 256-px H3×W3 report grid), with the working aspect within one pixel
           report(ui.aligned && ui.working
-                 && ui.aligned.w === Math.floor(ui.working.w / 3)
-                 && ui.aligned.h === Math.floor(ui.working.h / 3),
-            `8 compare geometry: the render side is the H3×W3 aligned grid (${ui.aligned?.w}×${ui.aligned?.h}` +
-            ` of the working ${ui.working?.w}×${ui.working?.h}) — the report pixels, upscaled for display`);
+                 && ui.aligned.w >= ui.working.w && ui.aligned.h >= ui.working.h
+                 && Math.abs(ui.aligned.w * ui.working.h / ui.working.w - ui.aligned.h) <= 1,
+            `8 compare geometry: the render side covers the working rectangle at ${ui.aligned?.w}×${ui.aligned?.h}` +
+            ` (working ${ui.working?.w}×${ui.working?.h}, report grid ${Math.floor((ui.working?.w ?? 0) / 3)}×` +
+            `${Math.floor((ui.working?.h ?? 0) / 3)})`);
         }
 
         // all three modes render through the same shared mapping; the wheel zooms to the
@@ -2227,17 +2230,31 @@ export async function runLevel8({ browser, port, report, skip }) {
       // a strength change recomputes the report; while it computes the previous one
       // stays with a subtle "updating…" state (the reduced-preview lifecycle)
       {
-        const mid = await ev(async () => {
+        await ev(() => {
           const inp = document.getElementById("cmp-strength");
           inp.value = "75";
           inp.dispatchEvent(new Event("input", { bubbles: true }));
-          await new Promise((r) => setTimeout(r, 60));   // the request is posted (async model fetch)
-          return { badge: document.getElementById("rep-updating").hidden,
-                   dimmed: document.getElementById("rep-body").classList.contains("updating"),
-                   strengthCell: document.getElementById("rep-strength").textContent };
         });
-        report(mid.badge === false && mid.dimmed && mid.strengthCell === "100%",
-          "8 report: while a slider drags the previous report stays with an \"updating…\" state");
+        // The invariant is "the updating state shows at some point while recomputing", not
+        // "it shows at t=60 ms": the page runs as one of several concurrent tabs of the shared
+        // Firefox, where a background tab's timers clamp to 1 s and a loaded content process
+        // stretches an in-page sleep past the report landing. Wait from Node for the state
+        // itself (with the previous report's cell still in place), then for the final report.
+        const updating = `(() => { const b = document.getElementById("rep-updating");
+                         return !b.hidden && document.getElementById("rep-body").classList.contains("updating")
+                                && document.getElementById("rep-strength").textContent === "100%"; })()`;
+        try {
+          await page.waitForFunction(updating, { timeout: 60000, polling: 50 });
+          report(true, "8 report: while a slider drags the previous report stays with an \"updating…\" state");
+        } catch {
+          const mid = await ev(() => ({
+            badge: document.getElementById("rep-updating").hidden,
+            dimmed: document.getElementById("rep-body").classList.contains("updating"),
+            strengthCell: document.getElementById("rep-strength").textContent,
+          }));
+          report(false, `8 report: while a slider drags the previous report stays with an "updating…" state` +
+                        ` (badge hidden: ${mid.badge}, dimmed: ${mid.dimmed}, cell: ${mid.strengthCell})`);
+        }
         await page.waitForFunction(
           `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.summary.strength === 75`,
           { timeout: 120000, polling: 200 });

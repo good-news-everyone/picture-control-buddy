@@ -313,6 +313,37 @@ async function level1e(ctx) {
     report(!bad.length, `1e ${key}: x ${xm.toExponential(1)}/y ${ym.toExponential(1)} vs replay,`
            + ` ncc ${prep.ncc.toFixed(4)} (Δbuild ${dncc.toFixed(4)}), blocked ${prep.blocked?.code ?? "no"}`
            + (bad.length ? ` — ${bad.join("; ")}` : ""));
+
+    // the compare render side (warpToView, 2026-11-20): with k = 1 its 3×3 shrink is
+    // bit-identical to the report grid (warpToWorking); at k = 2 (the stored shift scaled to the
+    // finer grid) a 6×6 shrink lands within VIEW_TOL mean |Δ| of it — a wrong shift scaling
+    // misaligns by k pixels and fails
+    {
+      const { shrink } = await import("./lib/resample.js");
+      const frame = { data: new Float32Array(linB.buffer, linB.byteOffset, linB.byteLength / 4),
+                      w: inj.inputs.linear.w, h: inj.inputs.linear.h };
+      const unr = inj.inputs.linear.unrotate;
+      const grid = P.warpToWorking(frame, prep, unr);
+      const v1 = P.warpToView(frame, prep, unr, { k: 1 });
+      const s1 = shrink(v1.data, v1.w, v1.h, 3, 3).data;
+      let same = s1.length === grid.data.length;
+      for (let i = 0; same && i < s1.length; i++) same = s1[i] === grid.data[i];
+      const v2 = P.warpToView(frame, prep, unr, { k: 2 });
+      const s2 = shrink(v2.data, v2.w, v2.h, 6, 3).data;
+      let mad = 0, n = 0;
+      for (let i = 0; i < Math.min(s2.length, grid.data.length); i++) {
+        const d = Math.abs(s2[i] - grid.data[i]);
+        if (Number.isFinite(d)) { mad += d; n++; }
+      }
+      mad /= Math.max(1, n);
+      const def = P.warpToView(frame, prep, unr);
+      const VIEW_TOL = 5e-4;     // measured: 1.2–1.7e-4; an unscaled shift (skl_3024__dsc_5584, shift 9.4 px) gives 1.67e-3
+      report(same && s2.length === grid.data.length && mad <= VIEW_TOL
+             && def.w === Math.round(prep.size.w * def.k) && def.k >= 1 / 3,
+        `1e ${key} view: shrink(warpToView k=1) ${same ? "==" : "!="} warpToWorking bit-exact,`
+        + ` k=2 6×6-shrunk mean |Δ| ${mad.toExponential(2)} (tol ${VIEW_TOL}), default k ${def.k.toFixed(3)}`
+        + ` -> ${def.w}×${def.h}`);
+    }
   }
 
   // extractEmbeddedJpeg: a pure port of the pairs.embedded_jpeg PIL scan (two candidates,

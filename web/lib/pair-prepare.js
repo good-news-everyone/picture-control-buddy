@@ -817,6 +817,31 @@ export async function preparePair(input) {
 // future report (stage 5) and its error map overlay these exact pixels. frame:
 // { data: Float32Array RGB, w, h }.
 export function warpToWorking(frame, prepared, unrotate) {
+  const W = prepared.size.w, H = prepared.size.h;
+  const o = orientedFrame(frame, prepared, unrotate);
+  const aW = alignedAt(o, prepared, W, H);
+  const out = shrink(aW, W, H, BOX, 3);
+  return { data: out.data, w: out.w, h: out.h };
+}
+
+// The display variant of the same chain (the compare screen): identical up to the box resize,
+// which goes to k× the working size instead of the working size, then the radial warp (its
+// parameters are size-normalized) and the align affine warp with the shift scaled by k; no
+// 3×3 shrink. The result is the same image-space rectangle as the H3×W3 grid (0..W, 0..H of the
+// working size), only sampled finer, so the report overlays still land on the same pixels.
+// k = min(maxLong / max(W, H), the oriented source extent / the working size) — never upsamples
+// the developed frame, at least the H3×W3 resolution. With k = 1, shrink(warpToView) is
+// bit-identical to warpToWorking (level 1e checks it).
+export function warpToView(frame, prepared, unrotate, { maxLong = 2048, k = null } = {}) {
+  const W = prepared.size.w, H = prepared.size.h;
+  const o = orientedFrame(frame, prepared, unrotate);
+  const kk = k ?? Math.max(1 / BOX, Math.min(maxLong / Math.max(W, H), o.w / W, o.h / H));
+  const OW = Math.max(1, Math.round(W * kk)), OH = Math.max(1, Math.round(H * kk));
+  return { data: alignedAt(o, prepared, OW, OH), w: OW, h: OH, k: kk };
+}
+
+// unrotate -> devignette -> lensRadial -> XMP crop -> orientation (warpToWorking's head)
+function orientedFrame(frame, prepared, unrotate) {
   const tr = prepared.transform;
   let { data, w, h } = frame;
   const unr = ((unrotate ?? 0) % 4 + 4) % 4;
@@ -838,16 +863,19 @@ export function warpToWorking(frame, prepared, unrotate) {
     }, c.angleSign);
     data = im.data; w = im.w; h = im.h;
   }
-  {
-    const r = rot90(data, w, h, tr.orientation);
-    data = r.data; w = r.w; h = r.h;
-  }
+  const r = rot90(data, w, h, tr.orientation);
+  return { data: r.data, w: r.w, h: r.h };
+}
+
+// the box resize to OW×OH -> the radialScale/radialK warp -> the align affine warp (the
+// stored shift is in working pixels, scaled to OW×OH) — warpToWorking's tail before the shrink
+function alignedAt(o, prepared, OW, OH) {
+  const tr = prepared.transform;
   const W = prepared.size.w, H = prepared.size.h;
-  const aS = resizeF(data, W, H, w, h, "box", 3).data;
-  const aR = warpRadial(aS, W, H, tr.radialScale, tr.radialK, 3).data;
+  const aS = resizeF(o.data, OW, OH, o.w, o.h, "box", 3).data;
+  const aR = warpRadial(aS, OW, OH, tr.radialScale, tr.radialK, 3).data;
   const sc = 1 / tr.warpScale;
-  const m = [sc, 0, W / 2 - sc * (W / 2 + tr.shiftX), 0, sc, H / 2 - sc * (H / 2 + tr.shiftY)];
-  const aW = warpAffine(aR, W, H, W, H, m, "bilinear", { dtype: "f32", channels: 3 }).data;
-  const out = shrink(aW, W, H, BOX, 3);
-  return { data: out.data, w: out.w, h: out.h };
+  const sx = tr.shiftX * (OW / W), sy = tr.shiftY * (OH / H);
+  const m = [sc, 0, OW / 2 - sc * (OW / 2 + sx), 0, sc, OH / 2 - sc * (OH / 2 + sy)];
+  return warpAffine(aR, OW, OH, OW, OH, m, "bilinear", { dtype: "f32", channels: 3 }).data;
 }

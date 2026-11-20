@@ -134,8 +134,18 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8
   const firefox = process.env.FIREFOX || "/usr/bin/firefox";
   // protocolTimeout: level 8 fits in the page (stage 3) legitimately run for minutes — a
   // waitForFunction is one long-lived BiDi call, so the default 180 s cap kills healthy waits
+  // Timer throttling of background tabs must stay off: the levels run as concurrent pages of
+  // one Firefox, and a non-active page's setTimeout/setTimeout clamp to 1 s there (budget timer
+  // throttling) — the level-8/8b assertions observe in-page timers while their page is not the
+  // active tab (spec/web-tests.md). The *_without_budget_throttling clamp applies once the
+  // budget throttling is off, so both minimums are lowered.
   const browser = await puppeteer.launch({ browser: "firefox", executablePath: firefox,
-                                           headless: true, protocolTimeout: 900000 });
+                                           headless: true, protocolTimeout: 900000,
+                                           extraPrefsFirefox: {
+                                             "dom.min_background_timeout_value": 4,
+                                             "dom.min_background_timeout_value_without_budget_throttling": 4,
+                                             "dom.timeout.enable_budget_timer_throttling": false,
+                                           } });
   // newPage from parallel tasks serially (BiDi)
   let newPageChain = Promise.resolve();
   const newPage = () => {

@@ -3,12 +3,12 @@
 // zoom/pan; the pair strip, the strength slider and the version history; the two exits.
 //
 // Geometry decision (the ui-plan.md §6 risk "Preview/report geometry", recorded here and in
-// the stage-4 status): the render side is produced at the aligned working geometry H3×W3 —
-// app.js develops the frame through the renderer, then warpToWorking() (web/lib/pair-prepare.js)
-// applies the pair's fitted transform chain and the 3×3 box shrink. Pixel (y, x) of the render
-// side == pixel (y, x) of the prepared x/y arrays and of the future report (stage 5), so the
-// error map can overlay these exact pixels. Everything on screen is an upscaling of that grid
-// (pure presentation zoom); the target side is its own full-color bitmap fit into the same
+// the stage-4 status): the render side covers the aligned working rectangle (0..W, 0..H) —
+// app.js develops the frame through the renderer, then warpToView() (web/lib/pair-prepare.js)
+// applies the pair's fitted transform chain at up to the developed frame's resolution (until
+// 2026-11-20 it was the H3×W3 grid itself, a 256-px thumbnail). The report grid is the same
+// rectangle 3×3-shrunk (warpToWorking), so the error map and the region highlight overlay the
+// same pixels; the target side is its own full-color bitmap fit into the same
 // viewport mapping. The canonical image space for the view math is the working size W×H
 // (prepared.size): a report pixel covers exactly a 3×3 block of it.
 //
@@ -45,7 +45,7 @@ export function createCompare({ state, renderSide, onVersionSelected, onStrength
   let curtain = 0.5;             // the divider position, a fraction of the canvas width
   let showTarget = false;        // the hold-key swap (Space)
   const view = { scale: 1, x: 0, y: 0 };   // user zoom multiplier + pan in canvas pixels
-  let renderBitmap = null;       // { data, w, h } — the H3×W3 render side
+  let renderBitmap = null;       // { data, w, h } — the render side (the working rectangle, finer)
   let targetBitmap = null;       // { data, w, h } — the decoded target at its own resolution
   let renderCv = null, targetCv = null;    // the ImageData canvases
   let requestedGen = 0;          // the generation of the latest render request

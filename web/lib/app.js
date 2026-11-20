@@ -33,7 +33,7 @@ import { createStart } from "./start.js";
 import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { createMore, computeAdvice, frameOf } from "./more-view.js";
-import { warpToWorking } from "./pair-prepare.js";
+import { warpToView } from "./pair-prepare.js";
 import { assignFile, pruneEmpty, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion } from "./session.js";
@@ -251,11 +251,12 @@ const beforeAfter = createBeforeAfter($("ba-slot"), { state, renderCurrent });
 
 // ---------- the Comparison screen (stage 4, spec/ui.md step 2) ----------
 // The render side: the developed frame through the renderer (neutral + profile LUT + detail),
-// then warpToWorking() applies the pair's fitted transform chain (the same parameters
+// then warpToView() applies the pair's fitted transform chain (the same parameters
 // pair-prepare computed, devignette included — the prepared x is devignetted, the renderer's
-// frame is not) and the 3×3 shrink. The result is H3×W3: pixel (y, x) of it == pixel (y, x) of
-// the prepared x/y arrays and of the future report — the on-screen upscaling is presentation
-// only (the ui-plan.md §6 risk "Preview/report geometry", recorded in compare-view.js).
+// frame is not). It covers the same image-space rectangle as the H3×W3 report grid (0..W, 0..H
+// of the working size) but sampled at up to the developed frame's own resolution (≤ 2048 px
+// long) instead of W/3 — the report overlays land on the same pixels, the render side is no
+// longer a 256-px thumbnail (the ui-plan.md §6 risk "Preview/report geometry", compare-view.js).
 // Generation-checked: a result for a superseded request resolves null and never applies; while
 // its LUT builds, the previous good frame stays on the screen.
 let compareFramePair = null;    // which pair the renderer frame belongs to
@@ -282,7 +283,7 @@ async function renderCompareSide(pair, version, strength, gen) {
     rgb[i] = rgba[j]; rgb[i + 1] = rgba[j + 1]; rgb[i + 2] = rgba[j + 2];
   }
   const unrotate = (4 - (DECODER_TURNS[pair.raw.info.orientation] ?? 0)) % 4;
-  return warpToWorking({ data: rgb, w: img.w, h: img.h }, pair.prepared, unrotate);
+  return warpToView({ data: rgb, w: img.w, h: img.h }, pair.prepared, unrotate);
 }
 
 const compareView = createCompare({ state,
