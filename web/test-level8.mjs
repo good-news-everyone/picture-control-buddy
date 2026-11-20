@@ -1326,6 +1326,13 @@ export async function runLevel8({ browser, port, report, skip }) {
                && s.ui.deltaHidden === true && s.ui.deltaDtHidden === true,
           `8 report: the summary shows the worker DTO numbers (dE ${s.ui.renderDE}),` +
           " fittedDelta hidden at the draft");
+        // every summary line explains itself on hover: the term and the value carry one tip
+        const tips = await ev(() => [...document.querySelectorAll("#rep-body .rep-kv dt")].map((dt) => ({
+          term: dt.textContent, tip: dt.title, same: dt.nextElementSibling?.title === dt.title })));
+        report(tips.length === 5 && tips.every((x) => x.tip.length > 40 && x.same)
+               && /dE2000/.test(tips.find((x) => x.term === "Render vs target")?.tip ?? "")
+               && /color bins/.test(tips.find((x) => x.term === "Bin mean")?.tip ?? ""),
+          `8 report: hovering a summary line explains it (${tips.map((x) => x.term).join(", ")})`);
       }
 
       // the color-match table: rows, swatches, sorting by every column
@@ -1838,10 +1845,28 @@ export async function runLevel8({ browser, port, report, skip }) {
                  coverage: s.advice.coverage,
                  tiles: [...document.querySelectorAll("#cmp-strip .cmp-th")].map((c) => c.dataset.pairId),
                  xs: document.querySelectorAll("#cmp-strip .cmp-th .cmp-th-x").length,
-                 add: !!document.querySelector("#cmp-strip #cmp-add") };
+                 add: !!document.querySelector("#cmp-strip #cmp-add"),
+                 pcts: [...document.querySelectorAll("#cmp-coverage .cov-table td.num")].map((td) => td.textContent),
+                 callout: (() => {
+                   const box = document.querySelector("#cmp-coverage .cov-callout");
+                   const miss = document.querySelector("#cmp-coverage .cov-missing");
+                   return { box: !!box, inBox: !miss || box?.contains(miss),
+                            bg: box ? getComputedStyle(box).backgroundColor : "",
+                            border: box ? getComputedStyle(box).borderTopStyle : "" };
+                 })() };
       });
       report(c0.first === "cmp-coverage" && c0.rows.length === 10 && c0.levels.every((l) => ["enough", "little", "none"].includes(l)),
         `8 stage 13: the color coverage tops the side panel (${c0.rows.length} groups: ${c0.levels.join(" ")})`);
+      // the percents have one width (leading zeros) and match the advice; the notice is a box
+      const wantPct = (() => {
+        const d = Math.max(1, ...c0.coverage.map((c) => String(Math.floor(c.value * 100 + 0.05)).length));
+        return c0.coverage.map((c) => (c.value * 100).toFixed(1).padStart(d + 2, "0") + "%");
+      })();
+      report(new Set(c0.pcts.map((x) => x.length)).size === 1 && JSON.stringify(c0.pcts) === JSON.stringify(wantPct)
+             && c0.callout.box && c0.callout.inBox && c0.callout.border === "solid"
+             && c0.callout.bg !== "rgba(0, 0, 0, 0)",
+        `8 coverage: the percents have one width with leading zeros (${c0.pcts.join(" ")}); the` +
+        " \"Little or none\" notice sits in a framed box on a darkened background");
       report(c0.tiles.length >= 1 && c0.xs === c0.tiles.length && c0.add,
         `8 stage 13: every tile has × and the strip ends with the drop button (${c0.tiles.length} tiles)`);
 

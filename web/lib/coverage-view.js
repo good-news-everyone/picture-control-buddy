@@ -143,18 +143,26 @@ export function renderCoverage(el, state) {
     return;
   }
   const tbl = mk("table", "cov-table");
+  // leading zeros to the widest share in the table, so the percents keep one width and the
+  // column does not "jump" between rows (2026-11-20 review); shares can exceed 100% — they
+  // sum the group's share over the frames of the fit set
+  const intDigits = Math.max(1, ...a.coverage.map((c) => String(Math.floor(c.value * 100 + 0.05)).length));
+  const pct = (v) => (v * 100).toFixed(1).padStart(intDigits + 2, "0") + "%";
   for (const c of a.coverage) {
     const tr = mk("tr", `lv-${c.level}`);
     tr.dataset.group = c.group;
     tr.dataset.level = c.level;
-    tr.append(mk("td", null, t(c.group)), mk("td", "num", `${(c.value * 100).toFixed(1)}%`),
+    tr.append(mk("td", null, t(c.group)), mk("td", "num", pct(c.value)),
               mk("td", null, levelText(c.level)));
     tbl.append(tr);
   }
   out.push(tbl);
+  // the notice under the table — "Little or none: …" and the "add to the fit" suggestions —
+  // sits in a tooltip-like box (a frame on a darkened background, 2026-11-20 review)
+  const box = mk("div", "cov-callout");
   const missing = a.coverage.filter((c) => c.level !== "enough" && c.group !== "greys");
   if (missing.length) {
-    out.push(mk("div", "cov-missing", t("Little or none: {groups}",
+    box.append(mk("div", "cov-missing", t("Little or none: {groups}",
       { groups: missing.map((c) => t(c.group)).join(", ") })));
   }
   const label = (id) => { const p = state.pairs.find((q) => q.id === id); return p ? pairLabel(p) : `#${id}`; };
@@ -163,8 +171,9 @@ export function renderCoverage(el, state) {
     const d = mk("div", "cov-suggest hint", t("{group}: {coverage}% ({level}) — add to the fit: {names}",
       { group: t(s.group), coverage: (s.coverage * 100).toFixed(1), level: levelText(s.level), names }));
     d.dataset.group = s.group;
-    out.push(d);
+    box.append(d);
   }
+  if (box.childElementCount) out.push(box);
   for (const n of a.notes) out.push(mk("div", "hint cov-note", noteText(n)));
   if (a.pending) out.push(mk("div", "hint", t("Analyzing {n} pair(s)…", { n: a.pending })));
   el.replaceChildren(...out);

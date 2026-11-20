@@ -149,13 +149,35 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   // ---------- the body ----------
   const empty = h("div", { id: "rep-empty", hidden: "" },
     t("Fit a profile to see the report."));
+  // every summary line explains itself on hover (2026-11-20 review): the tip is on the
+  // whole line (the term and the value)
+  const TIPS = {
+    strength: "The profile strength this report is computed at: 100% is the fitted profile, " +
+      "less blends it toward the Nikon neutral, more strengthens it.",
+    render: "Mean color difference (dE2000) between the RAW rendered with this profile and the " +
+      "target JPEG, over the aligned, not overexposed pixels. Lower is better: under ~2 is hard " +
+      "to see side by side.",
+    neutral: "The same difference for the RAW rendered without a profile (the Nikon neutral " +
+      "look) — the starting point. The profile should bring \"Render vs target\" well below it.",
+    bin: "dE2000 averaged over color bins (hue × chroma, greys by lightness) instead of over " +
+      "pixels: every color counts equally however small its area, so a large sky cannot hide " +
+      "errors in rare colors.",
+    delta: "How your manual adjustments changed \"Render vs target\" against the fitted " +
+      "profile: negative is better, positive is worse.",
+  };
+  const kv = (key, label, id, hidden = false) => {
+    const tip = t(TIPS[key]);
+    const dt = h("dt", { title: tip, class: "tip", ...(hidden ? { id: `${id}-dt`, hidden: "" } : {}) },
+      t(label));
+    const dd = h("dd", { id, title: tip, ...(hidden ? { hidden: "" } : {}) }, "—");
+    return [dt, dd];
+  };
   const summaryDl = h("dl", { class: "rep-kv" },
-    h("dt", {}, t("Strength")), h("dd", { id: "rep-strength" }, "—"),
-    h("dt", {}, t("Render vs target")), h("dd", { id: "rep-render-de" }, "—"),
-    h("dt", {}, t("Neutral vs target")), h("dd", { id: "rep-neutral-de" }, "—"),
-    h("dt", {}, t("Bin mean")), h("dd", { id: "rep-bin-mean" }, "—"),
-    h("dt", { id: "rep-delta-dt", hidden: "" }, t("Vs fitted")),
-    h("dd", { id: "rep-delta", hidden: "" }, "—"));
+    ...kv("strength", "Strength", "rep-strength"),
+    ...kv("render", "Render vs target", "rep-render-de"),
+    ...kv("neutral", "Neutral vs target", "rep-neutral-de"),
+    ...kv("bin", "Bin mean", "rep-bin-mean"),
+    ...kv("delta", "Vs fitted", "rep-delta", true));
   const tableEl = h("table", { id: "rep-table" });
   const mapModes = h("div", { class: "tgl", id: "rep-map-modes" },
     ...Object.keys(MAP_MODES).map((m) => h("button", { type: "button", "data-mode": m }, m)));

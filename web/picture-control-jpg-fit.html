@@ -151,6 +151,10 @@
   .rep-kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0;
     font-variant-numeric: tabular-nums; }
   .rep-kv dt { color: var(--dim); } .rep-kv dd { margin: 0; text-align: right; }
+  /* a summary term with an explanation on hover */
+  .rep-kv dt.tip { cursor: help; text-decoration: underline dotted rgba(255, 255, 255, .3);
+    text-underline-offset: 3px; }
+  .rep-kv dd[title] { cursor: help; }
   #rep-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   #rep-table th { text-align: right; color: var(--dim); font-weight: 600; font-size: 11px;
     text-transform: uppercase; letter-spacing: .04em; cursor: pointer; user-select: none;
@@ -298,6 +302,10 @@
   .cov-table tr.lv-little td { color: #cfa15a; }
   .cov-table tr.lv-none td { color: #e07a6a; }
   .cov-missing, .cov-suggest, .cov-note { margin: 2px 0; }
+  /* the coverage notice: a tooltip-like box — a frame on a darkened background */
+  .cov-callout { margin: 6px 0 4px; padding: 6px 8px; background: rgba(0, 0, 0, .35);
+    border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); }
+  .cov-callout > :first-child { margin-top: 0; } .cov-callout > :last-child { margin-bottom: 0; }
   /* the top row: the strip, then the square Refit (about a thumbnail's size) */
   #cmp-top { display: flex; align-items: flex-start; gap: 8px; margin-right: 14px; }
   #cmp-top #cmp-strip { flex: 1; min-width: 0; }
