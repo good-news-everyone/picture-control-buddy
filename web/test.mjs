@@ -131,6 +131,9 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
 
+  // NP3_BROWSER=chrome runs the browser levels in Chromium (CHROME = its executable) — for
+  // environments without Firefox; Firefox stays the reference browser of the suite.
+  const BROWSER = process.env.NP3_BROWSER || "firefox";
   const firefox = process.env.FIREFOX || "/usr/bin/firefox";
   // protocolTimeout: level 8 fits in the page (stage 3) legitimately run for minutes — a
   // waitForFunction is one long-lived BiDi call, so the default 180 s cap kills healthy waits
@@ -139,7 +142,13 @@ if (PAGE_LEVELS.some(selected) || selected("1c") || selected("8") || selected("8
   // throttling) — the level-8/8b assertions observe in-page timers while their page is not the
   // active tab (spec/web-tests.md). The *_without_budget_throttling clamp applies once the
   // budget throttling is off, so both minimums are lowered.
-  const browser = await puppeteer.launch({ browser: "firefox", executablePath: firefox,
+  const browser = BROWSER === "chrome"
+    ? await puppeteer.launch({ browser: "chrome", executablePath: process.env.CHROME, headless: true,
+        protocolTimeout: 900000,
+        args: ["--no-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist",
+               "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+               "--disable-backgrounding-occluded-windows"] })
+    : await puppeteer.launch({ browser: "firefox", executablePath: firefox,
                                            headless: true, protocolTimeout: 900000,
                                            extraPrefsFirefox: {
                                              "dom.min_background_timeout_value": 4,
