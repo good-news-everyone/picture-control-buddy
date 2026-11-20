@@ -49,6 +49,10 @@ export const rawErrorText = (code) => t(ERRORS[code] || code);
  *                            wizard's Compare screen), false to finish renderCurrent here;
  *   hooks.onLoaderUpdate(st) — a loader event with a tag (the wizard's pair decodes); return
  *                            true when handled; untagged ready frames go to the editor;
+ *   hooks.onRender()       — before every editor render; return true when the entry draws the
+ *                            current control itself (the wizard's quick editor on Compare);
+ *   hooks.hasFrame()       — true when the renderer holds a frame though no RAW is open in the
+ *                            editor (the curve backdrop histogram then reads it);
  *   transfer       — setupTransfer options (import on/off, the share target).
  * Resolves to the core API once the models are loaded and the renderer exists.
  */
@@ -122,6 +126,7 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
   // arrives, the previous frame stays on the screen. The generation (state.renderPending, lutSeq)
   // discards stale results. rAF limits the request rate during continuous slider movement.
   function renderCurrent() {
+    if (renderer && hooks.onRender?.()) return;
     if (!state.raw || !renderer) return;
     if (state.showNeutral) {           // "before" — the Nikon neutral without any NP3 tools
       reveal();
@@ -232,7 +237,7 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
   // histogram — the neutral luma histogram for the backdrop under the curve.
   const curveEditor = createCurveEditor($("curve-slot"), { state, onChange: onEdit, panel, getBaseline,
     chartSlot: isMobile ? $("curve-chart") : null,
-    histogram: () => (renderer && state.raw) ? renderer.lumaHistogram() : null });
+    histogram: () => (renderer && (state.raw || hooks.hasFrame?.())) ? renderer.lumaHistogram() : null });
   const blendingView = createBlendingView($("blending-slot"), { state, onChange: onEdit, panel, getBaseline });
   const gradingView = createGradingView($("grading-slot"), { state, onChange: onEdit, panel, getBaseline });
   // After an NP3 import the editors also re-read the values from the new control.

@@ -192,7 +192,7 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     t("Unaligned"));
   const mapSection = h("div", { id: "rep-map-section" },
     mapModes, mapCanvas,
-    h("div", { class: "rep-legend" }, legendBar, legendTicks),
+    h("div", { class: "rep-legend rep-scale" }, legendBar, legendTicks),
     h("div", { class: "rep-legend" }, clipChip, invalidChip),
     overlayBox);
   const paramsEl = h("div", { id: "rep-params" });
@@ -205,7 +205,11 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     return d;
   };
   const mapGrp = grp("map", "Error map", mapSection);
-  const body = h("div", { id: "rep-body" }, empty,
+  // a pair outside the current profile is a preview of how the profile does on it (decision
+  // #11); its numbers are not the fit's — say so above them (UX review, decision #15)
+  const previewNote = h("div", { id: "rep-preview", class: "rep-note", hidden: "" },
+    t("Preview: this pair is not in the profile yet — Refit to include it."));
+  const body = h("div", { id: "rep-body" }, empty, previewNote,
     grp("summary", "Summary", summaryDl),
     grp("table", "Color match", tableEl),
     mapGrp,
@@ -307,10 +311,12 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
       }
     }
     ctx.putImageData(im, 0, 0);
+    // every tick sits under its own value on the bar (UX review, decision #15: they were spread
+    // evenly beside it)
     const ticks = cfg.diverging
-      ? [`−${cfg.max}`, "0", `+${cfg.max}`]
-      : ["0", "2", "5", "10+"];
-    legendTicks.replaceChildren(...ticks.map((s) => h("span", {}, s)));
+      ? [[`−${cfg.max}`, 0], ["0", 0.5], [`+${cfg.max}`, 1]]
+      : [["0", 0], ["2", 0.2], ["5", 0.5], ["10+", 1]];
+    legendTicks.replaceChildren(...ticks.map(([s, f]) => h("span", { style: `left:${f * 100}%` }, s)));
   }
 
   function paintMapSection(rep, agg) {
@@ -463,6 +469,9 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     }
     const agg = scope === "aggregate" ? state.reportAggregate : null;
     empty.hidden = !!(rep || agg);
+    const v = state.versions?.find((x) => x.id === state.selectedVersionId);
+    const pairId = currentPair()?.id;
+    previewNote.hidden = !!agg || !rep || !v || pairId == null || (v.pairIds ?? []).includes(String(pairId));
     renderSummary(rep, agg);
     renderTable(agg ? agg.table : (rep?.table ?? []));
     renderParams(rep, agg);

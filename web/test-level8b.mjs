@@ -300,21 +300,21 @@ async function mainFlow({ browser, port, report, skip }) {
     await ev(() => document.activeElement?.blur?.());
   }
 
-  // ---------- 4. Manual -> Compare: the leave warning, Discard ----------
+  // ---------- 4. the quick editor: Cancel drops the edits ----------
   {
     const lw = await ev(() => {
-      document.getElementById("ed-to-compare").click();
-      return { shown: !document.getElementById("leave-confirm").hidden, step: window.__np3app.state.step };
+      const before = window.__np3app.state.step;
+      document.getElementById("adj-cancel").click();
+      return { before, step: window.__np3app.state.step };
     });
-    await ev(() => document.getElementById("leave-discard").click());
     await wf(`window.__np3app.state.step === "compare"`, 60000);
     const d = await ev(() => {
       const s = window.__np3app.state;
       return { same: JSON.stringify(s.control) === JSON.stringify(s.versions[0].control),
-               versions: s.versions.length };
+               versions: s.versions.length, id: s.versions[0].id };
     });
-    report(lw.shown && lw.step === "edit" && d.same && d.versions === 1,
-      "8b flow: Manual -> Compare asks first; Discard drops the edits, the profile stays");
+    report(lw.before === "edit" && lw.step === "compare" && d.same && d.versions === 1 && d.id === "draft",
+      "8b flow: Manual -> Cancel drops the edits, the profile stays");
   }
 
   // ---------- 5. Compare strip: a second pair (a renamed copy — a pair known to prepare everywhere) ----------
@@ -363,7 +363,7 @@ async function mainFlow({ browser, port, report, skip }) {
     await wf(`(() => { const p = ${nameId("DSC_5584D.NEF")}; return p && !!p.raw?.image; })()`, 600000, 300);
     const d = await ev(() => ({ ids: document.getElementById("cmp-refit").dataset.pairIds,
                                 txt: document.getElementById("cmp-refit").title }));
-    report(d.ids.split(",").length === 2 && /1 without a JPEG, 0 blocked — skipped/.test(d.txt),
+    report(d.ids.split(",").length === 2 && /skipped: 1 without a JPEG/.test(d.txt),
       `8b remove: a RAW-only tile stays out of the refit ("${d.txt}")`);
     // removing a tile during a refit cancels the refit; the profile stays
     await ev(() => document.getElementById("cmp-refit").click());
@@ -390,7 +390,7 @@ async function mainFlow({ browser, port, report, skip }) {
     await ev(() => document.getElementById("cmp-refit").click());
     await wf(`/iteration/.test(window.__np3app.state.status)`, 600000, 100);
     const mid = await ev(() => {
-      document.getElementById("cmp-refit").click();       // "Cancel the refit"
+      document.getElementById("cmp-refit").click();       // "Cancel" (the refit runs)
       const cancelled = window.__np3app.state.status;
       document.getElementById("cmp-refit").click();       // "Refit" again
       return { cancelled, fitting: window.__np3app.state.fitting };
@@ -445,8 +445,6 @@ async function mainFlow({ browser, port, report, skip }) {
     await ev(() => window.__t8b.adopt(window.__t8b.draftV));
     await ev(() => window.__t8b.setStrength(70));
     await cmpSettle();
-    await ev(() => document.getElementById("cmp-manual").click());
-    await wf(`window.__np3app.state.step === "edit" && !window.__np3app.state.renderPending`, 120000, 50);
     const st = await ev(() => {
       const s = window.__np3app.state;
       return { strength: s.strength, sel: s.selectedVersionId,
@@ -454,13 +452,13 @@ async function mainFlow({ browser, port, report, skip }) {
                same: JSON.stringify(s.control) === JSON.stringify(s.versions.find((v) => v.id === s.selectedVersionId).control),
                n0: window.__t8b.res.downloads.length };
     });
-    await ev(() => document.getElementById("export").click());
+    await ev(() => document.getElementById("cmp-download").click());
     await wf(`window.__t8b.res.downloads.length >= ${st.n0 + 1}`, 15000, 50);
     const single = await ev((i) => window.__t8b.downloadBytes(i), st.n0);
     const want = serialize({ ...scaled(st.vctl, 70), name: st.vctl.name });
     report(st.sel === "draft" && st.strength === 70 && st.same && single.name === `${st.vctl.name}.NP3`
            && single.bytes && eqBytes(Uint8Array.from(single.bytes), want),
-      `8b save: #export writes "${single.name}" = serialize(scaled(draft, 70%)) byte for byte`);
+      `8b save: Download NP3 writes "${single.name}" = serialize(scaled(draft, 70%)) byte for byte`);
 
     const noSet = await ev(() => !document.getElementById("export-set")
       && ![...document.querySelectorAll("button")].some((b) => /strength set/i.test(b.textContent)));

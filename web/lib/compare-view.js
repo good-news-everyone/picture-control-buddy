@@ -45,7 +45,7 @@ export function inVersion(p, v) {
 
 export function createCompare({ state, renderSide, onStrength,
                                 onManual, onPairSelected, onAddRaws, onAddTarget, onRemovePair,
-                                onRefit, onCancelRefit, onDownload, setStatus = () => {} }) {
+                                onRefit, onCancelRefit, onDownload, onShare, setStatus = () => {} }) {
   const canvas = $("cc");
   const ctx = canvas.getContext("2d");
   const stripEl = $("cmp-strip");
@@ -141,9 +141,14 @@ export function createCompare({ state, renderSide, onStrength,
   // clientHeight truncate a fractional box (e.g. 655.15 -> 655), stretching the bitmap
   // and skewing the mapping by up to a pixel; rounding the box keeps the three modes on
   // the same image-space mapping at any window size.
+  // HiDPI (UX review, decision #15): the mapping stays in CSS pixels (cw × ch), the bitmap is
+  // cw·dpr × ch·dpr and draw() scales the context by dpr — sharp on Retina / scaled Windows.
+  let cw = 1, ch = 1, dpr = 1;
   function sizeCanvas() {
     const r = canvas.getBoundingClientRect();
-    const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+    cw = Math.max(1, Math.round(r.width)); ch = Math.max(1, Math.round(r.height));
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = Math.round(cw * dpr), h = Math.round(ch * dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   }
 
@@ -154,14 +159,13 @@ export function createCompare({ state, renderSide, onStrength,
     const p = pair();
     if (!p) return 1;
     const { w: W, h: H } = p.prepared.size;
-    return Math.min(canvas.width / W, canvas.height / H);
+    return Math.min(cw / W, ch / H);
   }
 
   // The viewport rect an image point is shown through: the half under the cursor in the
   // side-by-side mode, the whole canvas otherwise. Both halves share the view, so the zoom
   // anchors at the cursor's own viewport.
   function viewportAt(x) {
-    const cw = canvas.width, ch = canvas.height;
     if (mode === "side") {
       return x < cw / 2 ? { x: 0, y: 0, w: cw / 2, h: ch }
                         : { x: cw / 2, y: 0, w: cw / 2, h: ch };
@@ -172,7 +176,6 @@ export function createCompare({ state, renderSide, onStrength,
   // All viewports an overlay spans: the two halves in the side-by-side mode, the whole
   // canvas otherwise (overlays share the view mapping with the images).
   function viewports() {
-    const cw = canvas.width, ch = canvas.height;
     return mode === "side" ? [{ x: 0, y: 0, w: cw / 2, h: ch },
                               { x: cw / 2, y: 0, w: cw / 2, h: ch }]
                            : [{ x: 0, y: 0, w: cw, h: ch }];
@@ -232,7 +235,7 @@ export function createCompare({ state, renderSide, onStrength,
   function mapPoint(u, v2, half = "L") {
     const p = pair();
     const { w: W, h: H } = p.prepared.size;
-    const rect = mode === "side" ? viewportAt(half === "L" ? 0 : canvas.width - 1)
+    const rect = mode === "side" ? viewportAt(half === "L" ? 0 : cw - 1)
                                  : viewportAt(0);
     const s = base() * view.scale;
     return { x: rect.x + rect.w / 2 + view.x + (u * W - W / 2) * s,
@@ -259,24 +262,30 @@ export function createCompare({ state, renderSide, onStrength,
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, 0, 0, W, H);
     ctx.restore();
-    if (label) {
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,.55)";
-      ctx.fillRect(rect.x + 6, rect.y + 6, ctx.measureText(label).width + 12, 18);
-      ctx.fillStyle = "#e6e6e6";
-      ctx.font = "12px system-ui, sans-serif";
-      ctx.fillText(label, rect.x + 12, rect.y + 19);
-      ctx.restore();
-    }
+    if (label) drawLabel(label, rect.x + 6, rect.y + 6);
+  }
+
+  // A caption plate; `right` anchors it by its right edge. The font is set before measuring
+  // (the plate used to be measured in the default 10px font and the 12px text overflowed it).
+  function drawLabel(label, x, y, right = false) {
+    ctx.save();
+    ctx.font = "12px system-ui, sans-serif";
+    const w = ctx.measureText(label).width + 12;
+    const x0 = right ? x - w : x;
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    ctx.fillRect(x0, y, w, 18);
+    ctx.fillStyle = "#e6e6e6";
+    ctx.fillText(label, x0 + 6, y + 13);
+    ctx.restore();
   }
 
   function draw() {
     sizeCanvas();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, cw, ch);
     const p = pair();
     if (!p || !renderCv || !targetCv) return;
-    const cw = canvas.width, ch = canvas.height;
     const full = { x: 0, y: 0, w: cw, h: ch };
     const labelR = t("RAW + NP3"), labelT = t("Target");
     if (mode === "side") {
@@ -290,6 +299,17 @@ export function createCompare({ state, renderSide, onStrength,
       place(targetCv, full, { x, w: cw - x }, null);
       ctx.fillStyle = "#e6e6e6";
       ctx.fillRect(x - 1, 0, 2, ch);
+      // the handle in the middle of the divider and the side captions (decision #15)
+      ctx.beginPath();
+      ctx.arc(x, ch / 2, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1b1b1b";
+      ctx.beginPath();
+      ctx.moveTo(x - 3, ch / 2 - 5); ctx.lineTo(x - 7, ch / 2); ctx.lineTo(x - 3, ch / 2 + 5);
+      ctx.moveTo(x + 3, ch / 2 - 5); ctx.lineTo(x + 7, ch / 2); ctx.lineTo(x + 3, ch / 2 + 5);
+      ctx.fill();
+      if (x > 90) drawLabel(labelR, x - 8, 6, true);
+      if (cw - x > 70) drawLabel(labelT, x + 8, 6);
     }
     drawRegion();
     drawMap();
@@ -318,23 +338,35 @@ export function createCompare({ state, renderSide, onStrength,
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
     // in the curtain mode a drag on the divider moves it; anywhere else pans
-    const onDivider = mode === "curtain" && Math.abs(x - canvas.width * curtain) <= 8;
+    const onDivider = nearDivider(x, y);
     drag = { startX: x, startY: y, viewX: view.x, viewY: view.y, curtain: onDivider };
-    if (onDivider) { curtain = Math.min(1, Math.max(0, x / canvas.width)); draw(); }
+    if (onDivider) { curtain = Math.min(1, Math.max(0, x / cw)); draw(); }
+    canvas.style.cursor = onDivider ? "col-resize" : "grabbing";
+  });
+  // the divider takes a drag within 8 px of the line or on its round handle
+  function nearDivider(x, y) {
+    if (mode !== "curtain") return false;
+    const dx = Math.abs(x - cw * curtain);
+    return dx <= 8 || Math.hypot(dx, y - ch / 2) <= 14;
+  }
+  canvas.addEventListener("mousemove", (e) => {
+    if (drag) return;
+    const r = canvas.getBoundingClientRect();
+    canvas.style.cursor = nearDivider(e.clientX - r.left, e.clientY - r.top) ? "col-resize" : "";
   });
   window.addEventListener("mousemove", (e) => {
     if (!drag) return;
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
     if (drag.curtain) {
-      curtain = Math.min(1, Math.max(0, x / canvas.width));
+      curtain = Math.min(1, Math.max(0, x / cw));
     } else {
       view.x = drag.viewX + (x - drag.startX);
       view.y = drag.viewY + (y - drag.startY);
     }
     draw();
   });
-  window.addEventListener("mouseup", () => { drag = null; });
+  window.addEventListener("mouseup", () => { if (drag) canvas.style.cursor = ""; drag = null; });
   window.addEventListener("resize", () => draw());
   // The box also changes size without a window resize — the step switch (editor -> compare)
   // lays the screen out after the first draw, the report panel fills in, a scrollbar comes or
@@ -354,6 +386,7 @@ export function createCompare({ state, renderSide, onStrength,
   canvas.addEventListener("dblclick", (e) => { e.preventDefault(); resetView(); });
   $("cmp-manual").addEventListener("click", () => onManual());
   $("cmp-download").addEventListener("click", () => onDownload?.());
+  $("cmp-share")?.addEventListener("click", () => onShare?.());
   refitBtn.addEventListener("click", () => (state.fitting ? onCancelRefit() : onRefit()));
 
   for (const btn of document.querySelectorAll("#cmp-modes button")) {
@@ -518,6 +551,19 @@ export function createCompare({ state, renderSide, onStrength,
         takeTargets(p, files);
       }
     });
+    // keyboard (UX review, decision #15): a selectable tile or one waiting for its JPEG is a
+    // focusable button; Enter / Space act as a click
+    if (code === "no_jpeg" || usable) {
+      box.tabIndex = 0;
+      box.setAttribute("role", "button");
+      box.setAttribute("aria-label", `${p.rawFile?.name ?? ""}${caption ? " — " + caption : ""}`);
+      if (p.id === state.selectedPairId && usable) box.setAttribute("aria-pressed", "true");
+      box.addEventListener("keydown", (e) => {
+        if (e.target !== box || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        box.click();
+      });
+    }
     box.addEventListener("click", () => {
       if (code === "no_jpeg") { box.querySelector(".cmp-th-file").click(); return; }
       if (!usable) return;                  // only a prepared, unblocked pair can be compared
@@ -568,23 +614,43 @@ export function createCompare({ state, renderSide, onStrength,
     const preparing = state.pairs.some((p) => p.preparing || p.raw === "pending" || p.target === "pending");
     refitBtn.dataset.pairIds = ids.join(",");
     if (state.fitting) {
-      refitBtn.textContent = t("Cancel the refit");
+      refitBtn.textContent = t("Cancel");                // a one-word label fits the square (decision #15)
+      refitBtn.dataset.sub = t("Refitting…");
       refitBtn.disabled = false;
       refitBtn.classList.add("running");
     } else {
-      refitBtn.textContent = t("Refit");                 // no pair count, no caption (decision #11)
+      refitBtn.textContent = t("Refit");                 // no pair count in the label (decision #11)
       refitBtn.disabled = !ids.length || !state.versions.length || preparing || same;
       refitBtn.classList.remove("running");
+      // the state as a short one-line sub-label under "Refit" (decision #15: the reason it is off
+      // is visible, not only in the tooltip); drawn by CSS ::after, so the label text stays "Refit"
+      const have = new Set((v?.pairIds ?? []).map(String));
+      const added = ids.filter((id) => !have.has(String(id))).length;
+      const removed = [...have].filter((id) => !ids.some((x) => String(x) === id)).length;
+      refitBtn.dataset.sub = !ids.length ? t("No pairs")
+        : preparing ? t("Preparing…")
+        : same ? t("Up to date")
+        : [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ")
+          + " " + (added + removed === 1 ? t("pair") : t("pairs"));
     }
     const { m, k } = fitCount(state);
     let txt = same ? t("The profile is already fitted on these pairs") : "";
-    if (m || k) txt += (txt ? "; " : "") + t("{m} without a JPEG, {k} blocked — skipped", { m, k });
+    if (m || k) {
+      const skipped = [];
+      if (m) skipped.push(t("{m} without a JPEG", { m }));
+      if (k) skipped.push(t("{k} blocked", { k }));
+      txt += (txt ? "; " : "") + t("skipped: {list}", { list: skipped.join(", ") });
+    }
     refitBtn.title = txt;                                // the reason it is off / skipped pairs: tooltip only
   }
 
   /** Re-renders the strip, the coverage and the refit button (pair changes, advice, fits). */
   function refreshPairs() {
+    // the strip is rebuilt: a focused tile keeps the keyboard focus across the rebuild
+    const focused = stripEl.contains(document.activeElement)
+      ? document.activeElement.closest(".cmp-th")?.dataset.pairId ?? (document.activeElement.id || null) : null;
     stripEl.replaceChildren(...state.pairs.map(thumbnail), addTile());
+    if (focused) (stripEl.querySelector(`.cmp-th[data-pair-id="${focused}"]`) ?? document.getElementById(focused))?.focus();
     renderCoverage(coverageEl, state);
     renderRefit();
   }
@@ -618,7 +684,13 @@ export function createCompare({ state, renderSide, onStrength,
     };
   }
 
-  return { refresh, refreshPairs, draw, scheduleRender, debug,
+  /** The strength slider and its label follow state.strength (the quick editor's panel moves it). */
+  function syncStrength() {
+    strengthInput.value = String(state.strength);
+    paintStrength();
+  }
+
+  return { refresh, refreshPairs, draw, scheduleRender, debug, syncStrength,
            // stage 5B: the report view's overlays on the compare image
            showRegion(labels, group) {
              region = labels && group != null ? { labels, group } : null;

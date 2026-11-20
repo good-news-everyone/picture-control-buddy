@@ -28,7 +28,7 @@ import { viewRemap, applyRemap } from "./pair-prepare.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion } from "./session.js";
-import { isDirty, fieldDeltas } from "./baseline.js";
+import { isDirty } from "./baseline.js";
 import { decodeTarget, editGain, editWarningCodes, wbMultipliers, MIN_TARGET } from "./target.js";
 import { scaled } from "./strength.js";
 
@@ -47,17 +47,29 @@ const core = await createEditorCore({
   },
   statusIds: ["start-status", "cmp-status"],
   hooks: {
-    onFinishedEdit: () => requestManualReport(),
     // the LUT is ready: the Compare screen re-requests its render side, the editor redraws
     onLutReady: () => {
-      if (state.step === "compare" && compareView) { compareView.scheduleRender(); return true; }
+      if (onHub() && compareView) { compareView.scheduleRender(); return true; }
       return false;
     },
+    // the quick editor (decision #16): every edit redraws the Compare render side with the
+    // manual control; the curve backdrop reads the compare frame
+    onRender: () => {
+      if (state.step !== "edit" || !compareView) return false;
+      compareView.syncStrength();
+      compareView.scheduleRender();
+      return true;
+    },
+    hasFrame: () => state.step === "edit" && compareFramePair != null,
     onLoaderUpdate: (st) => pairLoaderUpdate(st),
   },
 });
 const { state, setStatus, renderer, loader, panel, hist, curveEditor, blendingView, gradingView,
         beforeAfter, transfer, renderCurrent, getBaseline, setBaseline, applyEditorFrame } = core;
+
+// Compare is the hub (decision #11); the quick editor ("edit", decision #16) is Compare with the
+// parameter panel in place of the report — the strip, the viewer and the pairs stay.
+function onHub() { return state.step === "compare" || state.step === "edit"; }
 
 // ---------- the Comparison screen (stage 4, spec/ui.md step 2) ----------
 // The render side: the developed frame through the renderer (neutral + profile LUT + detail),
@@ -95,6 +107,8 @@ const COMPARE_RENDERS_MAX = 6;
 
 async function renderCompareSide(pair, version, strength, gen) {
   if (!compareUsable(pair)) return null;
+  // the quick editor renders the live manual control: no memo (it changes on every edit)
+  if (state.step === "edit") return renderCompareSideUncached(pair, version, strength, gen);
   const memoKey = compareRenderKey(pair, version, strength);
   const memo = compareRenders.get(memoKey);
   if (memo) {
@@ -126,12 +140,16 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
     compareFramePair = pair;
     compareFramePrep = pair.prepared;
   }
-  const ctl = scaled(version.control, strength);
+  // the quick editor: the manual control, the editor's LUT size (17 while a slider moves,
+  // 33 after the release); otherwise the version at the final 33
+  const editing = state.step === "edit";
+  const ctl = scaled(editing ? state.control : version.control, strength);
   renderer.setProfile(ctl);
-  renderer.lutN = 33;                     // the final LUT for the comparison
-  const key = renderer.lutCacheKey(33);
+  if (!editing) renderer.lutN = 33;       // the final LUT for the comparison
+  const n = renderer.lutN;
+  const key = renderer.lutCacheKey(n);
   if (!renderer.hasLut(key) && !core.lutDead) {
-    core.requestLut(ctl, 33);             // async: the ready path re-requests the render side
+    core.requestLut(ctl, n);              // async: the ready path re-requests the render side
     return null;
   }
   const rgba = renderer.render({ toScreen: false });
@@ -163,17 +181,25 @@ const compareView = createCompare({ state,
   },
   onManual: () => {
     const p = state.pairs.find((q) => q.id === state.selectedPairId);
-    if (p) enterEditor(p);                // step 3.1 with the selected version as the baseline
+    if (p) enterEditor(p);                // the quick editor on Compare (decision #16)
   },
+  onShare: () => transfer.shareNow(),     // Copy link moved from step 3.1 to Compare
   // the pair strip and the refit (decision #11)
   onAddRaws: (files) => { for (const f of files) addRawFile(f); },
   onAddTarget: (pair, file) => addTargetFile(pair, file),
   onRemovePair: (p) => removePair(p),
-  onRefit: () => runRefit(),
+  onRefit: () => confirmRefit(),
   onCancelRefit: () => cancelFit(t("Refit cancelled — the session is unchanged")),
   // Download NP3 right from Compare: the current profile at the current strength (the same
   // export as the editor's, transfer.exportNow)
-  onDownload: () => transfer.exportNow(),
+  onDownload: () => {
+    const name = `${state.control.name}.NP3`;
+    transfer.exportNow();
+    // what to do with the file (UX review, decision #15; the card layout of spec/np3-format.md)
+    if (state.status === t("Exported: {name}", { name })) {
+      setStatus(t("Downloaded {name}. Put it into NIKON/CUSTOMPC on the memory card, then on the camera: Manage Picture Control → Load/save → Copy to camera.", { name }));
+    }
+  },
   setStatus: (text, kind) => setStatus(text, kind),
 });
 
@@ -200,11 +226,12 @@ const start = createStart({ state, setStatus,
   onAddTarget: (pair, file) => addTargetFile(pair, file),
   onRemovePair: (p) => removePair(p),
   onFit: () => runFitPreparation(),
+  onCancelFit: () => { if (fitPending) cancelFit(t("Fit cancelled — press Fit to run it again")); },
 });
 
 function refreshPairsUI() {
   start.refresh();
-  if (state.step === "compare") compareView.refreshPairs();   // the strip, the coverage, Refit
+  if (onHub()) compareView.refreshPairs();   // the strip, the coverage, Refit
 }
 
 // ---------- pair preparation (stage 2, spec/web-schemas.md §2) ----------
@@ -286,11 +313,19 @@ fitWorker.onmessage = (e) => {
   const m = e.data;
   if (!fitPending || m.id !== fitPending.id) return;    // stale: nothing is applied
   if (m.type === "progress") {
-    setStatus(t("Fitting: iteration {it} of {total}, cost {cost}",
-                { it: m.iteration, total: m.total, cost: m.cost.toFixed(2) }));
+    // no LM cost in the UI (UX review, decision #15): the iteration and a progress bar
+    setStatus(fitPending.kind === "refit"
+      ? t("Refitting: iteration {it} of up to {total}", { it: m.iteration, total: m.total })
+      : t("Fitting: iteration {it} of up to {total}", { it: m.iteration, total: m.total }));
+    start.setFitProgress(m.iteration / m.total);
+    if (fitPending.kind === "refit") {
+      const rb = $("cmp-refit");
+      if (rb) rb.dataset.sub = t("Refit {it}/{total}", { it: m.iteration, total: m.total });
+    }
     return;
   }
   const task = fitPending;
+  start.setFitProgress(null);
   fitPending = null;
   state.fitting = false;
   const refit = task.kind === "refit";
@@ -301,19 +336,19 @@ fitWorker.onmessage = (e) => {
     const r = makeRefitVersion(state.versions, parent, m.result);
     const v = { ...r, name: parent.name, control: { ...r.control, name: parent.name } };
     adoptVersion(v, { show: false });
-    setStatus(t("Refit finished: {name} ({it} iterations, cost {cost} in {sec}s)", {
-      name: v.name, it: m.result.iterations.run,
-      cost: m.result.cost.toFixed(2), sec: (m.ms / 1000).toFixed(1),
-    }));
+    setStatus(t("Refit finished: {name} in {sec} s", { name: v.name, sec: (m.ms / 1000).toFixed(1) }));
     enterCompare();              // the refit stays on Compare (decision #11)
   } else if (m.type === "ready") {
     // The current profile (decision #12: no version history); the strength is kept.
-    state.versions = [draftVersion(m.result)];
+    // the NP3 name is the field as typed (decision #15), not controlOf's "NPF-" + upper[-15:]
+    const name = task.baseName ?? m.result.control.name;
+    const result = { ...m.result, control: { ...m.result.control, name } };
+    state.versions = [draftVersion(result)];
     state.selectedVersionId = "draft";
-    setStatus(t("Fit finished: {name} ({it} iterations, cost {cost} in {sec}s)", {
-      name: m.result.control.name, it: m.result.iterations.run,
-      cost: m.result.cost.toFixed(2), sec: (m.ms / 1000).toFixed(1),
-    }));
+    // the editor control follows the new profile at once: Download NP3 on Compare writes
+    // state.control, which stayed the neutral NPF-MANUAL until the manual step was opened
+    setBaseline(state.versions[0]);
+    setStatus(t("Fit finished: {name} in {sec} s", { name, sec: (m.ms / 1000).toFixed(1) }));
     enterCompare();              // stage 4: a successful fit goes to step 2 (spec/ui.md scenario)
   } else if (m.type === "error") {
     // A failure keeps the previous session state: no partial versions.
@@ -335,7 +370,7 @@ function adoptVersion(v, { show = true } = {}) {
   setBaseline(v);
   if (!show) return;
   requestReport();
-  if (state.step === "compare") compareView.refresh();
+  if (onHub()) compareView.refresh();
 }
 
 // Cancels the running fit or refit: nothing it computed is applied (a refit leaves every
@@ -387,7 +422,8 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
                     q.masks.validMask.buffer, q.masks.nearWhiteMask.buffer);
     }
     if (!state.fitting) return true;       // cancelled while the payload was assembled
-    fitPending = { id: payload.id, kind, parentId };
+    fitPending = { id: payload.id, kind, parentId, baseName };
+    if (kind === "fit") start.setFitProgress(0);
     fitWorker.postMessage(payload, transfer);
     return true;
   } catch (err) {
@@ -436,36 +472,16 @@ reportWorker.onmessage = (e) => {
 };
 reportWorker.onerror = () => { /* the report is optional: rendering is unaffected */ };
 
-// Step 3.1 (stage 6): a finished manual edit re-runs the report on the manual control — the
-// "<version>+manual" report with the field deltas vs the fitted baseline and fittedDelta
-// against the fitted version's own dE at the same strength. Outside the flow — nothing.
-function requestManualReport() {
-  if (state.step === "edit" && state.baseline) requestReport();
-}
-
 async function requestReport() {
+  if (state.step === "edit") return;          // hidden while editing; Done / Cancel re-request it
   try {
     const version = state.versions.find((v) => v.id === state.selectedVersionId);
     const usable = state.pairs.filter(compareUsable);
     if (!version || !usable.length) return;
-    // the manual control replaces the version's while the editor works on that baseline
-    const manual = state.step === "edit" && state.baseline?.versionId === version.id
-                   && isDirty(state.control, state.baseline.control);
-    const control = manual ? JSON.parse(JSON.stringify(state.control)) : version.control;
-    const versionId = manual ? `${version.id}+manual` : version.id;
-    let deltas = null, fittedRenderDE = null;
-    if (manual) {
-      deltas = fieldDeltas(state.control, state.baseline.control);
-      // stage 7: a per-pair reference — each pair's delta against its own fitted dE at the
-      // same version and strength (the worker takes { pairName: dE }; a pair without its
-      // fitted report gets no delta)
-      fittedRenderDE = {};
-      for (const p of usable) {
-        const ref = p.fittedDE;
-        if (ref && ref.versionId === version.id && ref.strength === state.strength)
-          fittedRenderDE[String(p.id)] = ref.value;
-      }
-    }
+    // the report is always the current profile's (the quick editor hides it, decision #16;
+    // the step-3.1 "<version>+manual" report with field deltas is gone with that screen)
+    const control = version.control, versionId = version.id;
+    const deltas = null, fittedRenderDE = null;
     const gen = ++reportGen;                  // supersede whatever is running/fetching
     const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
     if (gen !== reportGen) return;            // superseded while the models were fetched
@@ -564,13 +580,14 @@ function framesLanded(m) {
 }
 function updateAdvice() {
   state.advice = computeAdvice(state);
-  if (state.step === "compare") compareView.refreshPairs();
+  if (onHub()) compareView.refreshPairs();
   refreshPairsUI();
 }
 
 async function prepareOne(pair) {
   pair.preparing = true;
   pair.prepStage = "queued";
+  pair.prepStageAt = performance.now();
   pair.prepError = null;
   refreshPairsUI();
   const gen = pair.prepGen;
@@ -593,7 +610,7 @@ async function prepareOne(pair) {
       xmp: pair.target.xmp, rawBytes,
       gain: g.gain, gainNote: g.note,
     }, [rawBytes.buffer, targetU8.buffer], (stage) => {
-      if (pair.prepGen === gen) { pair.prepStage = stage; refreshPairsUI(); }
+      if (pair.prepGen === gen) { pair.prepStage = stage; pair.prepStageAt = performance.now(); refreshPairsUI(); }
     });
     if (pair.prepGen !== gen) return false;    // superseded mid-flight: nothing is applied
     if (res && res.error) pair.prepError = res.error.detail;
@@ -702,7 +719,7 @@ function removePair(p) {
     compareFramePair = null;
   }
   state.reportAggregate = null;
-  if (state.step === "compare") compareView.refresh();      // the next pair on the canvas
+  if (onHub()) compareView.refresh();      // the next pair on the canvas
   if (state.versions.length) requestReport();   // the aggregate over the remaining pairs
   setStatus(msg);
   refreshPairsUI();
@@ -757,7 +774,8 @@ function pairLoaderUpdate(st) {
     if (inSession(p) && p.rawFile && p.rawFile.name === st.name && p.raw === "pending") {
       p.raw = { name: st.name, image: st.image, info: st.info, warn: st.warn };
       refreshPair(p);
-      setStatus(t("Ready"));
+      setStatus(isTargetReady(p) ? t("{name} decoded", { name: st.name })
+                                 : t("{name} decoded — add its JPEG", { name: st.name }));
     }
     refreshPairsUI();
   }
@@ -856,61 +874,80 @@ async function addTargetFile(pair, file) {
   autoPrepare();
 }
 
-// ---------- navigation: Start <-> the manual editor ----------
-// The wizard's editor is step 3.1: it always works against a fitted version (the standalone
-// editor is its own page, spec/ui-pages.md).
+// ---------- the quick editor on Compare (spec/ui.md decision #16) ----------
+// "Manual adjustments" keeps Compare — the strip, the viewer with the target, pair switching —
+// and puts the parameter panel in place of the report. The render side follows every edit
+// (hooks.onRender above). Done makes the edits the current profile (a new immutable "manual"
+// version with the same pairs; Download NP3 writes it); Cancel returns the control to the
+// profile it started from. The report is hidden meanwhile and recomputes on the way out.
+// state.step "edit" is this mode (the separate step-3.1 screen is gone).
 function enterEditor(pair) {
-  if (!isRawReady(pair) || pair.blocked || !state.versions.length) return;
-  cancelFit();                         // navigation cancels a running fit
-  state.selectedPairId = pair.id;
+  if (!state.versions.length || state.step === "edit") return;
+  if (pair && compareUsable(pair)) state.selectedPairId = pair.id;
+  if (!state.pairs.some((p) => p.id === state.selectedPairId && compareUsable(p))) return;
+  if (state.fitting) cancelFit();      // a running refit would replace the profile under the edits
+  const v = state.versions.find((x) => x.id === state.selectedVersionId) ?? state.versions[0];
+  setBaseline(v);                      // the edits start from the current profile; undo/marks/resets against it
   state.step = "edit";
   syncStep();
-  reportView.refresh();                // the report shows beside the editor (spec/ui.md step 3.1)
-  // entering the editor loads the selected version's control as the immutable baseline
-  // (stage 6): resets/marks/undo work against it; without a fitted version the editor is
-  // the standalone one (the control is kept, resets go to neutral). The version history is
-  // never touched.
-  const v = state.versions.find((x) => x.id === state.selectedVersionId);
-  setBaseline(v);
-  applyEditorFrame({ name: pair.raw.name, image: pair.raw.image, info: pair.raw.info, warn: pair.raw.warn });
+  compareView.refresh();               // the strip (Refit hidden), the render side with the control
 }
 
-// ---------- leaving the manual adjustment (stage 6, spec/ui-plan.md stage 6) ----------
-// Returning to fitting (Start / Compare) from step 3.1 with manual edits on a fitted
-// baseline warns first: the edits are discarded (the version stays unchanged; manual edits
-// never carry into a refit). The warning is an in-page alertdialog, not window.confirm —
-// non-blocking for the page and the browser tooling. Without edits, or in standalone
-// editing (nothing is discarded there), navigation is immediate.
-const leaveBox = $("leave-confirm");
-let leavePending = null;
-function guardLeave(go) {
-  if (state.step !== "edit" || !state.baseline || !isDirty(state.control, state.baseline.control))
-    return false;
-  leavePending = go;
-  leaveBox.hidden = false;
-  $("leave-keep").focus();
-  return true;
+let manualSeq = 0;                     // manual version ids: <parent>m<n>, unique in the session
+function exitEditor({ save }) {
+  if (state.step !== "edit") return;
+  const v = state.versions.find((x) => x.id === state.selectedVersionId) ?? state.versions[0];
+  const dirty = !!state.baseline && isDirty(state.control, state.baseline.control);
+  state.step = "compare";
+  syncStep();
+  if (save && dirty) {
+    // the edits become the current profile: same pairs and fit metadata, a new id (the render
+    // and report caches never mix the two), marked manual — a refit asks before replacing it
+    const control = JSON.parse(JSON.stringify(state.control));
+    adoptVersion({ ...v, id: `${v.id.replace(/m\d+$/, "")}m${++manualSeq}`, name: control.name,
+                   control, parentId: v.id, kind: "manual", manual: true }, { show: false });
+    setStatus(t("Manual adjustments saved to {name}", { name: control.name }));
+  } else {
+    Object.assign(state.control, JSON.parse(JSON.stringify(state.baseline?.control ?? v.control)));
+    panel.refresh();
+    hist.clear();
+    hist.push();
+    if (dirty) setStatus(t("Manual adjustments discarded"));
+  }
+  compareView.refresh();
+  requestReport();
+  reportView.refresh();
 }
-function leaveKeep() {
-  leavePending = null;
-  leaveBox.hidden = true;
+$("adj-done").addEventListener("click", () => exitEditor({ save: true }));
+$("adj-cancel").addEventListener("click", () => exitEditor({ save: false }));
+
+// ---------- the in-page confirmation (an alertdialog, never window.confirm) ----------
+// Used before a refit replaces a profile with manual adjustments (decision #16).
+const confirmBox = $("confirm-box");
+let confirmGo = null;
+function askConfirm(text, yesLabel, go) {
+  $("confirm-text").textContent = text;
+  $("confirm-yes").textContent = yesLabel;
+  confirmGo = go;
+  confirmBox.hidden = false;
+  $("confirm-no").focus();
 }
-function leaveDiscard() {
-  const go = leavePending;
-  leavePending = null;
-  leaveBox.hidden = true;
-  Object.assign(state.control, JSON.parse(JSON.stringify(state.baseline.control)));
-  panel.refresh();
-  hist.clear();
-  hist.push();
-  go?.();
+function confirmClose() { confirmGo = null; confirmBox.hidden = true; }
+$("confirm-no").addEventListener("click", confirmClose);
+$("confirm-yes").addEventListener("click", () => { const go = confirmGo; confirmClose(); go?.(); });
+confirmBox.addEventListener("keydown", (e) => { if (e.key === "Escape") confirmClose(); });
+
+// A refit starts from zero (decision #3): manual adjustments on the current profile are lost —
+// ask first. A running refit is cancelled by the same button without asking.
+function confirmRefit() {
+  const v = state.versions.find((x) => x.id === state.selectedVersionId);
+  if (state.fitting || !v?.manual) { runRefit(); return; }
+  askConfirm(t("Refit starts from zero over the pairs: the manual adjustments of {name} will be lost.",
+               { name: v.name }), t("Refit anyway"), () => runRefit());
 }
-$("leave-keep").addEventListener("click", leaveKeep);
-$("leave-discard").addEventListener("click", leaveDiscard);
-leaveBox.addEventListener("keydown", (e) => { if (e.key === "Escape") leaveKeep(); });
 
 function showStart() {
-  if (guardLeave(showStart)) return;
+  if (state.step === "edit") exitEditor({ save: false });
   state.step = "start";
   syncStep();
   refreshPairsUI();       // the assembled session is kept across the navigation
@@ -920,7 +957,7 @@ function showStart() {
 // (the ready handler above) or, later, a refit. Leaving it keeps the prepared pairs and the
 // versions; the selected pair skips blocked ones (they cannot be compared, as they cannot fit).
 function enterCompare() {
-  if (guardLeave(enterCompare)) return;
+  if (state.step === "edit") exitEditor({ save: false });
   if (!state.versions.length) {
     setStatus(t("Fit a profile first — the Comparison step needs a version"));
     return;
@@ -947,11 +984,8 @@ function syncStep() {
   document.body.classList.toggle("step-start", state.step === "start");
   document.body.classList.toggle("step-edit", state.step === "edit");
   document.body.classList.toggle("step-compare", state.step === "compare");
-  $("ed-to-compare").hidden = !state.versions.length;   // the editor's way back to Compare
-  if (state.step !== "edit") leaveKeep();               // a pending warning never outlives the step
+  if (state.step === "start") confirmClose();           // a pending question never outlives the hub
 }
-
-$("ed-to-compare").addEventListener("click", enterCompare);
 
 // ---------- files dropped on the page ----------
 // The Start zone, the pair cards and the Compare strip handle their own drops (stopPropagation).
@@ -966,7 +1000,7 @@ document.addEventListener("drop", (e) => {
 function routeFile(f) {
   const ext = (f.name.split(".").pop() || "").toLowerCase();
   if (ext === "nef" || ext === "dng") {
-    if (state.step === "start" || state.step === "compare") addRawFile(f);
+    if (state.step === "start" || onHub()) addRawFile(f);
     else setStatus(t("{name}: add RAW files on the Comparison screen", { name: f.name }), "error");
   } else if (ext === "jpg" || ext === "jpeg") {
     // RAW first (decision #7): a JPEG belongs to a card, not to the page
@@ -991,10 +1025,19 @@ function routeFile(f) {
 syncStep();
 setStatus(t("Add RAW files to assemble pairs"));
 
+// The session lives in this tab's memory only (decisions #4/#12): closing or reloading the tab
+// with pairs loaded asks first (UX review, decision #15). Browsers show their own text and
+// only after a user gesture on the page.
+window.addEventListener("beforeunload", (e) => {
+  if (!state.pairs.length) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
 // For the end-to-end tests and the following parts: the state and entry points.
 window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, blendingView,
                     gradingView, transfer, beforeAfter, start, hist, compare: compareView,
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne, autoPrepare,
-                    runRefit, removePair, computeAdvice, adoptVersion };
+                    runRefit, removePair, computeAdvice, adoptVersion, confirmRefit, exitEditor };

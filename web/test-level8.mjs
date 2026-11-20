@@ -178,11 +178,11 @@ export async function runLevel8({ browser, port, report, skip }) {
                  fitDisabled: document.getElementById("fit").disabled };
       });
       report(p1.name === "DSC_5584.NEF" && p1.cam.includes("Z f") && !p1.warn
-             && p1.defName === "dsc_5584" && p1.fitName === "dsc_5584",
-        `8 pairs: the RAW decodes into pair 1 (${p1.cam}), the default name "${p1.defName}" (as in match.py)`);
-      report(p1.card.includes(p1.cam) && p1.card.includes(`${p1.w}×${p1.h}`) && p1.card.includes("Active D-Lighting"),
-        `8 pairs: the card shows the camera and the frame size (${p1.w}×${p1.h}), ADL is honestly "?"`);
-      report(p1.state === "no_jpeg" && p1.slot && p1.fitDisabled && /0 pair\(s\) will be fitted/.test(p1.count)
+             && p1.defName === "NPF-DSC_5584" && p1.fitName === "NPF-DSC_5584",
+        `8 pairs: the RAW decodes into pair 1 (${p1.cam}), the default name "${p1.defName}" (the final NP3 name, as match.write builds it — decision #15)`);
+      report(p1.card.includes(p1.cam) && p1.card.includes(`${p1.w}×${p1.h}`) && !p1.card.includes("Active D-Lighting"),
+        `8 pairs: the card shows the camera and the frame size (${p1.w}×${p1.h}), no "Active D-Lighting ?" row (decision #15)`);
+      report(p1.state === "no_jpeg" && p1.slot && p1.fitDisabled && /^0 pairs will be fitted/.test(p1.count)
              && /1 without a JPEG/.test(p1.count),
         `8 pairs: after the decode the card offers "Add JPEG"; Fit stays disabled ("${p1.count}")`);
     }
@@ -350,7 +350,7 @@ export async function runLevel8({ browser, port, report, skip }) {
       report(nonAscii, "8 name: non-ASCII is highlighted (the np3.serialize rule)");
       const st = await ev(() => {
         const inp = document.getElementById("fit-name");
-        inp.value = "dsc_5584";
+        inp.value = "NPF-DSC_5584";
         inp.dispatchEvent(new Event("input", { bubbles: true }));
         document.getElementById("fit").click();      // disabled: nothing happens
         const s = window.__np3app.state;
@@ -359,7 +359,7 @@ export async function runLevel8({ browser, port, report, skip }) {
                  count: document.getElementById("fit-count").textContent };
       });
       report(st.disabled && !st.fitting && st.codes.every((c) => c === "target_too_small") && st.versions === 0
-             && /^0 pair\(s\) will be fitted; 0 without a JPEG, 2 blocked/.test(st.count),
+             && /^0 pairs will be fitted; skipped: 2 blocked/.test(st.count),
         `8 Fit: with only pre-fit-blocked pairs (small golden previews) Fit is disabled, no version ("${st.count}")`);
     }
 
@@ -403,8 +403,23 @@ export async function runLevel8({ browser, port, report, skip }) {
         `8 wizard page: a dropped NP3 is not imported ("${np3.status}")`);
     }
 
-    // a fresh wizard page for the fit scenarios (the Start checks above leave two blocked pairs)
+    // the leave guard (decision #15): with pairs in the session a beforeunload is cancelled, so
+    // the browser asks before a reload/close; without pairs nothing is asked
+    {
+      const guard = await ev(() => {
+        const e = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(e);
+        return { pairs: window.__np3app.state.pairs.length, prevented: e.defaultPrevented };
+      });
+      report(guard.pairs > 0 && guard.prevented,
+        `8 wizard page: closing/reloading the tab with ${guard.pairs} pairs asks first (beforeunload)`);
+    }
+    // a fresh wizard page for the fit scenarios (the Start checks above leave two blocked pairs);
+    // the browser's leave prompt (if it shows one) is accepted
+    const acceptLeave = (d) => { if (d.type() === "beforeunload") d.accept().catch(() => {}); };
+    page.on("dialog", acceptLeave);
     await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html`);
+    page.off("dialog", acceptLeave);
     await page.waitForFunction(
       `window.__np3app && window.__np3app.state.step === "start"`,
       { timeout: 120000, polling: 200 });
@@ -572,13 +587,15 @@ export async function runLevel8({ browser, port, report, skip }) {
       {
         const during = await ev(() => ({
           fitDisabled: document.getElementById("fit").disabled,
-          card: window.__t8.card(1).querySelector(".pair-meta").textContent,
+          card: window.__t8.card(1).querySelector(".pair-prog")?.textContent ?? "",
+          bar: !!window.__t8.card(1).querySelector(".pair-prog .pair-prog-bar i"),
+          spin: !!window.__t8.card(1).querySelector(".pair-prog-text .spin"),
           state: window.__t8.card(1).querySelector(".pair-state").dataset.state,
           name: document.getElementById("fit-name").value,
         }));
-        report(during.fitDisabled && during.card.includes("Preparing") && during.state === "preparing"
-               && during.name === "dsc_5584",
-          `8 prepare: a card with both files prepares by itself — progress on the card, Fit locked ("${during.card.slice(0, 60)}…")`);
+        report(during.fitDisabled && /Step \d of 7|Waiting for the previous pair/.test(during.card) && during.bar
+               && during.spin && during.state === "preparing" && during.name === "NPF-DSC_5584",
+          `8 prepare: a card with both files prepares by itself — a stage bar and a spinner on the card, Fit locked ("${during.card.slice(0, 60)}")`);
       }
       // cancel/replace: the JPEG is replaced mid-preparation — the running task is cancelled,
       // its result is stale and must not land; the pair is prepared again for the new file
@@ -613,7 +630,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           `8 prepare: the aligned pair shows NCC ${done.p1.ncc.toFixed(3)}`);
         report(done.p2.blocked === "ncc_low" && /Alignment failed/.test(done.p2.card) && done.p2.state === "blocked",
           `8 prepare: the cross pair is blocked (ncc ${done.p2.ncc.toFixed(3)} < 0.60), its card shows the badge`);
-        report(!done.fitDisabled && /^1 pair\(s\) will be fitted; 0 without a JPEG, 1 blocked/.test(done.count),
+        report(!done.fitDisabled && /^1 pair will be fitted; skipped: 1 blocked/.test(done.count),
           `8 prepare: Fit is enabled over the one usable pair ("${done.count}")`);
       }
 
@@ -627,9 +644,9 @@ export async function runLevel8({ browser, port, report, skip }) {
           status: document.getElementById("status").textContent,
           versions: window.__np3app.state.versions.length,
         }));
-        report(done.fitDisabled && done.fitLabel === "Fitting…" && /^(Fitting|Fitting:)/.test(done.status)
+        report(!done.fitDisabled && done.fitLabel === "Cancel fitting" && /^(Fitting|Fitting:)/.test(done.status)
                && done.versions === 0,
-          `8 fit: the fit runs with progress in the status line, Fit is locked ("${done.status.slice(0, 44)}…")`);
+          `8 fit: the fit runs with progress in the status line, the button cancels it ("${done.status.slice(0, 44)}…")`);
       }
       // cancel on a mid-flight JPEG replacement: the running fit is cancelled, no version is created
       await ev(() => window.__t8.dropOnCard(1, [["/test1/DSC_5584.jpg", "DSC_5584.JPG"]]));
@@ -672,44 +689,54 @@ export async function runLevel8({ browser, port, report, skip }) {
         report(draft.name === "NPF-DSC_5584" && draft.status.startsWith("Fit finished")
                && draft.iters > 0 && draft.cost > 0,
           `8 fit: "${draft.name}" in ${draft.iters} iterations (cost ${draft.cost}) — "${draft.status.slice(0, 52)}…"`);
+        // the exported control follows the fit at once — Download NP3 on Compare before the
+        // manual step used to write the neutral NPF-MANUAL (decision #15)
+        const same = await ev(() => {
+          const s = window.__np3app.state;
+          return JSON.stringify(s.control) === JSON.stringify(s.versions[0].control);
+        });
+        report(same, "8 fit: the export control is the fitted profile right after the fit");
       }
-      // the manual editor is reached from Compare (decision #7) and applies the version control
+      // the quick editor (decision #16) is reached from Compare and applies the profile control:
+      // Compare stays (the viewer with the target, the strip), the panel replaces the report
       await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
       await ev(() => document.getElementById("cmp-manual").click());
       await page.waitForFunction(
-        `window.__np3app.state.step === "edit" && window.__np3app.state.raw`,
+        `window.__np3app.state.step === "edit" && !window.__np3app.state.renderPending`,
         { timeout: 60000, polling: 200 });
-      await page.waitForFunction("!document.getElementById('c').hidden",
-        { timeout: 60000, polling: 100 });
       {
         const ed = await ev(() => {
           const A = window.__np3app;
+          const shown = (id) => getComputedStyle(document.getElementById(id)).display !== "none";
           return {
             controlSame: JSON.stringify(A.state.control) === JSON.stringify(A.state.versions[0].control),
             strength: A.state.strength,
-            shown: !document.getElementById("c").hidden,
+            layout: shown("compare") && shown("panel") && shown("cmp-strip") && !shown("report")
+              && !shown("view") && !shown("files") && !shown("cmp-refit-box"),
             name: A.state.control.name,
           };
         });
-        report(ed.controlSame && ed.strength === 100 && ed.shown,
-          `8 fit: Compare -> manual adjustment opens the fitted pair with the draft control (${ed.name})`);
+        report(ed.controlSame && ed.strength === 100 && ed.layout,
+          `8 fit: Manual adjustments opens the quick editor on Compare with the profile control (${ed.name}); the panel replaces the report`);
       }
-      // Copy link in step 3.1 leads to the profile editor page (spec/ui-pages.md "Share links")
+      // Cancel without edits: straight back to Compare, the profile untouched
+      await ev(() => document.getElementById("adj-cancel").click());
+      await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
+      // Copy link moved from step 3.1 to Compare: it leads to the profile editor page
+      // (spec/ui-pages.md "Share links")
       {
         const link = await page.evaluate(async () => {
           window.__link = null;
           navigator.clipboard.writeText = (s) => { window.__link = s; return Promise.resolve(); };
-          document.getElementById("share").click();
+          document.getElementById("cmp-share").click();
           await new Promise((r) => setTimeout(r, 300));
           return window.__link;
         });
         report(typeof link === "string" && new RegExp(`^http://127\\.0\\.0\\.1:${port}/web/picture-control-editor\\.html\\?np3=[A-Za-z0-9_-]+$`).test(link),
-          `8 share: Copy link in the manual step builds the editor link (${(link || "").slice(0, 70)}…)`);
+          `8 share: Copy link on Compare builds the editor link (${(link || "").slice(0, 70)}…)`);
       }
-      // back to Compare (the editor has no "Back to Start" since decision #11); on the strip the
-      // cross pair is removed (×) and a new pair comes in: SKL_3024 + a preview JPEG, which the
-      // pre-fit check blocks (target_too_small) — the profile stays over pair 1
-      await ev(() => document.getElementById("ed-to-compare").click());
+      // on the strip the cross pair is removed (×) and a new pair comes in: SKL_3024 + a preview
+      // JPEG, which the pre-fit check blocks (target_too_small) — the profile stays over pair 1
       await page.waitForFunction(`window.__np3app.state.step === "compare"`, { timeout: 60000, polling: 200 });
       await ev(() => document.querySelector('#cmp-strip .cmp-th[data-pair-id="2"] .cmp-th-x').click());
       await ev(async () => {
@@ -982,21 +1009,19 @@ export async function runLevel8({ browser, port, report, skip }) {
         // the exit to the manual editor and back (no More / Start exits, decision #11)
         {
           await ev(() => document.getElementById("cmp-manual").click());
-          await page.waitForFunction(
-            `window.__np3app.state.step === "edit" && !!window.__np3app.state.raw`,
-            { timeout: 60000, polling: 200 });
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`, { timeout: 60000, polling: 200 });
           const ed = await ev(() => {
             const A = window.__np3app;
             const v = A.state.versions.find((x) => x.id === A.state.selectedVersionId);
             return { controlSame: JSON.stringify(A.state.control) === JSON.stringify(v.control),
-                     strength: A.state.strength, raw: A.state.raw?.name,
-                     shown: !document.getElementById("c").hidden,
-                     toStart: !!document.getElementById("to-start"), back: !document.getElementById("ed-to-compare").hidden };
+                     strength: A.state.strength, pair: A.state.selectedPairId,
+                     toStart: !!document.getElementById("to-start"),
+                     done: !!document.getElementById("adj-done"), cancel: !!document.getElementById("adj-cancel") };
           });
-          report(ed.controlSame && ed.strength === 100 && ed.raw === "DSC_5584.NEF" && ed.shown && !ed.toStart && ed.back,
-            "8 exit: Looks good opens the editor with the current profile as the baseline, the strength kept;" +
-            " only Back to Comparison leads out");
-          await ev(() => document.getElementById("ed-to-compare").click());
+          report(ed.controlSame && ed.strength === 100 && ed.pair === 1 && !ed.toStart && ed.done && ed.cancel,
+            "8 exit: Manual adjustments opens the quick editor with the current profile as the baseline, the" +
+            " strength kept; Done / Cancel lead out");
+          await ev(() => document.getElementById("adj-cancel").click());
           await cmpSettle();
           const back2 = await ev(() => ({ step: window.__np3app.state.step,
             selected: window.__np3app.state.selectedVersionId,
@@ -1008,10 +1033,10 @@ export async function runLevel8({ browser, port, report, skip }) {
             "8 navigation: editor -> Compare preserves the profile, the strength, the pairs and the selected pair");
         }
 
-        // --- stage 6: the fitted baseline in the manual editor (spec/ui-plan.md stage 6,
-        // spec/ui.md "Decisions" #2): field/group/tool/profile reset to the selected fit
-        // version, the changed marks (incl. after undo), the manual report, the leave
-        // warning (keep / discard) and the rebaseline on a version switch ---
+        // --- stage 6 in the quick editor (spec/ui.md decisions #2, #16): field/group/tool/profile
+        // reset to the current profile, the changed marks (incl. after undo), the render side
+        // follows the edits, Cancel drops / Done keeps the edits, the rebaseline on a profile
+        // switch ---
         {
           await ev(() => {   // no modal dialog may ever open: record any attempt
             window.__t8.modal = 0;
@@ -1026,10 +1051,10 @@ export async function runLevel8({ browser, port, report, skip }) {
              && window.__np3app.state.pairs[0].report.summary.strength === 100`,
             { timeout: 120000, polling: 200 });
           await ev(() => document.getElementById("cmp-manual").click());
-          await page.waitForFunction(
-            `window.__np3app.state.step === "edit" && !!window.__np3app.state.raw`,
-            { timeout: 60000, polling: 200 });
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`, { timeout: 60000, polling: 200 });
           await settle();
+          await cmpSettle();
+          const draftHashEdit0 = await ev(() => window.__t8.snapCC());
           // helpers: the visible marks and the enabled reset controls in the panel
           await ev(() => {
             const A = window.__np3app;
@@ -1050,7 +1075,7 @@ export async function runLevel8({ browser, port, report, skip }) {
                      same: JSON.stringify(A.state.control) === JSON.stringify(bl.control),
                      marks: S.marks(), groups: S.groupMarks().length, resets: S.enabledResets(),
                      hist: A.hist.length,
-                     backBtn: !document.getElementById("ed-to-compare").hidden };
+                     backBtn: getComputedStyle(document.getElementById("adj-done")).display !== "none" };
           });
           report(b0.fitted && b0.vid === "draft" && b0.same && b0.marks === 0 && b0.groups === 0
                  && b0.resets === 0 && b0.hist === 1 && b0.backBtn,
@@ -1072,18 +1097,12 @@ export async function runLevel8({ browser, port, report, skip }) {
           });
           report(f1.chg && f1.markVisible && f1.groups.join(",") === "basic" && f1.basicReset,
             `8 stage 6: an edited field shows its mark and its group's (${f1.groups.join(",")})`);
-          // the manual report: the edited control, deltas vs the baseline, fittedDelta (1 usable pair)
-          await page.waitForFunction(
-            `window.__np3app.state.pairs[0].report && window.__np3app.state.pairs[0].report.id === "draft+manual:1"`,
-            { timeout: 120000, polling: 200 });
-          const mr = await ev(() => {
-            const r = window.__np3app.state.pairs[0].report;
-            return { sat: r.parameters.base.saturation, delta: r.parameters.deltas?.saturation,
-                     fd: r.summary.fittedDelta };
-          });
-          report(mr.sat === satEdit && mr.delta === satEdit - sat0 && typeof mr.fd === "number",
-            `8 stage 6: a finished manual edit re-runs the report (draft+manual, delta ${mr.delta},` +
-            ` fittedDelta ${typeof mr.fd === "number" ? mr.fd.toFixed(3) : mr.fd})`);
+          // the render side follows the edit (the quick editor draws on the compare canvas); the
+          // report stays hidden and is not recomputed meanwhile (decision #16)
+          await cmpSettle();
+          const editHash = await ev(() => window.__t8.snapCC());
+          report(editHash !== draftHashEdit0,
+            "8 stage 6: an edit re-renders the compare render side with the manual control");
           const f2 = await ev(() => {
             const S = window.__t8.s6;
             S.row("basic", 0).querySelector("input[type=range]")
@@ -1225,49 +1244,63 @@ export async function runLevel8({ browser, port, report, skip }) {
           await ev(() => window.__t8.groupSlider("strength", 0, 100));
           await settle();
 
-          // the leave warning: an edit, then Back to Comparison -> the in-page dialog; Keep stays
+          // Cancel: back to Compare at once, the control returns to the profile, the profile untouched
           await ev((v) => window.__t8.groupSlider("basic", 0, v), satEdit);
-          const lk = await ev(() => {
-            const A = window.__np3app;
-            document.getElementById("ed-to-compare").click();
-            const shown = !document.getElementById("leave-confirm").hidden;
-            const role = document.getElementById("leave-confirm").getAttribute("role");
-            const stepDuring = A.state.step;
-            document.getElementById("leave-keep").click();
-            return { shown, role, stepDuring, hidden: document.getElementById("leave-confirm").hidden,
-                     step: A.state.step, sat: A.state.control.saturation };
-          });
-          report(lk.shown && lk.role === "alertdialog" && lk.stepDuring === "edit" && lk.hidden
-                 && lk.step === "edit" && lk.sat === satEdit,
-            "8 stage 6: leaving with manual edits shows an in-page warning; Keep editing stays with the edits");
-          // Discard: back to Compare, the control returns to the profile, the profile is untouched
           const ld = await ev((json0) => {
             const A = window.__np3app;
-            document.getElementById("ed-to-compare").click();
-            const shown = !document.getElementById("leave-confirm").hidden;
-            document.getElementById("leave-discard").click();
+            const stepDuring = A.state.step;
+            document.getElementById("adj-cancel").click();
             const v = A.state.versions.find((x) => x.id === "draft");
-            return { shown, step: A.state.step,
+            return { stepDuring, step: A.state.step, versions: A.state.versions.length,
                      controlIsVersion: JSON.stringify(A.state.control) === JSON.stringify(v.control),
-                     versionSame: JSON.stringify(v.control) === json0,
-                     modal: window.__t8.modal };
+                     versionSame: JSON.stringify(v.control) === json0, modal: window.__t8.modal };
           }, draftJson0);
-          report(ld.shown && ld.step === "compare" && ld.controlIsVersion && ld.versionSame && ld.modal === 0,
-            "8 stage 6: Discard edits leaves, drops the manual edits, the profile stays unchanged" +
-            " (no window.confirm/alert)");
-          // without edits the editor leaves immediately
+          report(ld.stepDuring === "edit" && ld.step === "compare" && ld.versions === 1 && ld.controlIsVersion
+                 && ld.versionSame && ld.modal === 0,
+            "8 stage 6: Cancel leaves the quick editor, drops the edits, the profile stays unchanged (no window.confirm/alert)");
+          await cmpSettle();
+          // Done: the edits become the current profile — a new manual version, the same pairs
+          await ev(() => document.getElementById("cmp-manual").click());
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`, { timeout: 60000, polling: 200 });
+          await ev((v) => window.__t8.groupSlider("basic", 0, v), satEdit);
+          const dn = await ev(() => {
+            const A = window.__np3app;
+            document.getElementById("adj-done").click();
+            const v = A.state.versions[0];
+            return { step: A.state.step, n: A.state.versions.length, id: v.id, kind: v.kind, manual: v.manual,
+                     sat: v.control.saturation, pairs: v.pairIds.join(","), sel: A.state.selectedVersionId,
+                     ctlSame: JSON.stringify(A.state.control) === JSON.stringify(v.control) };
+          });
+          report(dn.step === "compare" && dn.n === 1 && /^draftm\d+$/.test(dn.id) && dn.kind === "manual" && dn.manual
+                 && dn.sat === satEdit && dn.pairs === "1" && dn.sel === dn.id && dn.ctlSame,
+            `8 stage 6: Done keeps the edits as the current profile (${dn.id}, saturation ${dn.sat}, pairs ${dn.pairs})`);
+          // a refit would start from zero: with manual adjustments it asks first (an in-page
+          // alertdialog); "Keep the profile" starts nothing
+          const rq = await ev(() => {
+            const A = window.__np3app;
+            A.confirmRefit();
+            const box = document.getElementById("confirm-box");
+            const r = { shown: !box.hidden, role: box.getAttribute("role"),
+                        text: document.getElementById("confirm-text").textContent };
+            document.getElementById("confirm-no").click();
+            return { ...r, hidden: box.hidden, fitting: A.state.fitting, modal: window.__t8.modal };
+          });
+          report(rq.shown && rq.role === "alertdialog" && /manual adjustments/.test(rq.text) && rq.hidden
+                 && !rq.fitting && rq.modal === 0,
+            "8 stage 6: a refit over a profile with manual adjustments asks first; Keep the profile starts nothing");
+          // Done without edits changes nothing
           await cmpSettle();
           await ev(() => document.getElementById("cmp-manual").click());
-          await page.waitForFunction(`window.__np3app.state.step === "edit"`,
-            { timeout: 60000, polling: 200 });
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`, { timeout: 60000, polling: 200 });
           const clean = await ev(() => {
-            document.getElementById("ed-to-compare").click();
-            return { step: window.__np3app.state.step,
-                     hidden: document.getElementById("leave-confirm").hidden };
+            const A = window.__np3app;
+            const id0 = A.state.versions[0].id;
+            document.getElementById("adj-done").click();
+            return { step: A.state.step, same: A.state.versions[0].id === id0 };
           });
           await cmpSettle();
-          report(clean.step === "compare" && clean.hidden,
-            "8 stage 6: without manual edits the editor leaves at once (no warning)");
+          report(clean.step === "compare" && clean.same,
+            "8 stage 6: Done without edits leaves at once and keeps the profile");
 
           // a replaced profile rebaselines: r1 -> its control, its marks, a fresh history
           await ev(() => window.__np3app.adoptVersion(window.__t8.r1V));
@@ -1292,7 +1325,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(rb.vid === "r1" && rb.same && rb.marked === 1 && rb.sat === rb.r1sat && rb.marks === 0,
             `8 stage 6: a replaced profile rebaselines the editor (reset to r1's ${rb.r1sat})`);
           // back to Compare on the draft for the report checks below
-          await ev(() => document.getElementById("ed-to-compare").click());
+          await ev(() => document.getElementById("adj-cancel").click());
           await page.waitForFunction(`window.__np3app.state.step === "compare"`,
             { timeout: 60000, polling: 200 });
           await ev(() => window.__np3app.adoptVersion(window.__t8.draftV));
@@ -1766,17 +1799,17 @@ export async function runLevel8({ browser, port, report, skip }) {
           { timeout: 120000, polling: 200 });
       }
 
-      // step 3.1: the same report component shows beside the manual editor
+      // the quick editor hides the report (decision #16): the panel takes its column
       {
         await ev(() => document.getElementById("cmp-manual").click());
         await page.waitForFunction(`window.__np3app.state.step === "edit"`,
           { timeout: 60000, polling: 200 });
         const ed = await ev(() => ({
-          shown: getComputedStyle(document.getElementById("report")).display !== "none",
-          renderDE: document.getElementById("rep-render-de")?.textContent ?? "" }));
-        report(ed.shown && ed.renderDE.length > 0,
-          `8 report: at step 3.1 the report shows beside the editor (dE ${ed.renderDE})`);
-        await ev(() => document.getElementById("ed-to-compare").click());
+          report: getComputedStyle(document.getElementById("report")).display,
+          panel: getComputedStyle(document.getElementById("panel")).display }));
+        report(ed.report === "none" && ed.panel !== "none",
+          "8 report: the quick editor hides the report, the parameter panel takes its column");
+        await ev(() => document.getElementById("adj-cancel").click());
         await page.waitForFunction(`window.__np3app.state.step === "compare"`,
           { timeout: 60000, polling: 200 });
       }
@@ -1819,17 +1852,17 @@ export async function runLevel8({ browser, port, report, skip }) {
         return { id: v.id, name: v.name, n: s.versions.length, json: JSON.stringify(s.versions) };
       });
 
-      // the editor with manual edits: Back to Comparison asks first; Discard drops the edits
+      // the quick editor with manual edits: Cancel drops them, the profile stays
       await ev(() => document.getElementById("cmp-manual").click());
       await hubSettle(`window.__np3app.state.step === "edit"`, 60000);
       await ev(() => window.__t8.groupSlider("basic", 0, 37));
       const lw = await ev(() => {
-        document.getElementById("ed-to-compare").click();
-        return { shown: !document.getElementById("leave-confirm").hidden, step: window.__np3app.state.step };
+        document.getElementById("adj-cancel").click();
+        const s = window.__np3app.state;
+        return { step: s.step, json: JSON.stringify(s.versions) };
       });
-      report(lw.shown && lw.step === "edit",
-        "8 stage 13: Back to Comparison with manual edits asks first (the leave warning)");
-      await ev(() => document.getElementById("leave-discard").click());
+      report(lw.step === "compare" && lw.json === v0.json,
+        "8 stage 13: Cancel in the quick editor drops the manual edits, the profile is unchanged");
       await hubSettle(`window.__np3app.state.step === "compare"`, 60000);
 
       // the coverage block at the top of the side panel (where Versions used to be)
@@ -1934,9 +1967,11 @@ export async function runLevel8({ browser, port, report, skip }) {
                  state: tile.dataset.state, inactive: tile.classList.contains("inactive"),
                  caption: tile.querySelector(".cmp-th-badge")?.textContent ?? "",
                  selected: s.advice.selected, coverage: s.advice.coverage,
-                 btn: btn.textContent, btnOn: !btn.disabled, ids: btn.dataset.pairIds,
+                 btn: btn.textContent, btnOn: !btn.disabled, ids: btn.dataset.pairIds, sub: btn.dataset.sub,
                  json: JSON.stringify(s.versions), fitting: s.fitting };
       }, id3);
+      report(m1.sub === "+1 pair",
+        `8 stage 13: the Refit button says what a refit would change in its sub-line ("${m1.sub}", decision #15)`);
       report(m1.target === "DSC_5584B.jpg" && m1.ncc >= 0.6 && !m1.err && m1.state === "new" && m1.inactive
              && m1.caption === "Refit to include",
         `8 stage 13: the JPEG on the tile completes the pair — prepared (NCC ${m1.ncc.toFixed(3)}), dimmed, "${m1.caption}"`);
@@ -1949,6 +1984,11 @@ export async function runLevel8({ browser, port, report, skip }) {
         { timeout: 120000, polling: 50 });
       const sel3 = await ev(() => window.__np3app.state.selectedPairId);
       report(sel3 === id3, "8 stage 13: a prepared new pair is selectable — Compare shows the current profile on it");
+      // its report is a preview, not the fit's numbers: the report says so (decision #15)
+      await hubSettle(`(() => { const p = window.__np3app.state.pairs.find((q) => q.id === ${id3});
+                         return !!(p && p.report); })()`, 120000);
+      const pv = await ev(() => { window.__np3app.report.refresh(); return document.getElementById("rep-preview").hidden; });
+      report(pv === false, "8 stage 13: the report of a pair outside the profile is marked as a preview");
 
       // cancel path: a cancelled refit leaves the session unchanged, the screen stays on Compare
       await ev(() => document.getElementById("cmp-refit").click());
@@ -1960,7 +2000,7 @@ export async function runLevel8({ browser, port, report, skip }) {
         return { status: s.status, fitting: s.fitting, json: JSON.stringify(s.versions), step: s.step,
                  btn: document.getElementById("cmp-refit").textContent };
       });
-      report(during === "Cancel the refit" && cx.status.startsWith("Refit cancelled") && !cx.fitting
+      report(during === "Cancel" && cx.status.startsWith("Refit cancelled") && !cx.fitting
              && cx.json === v0.json && cx.step === "compare" && cx.btn === "Refit",
         `8 stage 13: while refitting the button cancels; a cancelled refit leaves the profile unchanged ("${cx.status}")`);
 
@@ -1977,15 +2017,16 @@ export async function runLevel8({ browser, port, report, skip }) {
                  nParams: v.fitVector.length, tile: tile.dataset.state,
                  btn: document.getElementById("cmp-refit").disabled,
                  note: document.getElementById("cmp-refit").title,
-                 noCaption: !document.getElementById("cmp-refit-count") };
+                 noCaption: !document.getElementById("cmp-refit-count"),
+                 sub: document.getElementById("cmp-refit").dataset.sub };
       }, id3);
       report(rf.n === 1 && rf.id !== v0.id && rf.kind === "refit" && rf.name === v0.name && rf.ctlName === v0.name
              && rf.sel === rf.id && rf.nParams === 56,
         `8 stage 13: the refit replaces the profile — one profile (${rf.id}), the name kept ("${rf.name}")`);
       report(rf.pairIds.join(",") === shown && shown.split(",").length >= 2 && rf.step === "compare" && rf.strength === 80,
         `8 stage 13: the refit used exactly the shown pair ids (${rf.pairIds}); still on Compare, strength 80% kept`);
-      report(rf.tile === "active" && rf.btn && /already fitted/.test(rf.note) && rf.noCaption,
-        `8 stage 13: the new pair's tile is active now; Refit is off until the pairs change ("${rf.note}")`);
+      report(rf.tile === "active" && rf.btn && /already fitted/.test(rf.note) && rf.noCaption && rf.sub === "Up to date",
+        `8 stage 13: the new pair's tile is active now; Refit is off until the pairs change ("${rf.note}", "${rf.sub}")`);
       // the layout: Refit is a square right of the strip; Manual adjustments and Download NP3
       // at the bottom of the side panel; Download NP3 saves the current profile at the strength
       {
@@ -2014,6 +2055,9 @@ export async function runLevel8({ browser, port, report, skip }) {
         const want = serialize({ ...scaled(cur.ctl, cur.st), name: cur.ctl.name });
         report(cur.st === 80 && got.length === want.length && got.every((v, i) => v === want[i]),
           `8 stage 13: Download NP3 on Compare saves the current profile at ${cur.st}% byte for byte`);
+        const hint = await ev(() => window.__np3app.state.status);
+        report(/NIKON\/CUSTOMPC/.test(hint) && hint.includes(`${cur.ctl.name}.NP3`),
+          `8 stage 13: after the download the status says where the file goes ("${hint.slice(0, 60)}…")`);
       }
       await ev(() => {
         const inp = document.getElementById("cmp-strength");

@@ -108,9 +108,24 @@ export function fitCount(state) {
 
 export function fitCountText(state) {
   const { n, m, k } = fitCount(state);
-  let s = t("{n} pair(s) will be fitted", { n });
-  if (m || k) s += "; " + t("{m} without a JPEG, {k} blocked — skipped", { m, k });
+  let s = n === 1 ? t("1 pair will be fitted") : t("{n} pairs will be fitted", { n });
+  const skipped = [];
+  if (m) skipped.push(t("{m} without a JPEG", { m }));
+  if (k) skipped.push(t("{k} blocked", { k }));
+  if (skipped.length) s += "; " + t("skipped: {list}", { list: skipped.join(", ") });
+  const preparing = state.pairs.filter((p) => p.preparing).length;
+  if (preparing) s += " — " + t("Fit unlocks when the preparation finishes");
   return s;
+}
+
+// The pair-preparation stages of pair-worker.js in user words (the codes are data).
+const PREP_STAGES = {
+  queued: "queued", decode: "reading the RAW", vignette: "lens corrections",
+  crop: "geometry", orient: "geometry", radial: "lens corrections",
+  align: "aligning with the JPEG", shrink: "finishing",
+};
+function prepStageText(stage) {
+  return t(PREP_STAGES[stage] ?? "working");
 }
 
 /**
@@ -119,27 +134,34 @@ export function fitCountText(state) {
  *   onAddTarget(pair, file)   — the JPEG of one card (add or replace);
  *   onRemovePair(pair)        — "Remove from fit": the pair leaves the session;
  *   onFit()                   — the Fit button (preparation + the fit Worker live in app.js);
+ *   onCancelFit()             — the same button while a fit runs ("Cancel fitting");
  *   setStatus(text)           — the shared status line (app.js owns it).
- * Returns { refresh, setNameDefault }.
+ * Returns { refresh, setNameDefault, setFitProgress }.
  */
 export const START_IDS = {
   pairs: "pairs", name: "fit-name", nameErr: "fit-name-err", fit: "fit", fitCount: "fit-count",
+  fitProgress: "fit-progress",
   rawZone: "raw-drop", rawPicker: "raw-file",
 };
 
 export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit = () => {},
-                              setStatus, ids = START_IDS, mode = "start", decorate = null }) {
+                              onCancelFit = () => {}, setStatus, ids = START_IDS, mode = "start", decorate = null }) {
   const pairsEl = $(ids.pairs);
   const nameInput = ids.name ? $(ids.name) : null;      // absent on the More screen
   const nameErr = ids.nameErr ? $(ids.nameErr) : null;
   const fitBtn = ids.fit ? $(ids.fit) : null;
   const fitCountEl = ids.fitCount ? $(ids.fitCount) : null;
+  const fitProgress = ids.fitProgress ? $(ids.fitProgress) : null;
   const toCompareBtn = ids.toCompare ? $(ids.toCompare) : null;
   const rawZone = $(ids.rawZone);
   const rawPicker = $(ids.rawPicker);
 
   // ---------- the RAW picker and drop zone ----------
   rawZone.addEventListener("click", () => rawPicker.click());
+  // the zone is a role=button with tabindex=0 in the markup: Enter / Space open the picker
+  rawZone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); rawPicker.click(); }
+  });
   rawPicker.addEventListener("change", () => { onAddRaws([...rawPicker.files]); rawPicker.value = ""; });
 
   function bindZone(zone, accept, kinds, cb) {
@@ -194,12 +216,24 @@ export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit
     const preparing = state.pairs.some((p) => p.preparing);
     const fittable = fitCount(state).n > 0;
     if (fitCountEl) fitCountEl.textContent = state.pairs.length ? fitCountText(state) : "";
-    fitBtn.textContent = t(state.fitting ? "Fitting…" : "Fit");
-    fitBtn.disabled = state.fitting || !isValidProfileName(state.profileName) || !fittable || preparing;
+    // while a fit runs the button cancels it (UX review, decision #15); the progress bar under
+    // it follows the LM iterations (setFitProgress from app.js)
+    fitBtn.textContent = t(state.fitting ? "Cancel fitting" : "Fit");
+    fitBtn.classList.toggle("cancel", !!state.fitting);
+    fitBtn.disabled = state.fitting ? false
+      : !isValidProfileName(state.profileName) || !fittable || preparing;
+    if (fitProgress && !state.fitting) fitProgress.hidden = true;
     // stage 4: the Comparison step needs a fitted version (from Fit or, later, a refit)
     if (toCompareBtn) toCompareBtn.disabled = state.versions.length === 0;
   }
-  fitBtn?.addEventListener("click", () => onFit());
+  fitBtn?.addEventListener("click", () => (state.fitting ? onCancelFit() : onFit()));
+
+  /** The fit progress under the button: `frac` in 0..1, or null to hide it. */
+  function setFitProgress(frac) {
+    if (!fitProgress) return;
+    fitProgress.hidden = frac == null;
+    if (frac != null) fitProgress.value = Math.max(0, Math.min(1, frac));
+  }
 
   // ---------- pair cards ----------
   function el(tag, cls, text) {
@@ -268,12 +302,11 @@ export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit
       dl.append(...metaRow("Frames", `${p.raw.image.w}×${p.raw.image.h}`
         + (isTargetReady(p) ? ` / ${p.target.width}×${p.target.height}` : "")));
     }
-    // Active D-Lighting is honestly unknown until the browser RAW metadata exposes it
-    const [adlDt, adlDd] = metaRow("Active D-Lighting", "?");
-    dl.append(adlDt, adlDd);
+    // Active D-Lighting is not shown: the browser RAW metadata does not expose it, and a
+    // permanent "?" on every card was noise (UX review, decision #15)
     // stage 2: preparation progress and the aligned NCC
     if (p.preparing) {
-      dl.append(...metaRow("Preparing", t("{stage}…", { stage: p.prepStage ?? "queued" })));
+      dl.append(...metaRow("Preparing", t("{stage}…", { stage: prepStageText(p.prepStage ?? "queued") })));
     } else if (p.prepared && !blocked) {
       dl.append(...metaRow("Alignment", `NCC ${p.prepared.ncc.toFixed(3)}`));
     }
@@ -340,5 +373,5 @@ export function createStart({ state, onAddRaws, onAddTarget, onRemovePair, onFit
     updateFit();
   }
 
-  return { refresh, setNameDefault };
+  return { refresh, setNameDefault, setFitProgress };
 }

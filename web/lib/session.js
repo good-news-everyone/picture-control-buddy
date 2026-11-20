@@ -24,11 +24,12 @@ export function isValidProfileName(s) {
   return s.length >= 1 && s.length <= 19 && /^[\x00-\x7F]*$/.test(s);
 }
 
-/** Default profile name from the first RAW's base name, as in match.py (basename, lowercased),
- *  sanitized into the 1..19 printable-ASCII rule. */
+/** Default profile name from the first RAW's base name: the final NP3 name exactly as match.write
+ *  builds it ("NPF-" + base.upper()[-15:]), sanitized into the 1..19 printable-ASCII rule. The
+ *  field shows what lands in the NP3 — the fit writes the field as typed (UX review, decision #15). */
 export function defaultProfileName(rawFileName) {
   const s = baseName(rawFileName).replace(/[^\x21-\x7E]/g, "-");
-  return s.slice(0, 19);
+  return "NPF-" + s.toUpperCase().slice(-15);
 }
 
 export function createPair() {
@@ -133,7 +134,7 @@ export function nextVersionName(versions, prevName) {
 export function nextVersionId(versions) {
   let n = 0;
   for (const v of versions) {
-    const m = /^r(\d+)$/.exec(v.id);
+    const m = /^r(\d+)/.exec(v.id);           // "r2" and its manual successors "r2m1", …
     if (m) n = Math.max(n, parseInt(m[1], 10));
   }
   return `r${n + 1}`;
