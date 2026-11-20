@@ -140,7 +140,10 @@ curveChart.addEventListener("pointerdown", (e) => e.stopPropagation());
   done.className = "ce-done";
   done.innerHTML = `${ICONS.check}<span data-i18n="Done">${t("Done")}</span>`;
   done.addEventListener("click", () => setTool("basic"));
-  slot.querySelector(".ce-toggle")?.after(done);
+  // Done is a direct child of the slot, right of the .ce-head row (the toggle + the changed
+  // mark): the #curve-slot > .ce-done rules size it; inside .ce-head it fell back to the
+  // tool-bar button look (an icon over a label, a big box)
+  (slot.querySelector(".ce-head") ?? slot.querySelector(".ce-toggle"))?.after(done);
   slot.querySelector('input[type="checkbox"]')?.addEventListener("change", () => { updateOverlay(); updateDots(); });
   // the 20-point limit is shown as a toast (the editor's own note is hidden by CSS here)
   const limit = slot.querySelector(".ce-limit");

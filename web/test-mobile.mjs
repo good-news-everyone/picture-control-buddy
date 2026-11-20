@@ -1490,6 +1490,17 @@ export async function runMobileLevels({ browser, port, report, skip }) {
       report(hit.length === 2 && hit.every((r) => Math.abs(r - 22) < 0.6), `9d curve: every point has an invisible hit circle of 22 screen px at this scale (${hit.map((r) => r.toFixed(1))})`);
       const done = await R(pg, "#curve-slot .ce-done");
       report(done && done.w >= 44 && done.h >= 44, `9d curve: the Done button is in the panel and finger-sized (${J(done && [Math.round(done.w), Math.round(done.h)])})`);
+      // ...and compact: one row with the toggle (a direct child of the slot, icon and label side by
+      // side, not the tool-bar look of an icon over a label)
+      const dl = await pg.evaluate(() => {
+        const b = document.querySelector("#curve-slot .ce-done"), head = document.querySelector("#curve-slot .ce-head");
+        const r = b.getBoundingClientRect(), hr = head.getBoundingClientRect();
+        const ic = b.querySelector("svg").getBoundingClientRect(), tx = b.querySelector("span").getBoundingClientRect();
+        return { direct: b.parentElement.id === "curve-slot", h: Math.round(r.height), icon: Math.round(ic.width),
+                 sideBySide: tx.left >= ic.right - 1, row: Math.abs((r.top + r.bottom) / 2 - (hr.top + hr.bottom) / 2) < 6 };
+      });
+      report(dl.direct && dl.h <= 52 && dl.icon <= 20 && dl.sideBySide && dl.row,
+        `9d curve: Done is compact, in the toggle row (${J(dl)})`);
       // leaving the tool hides the overlay, coming back shows it again
       const vis = await pg.evaluate(() => { const m = window.__np3app.mobile, c = document.getElementById("curve-chart"), out = {};
         m.setTool("details"); out.details = c.hidden; m.setTool("curve"); out.back = c.hidden; return out; });
