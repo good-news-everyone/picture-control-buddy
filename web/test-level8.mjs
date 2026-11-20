@@ -1487,13 +1487,18 @@ export async function runLevel8({ browser, port, report, skip }) {
             window.dispatchEvent(new MouseEvent("mouseup", opts(r.width * ft[1])));
           }, [from, to]);
           await dragDivider(0.3, 1.0);
+          const atRight = await ev(() => window.__np3app.compare.debug().curtain);
           const renderPx = await ev((s) => window.__t8.px(s.w * 0.1, s.h * 0.5), sides);
           await dragDivider(1.0, 0.0);
+          const atLeft = await ev(() => window.__np3app.compare.debug().curtain);
           const targetPx = await ev((s) => window.__t8.px(s.w * 0.5, s.h * 0.5), sides);
-          await dragDivider(0.0, 0.3);
           const same = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
-          report(same(sides.left, renderPx) <= 3 && same(sides.right, targetPx) <= 3,
-            "8 curtain: left of the divider is the render, right is the target");
+          report(atRight > 0.99 && atLeft < 0.01 && same(sides.left, renderPx) <= 3 && same(sides.right, targetPx) <= 3,
+            `8 curtain: left of the divider is the render, right is the target (divider at the edges: ${atRight.toFixed(2)}, ${atLeft.toFixed(2)})`);
+          // back to side-by-side with the divider in the middle: the checks below compare the
+          // render side's pixels (the removed key-toggle mode used to show it full-canvas)
+          await dragDivider(0.0, 0.5);
+          await ev(() => document.querySelector('#cmp-modes button[data-mode="side"]').click());
         }
 
         // a blocked pair cannot be selected
