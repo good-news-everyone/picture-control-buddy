@@ -54,7 +54,7 @@ base part.
 Needs the `tools` pack exports (via `sweep.py extract tools` equivalent — `collect` reads
 `renders/sweep/<name>/tif`) and the full-size `detail` pack (export TIFF at full size in NX).
 
-## Fitting the detail tools (research, 2026-11-24; not in the fit engine yet)
+## Fitting the detail tools (research, then the fit engine, 2026-11-24)
 
 Scripts and how to rerun: `research/detailfit/README.md`. Measured against real NX exports of SA
 frames (fitcheck NEW4 at 1512 px; full-size packs `detailcheck`, `detailcheck2`) and LR targets.
@@ -81,7 +81,23 @@ shift is up to ±2 px (lens correction), so full-size work aligns per 768 px cro
   Clarity -40: -38..-42 % on all frames, full-size band gains 0.65-0.82 -> 0.82-1.01; Clarity +50:
   -2..-6 %; Texture +50: -1..-6 % (LR's positive Clarity and Texture lift 1-8 px more than the NP3
   tools can); Sharpening 7: the finest band matches (0.98-0.99), 1-4 px overshoot by 11-15 %.
-- **For the engine:** fit Clarity and Mid-range at the fit scale (x4) by the joint regression after
-  color; Sharpening together with Mid-range on x2 / full-size bands of the target; a robust joint
-  over frames; fine bands only from low-ISO frames. The web render is at most x2, so Sharpening
-  needs a calibration of our x2 render against NX x2 (re-export `detailcheck`).
+- **In the engine** (`detailfit.py`, `web/lib/detail-fit.js`; `match.py` and the wizard, spec/ui.md
+  decision #19): Clarity and Mid-range after the color fit, on our render of the fitted profile
+  (match.py: 1536 px from the half-size development, detail applied on the grid; the wizard: the
+  1600 px compare grid). Production form of the regression: the Young-van Vliet recursive Gaussian
+  with q solved for the exact variance (the paper's q(sigma) is 10-25 % wide), band sigma 5.6-179
+  full-frame px, a cubic tone term per pair instead of the 16-knot LUT, each pair normalized by its
+  band energy, signs enumerated, values rounded to 0.25 within ±5. On the research data it matches
+  the research form: NX probes Clarity +2 -> 2.0, +5 -> 5.0, -2 -> -1.75, -5 -> -4.75; SA 12 frames
+  0.0 / 0.5; the LR variants 1.0 / 1.25, -3.0 / 0.25, -0.25 / 2.25.
+- **Calibration (`CAL`, `CAL_WEB`).** Our renders carry more band contrast than NX's render of the
+  same profile: fitted against NX's NEW4 exports the uncalibrated step returns Clarity +0.25 /
+  Mid-range +0.05 (match.py, 7 frames) and +0.23 / -0.20 (wizard, 12 frames) instead of 0 / 1
+  (medians; spread about ±0.4, the night frame -2.2). The excess is taken out as plus-table
+  responses: `CAL` = (-0.25, +0.95), `CAL_WEB` = (-0.25, +1.2). With it the wizard on the 4 LR
+  variant frames gives SA -0.25 / 1.0, Clarity -40 -3.25 / 1.0, Clarity +50 0.75 / 1.75,
+  Texture +50 -0.5 / 2.75 — Clarity within 0.25 and Mid-range within 0.5 of the fit on NX's renders.
+- **Not yet:** Sharpening together with Mid-range on x2 / full-size bands of the target (one
+  Sharpening value cannot follow LR's band shape); a robust joint over frames; fine bands only from
+  low-ISO frames. The web render is at most x2, so Sharpening needs a calibration of our x2 render
+  against NX x2 (re-export `detailcheck`).

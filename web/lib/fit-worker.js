@@ -10,10 +10,15 @@
 //     devMeta, devLut, profileMeta, profileBin,     — the CPU dev/profile models (cloned)
 //     files,                                        — { raw, target } base names (envelope)
 //     pairs: [{ name, ncc, x, y, masks, gain }],    — prepared pairs; x/y/mask/gain buffers transferred
+//     detail?: { meta, bin, pairs: [{ name, lin, ty, w, h, scale }] }
+//                                                   — the detail fit's input (lib/detail-fit.js): the
+//                                                     compare-grid linear frame (NaN outside) and the
+//                                                     target's Y'; buffers transferred
 //     poolSize? }                                   — optional: the helper count (tests; 0 = single-threaded)
 //   { type: "cancel", id }
 // Messages out:
 //   { type: "progress", id, generation, iteration, total, cost, lambda }   — per accepted LM iteration
+//   { type: "progress", id, generation, stage: "detail", done, total }      — the detail fit, per pair
 //   { type: "ready", id, generation, result, ms }   — FitResult (spec §3.2), fitVector transferred
 //   { type: "error", id, generation, code, detail }
 // A cancelled task posts nothing at all.
@@ -28,6 +33,8 @@ import { loadModel } from "./profile.js";
 import { loadDev, jacobianSteps } from "./fit.js";
 import { runFreeFit, runFreeFitParallel } from "./sample.js";
 import { createFitPool, poolSize } from "./fit-pool.js";
+import { loadDetail } from "./detail.js";
+import { fitDetailPairs, TOOLS as DETAIL_TOOLS } from "./detail-fit.js";
 
 const spawnHelper = () => new Worker(new URL("./fit-jac-worker.js", import.meta.url), { type: "module" });
 const POOL_SIZE = typeof Worker === "function" ? poolSize(self.navigator && self.navigator.hardwareConcurrency) : 0;
@@ -74,6 +81,23 @@ self.onmessage = async (e) => {
     if (stale()) return;                      // cancelled: exit without a result
     if (out === null) out = runFreeFit(m.pairs, opts);
     if (stale()) return;
+    // Clarity and Mid-range for the fitted color (lib/detail-fit.js, spec/ui.md decision #19)
+    let detail = null;
+    if (m.detail && m.detail.pairs && m.detail.pairs.length) {
+      const progress = (done, total) => {
+        if (!stale())
+          self.postMessage({ type: "progress", id: m.id, generation: m.generation, stage: "detail", done, total });
+      };
+      progress(0, m.detail.pairs.length);
+      const r = await fitDetailPairs({ dev, model, detail: loadDetail(m.detail.meta, m.detail.bin),
+                                       control: out.control, pairs: m.detail.pairs,
+                                       onPair: progress, shouldCancel: stale });
+      if (stale()) return;
+      if (r && r.pairs) {
+        for (const t of DETAIL_TOOLS) out.control[t] = r.values[t];
+        detail = { values: r.values, raw: r.raw, cost: r.cost, cost0: r.cost0, pairs: r.pairs };
+      }
+    }
     const result = {
       schemaVersion: 1,
       kind: "fitResult",
@@ -90,6 +114,7 @@ self.onmessage = async (e) => {
       pairs: out.names,
       init: out.init,                         // the winning STARTS entry (fit.js)
       starts: out.starts,
+      detail,                                 // the detail fit (null: not run or no usable pixels)
     };
     self.postMessage({ type: "ready", id: m.id, generation: m.generation,
                        result, ms: Date.now() - t0 }, [out.x.buffer]);

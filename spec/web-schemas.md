@@ -158,6 +158,7 @@ Order is exactly `np.r_[x[:NB+NG+NC], extra]` with `NB=24, NG=6, NC=20`
 | `pairs` | string[] | pair ids | The exact pair ids included (refit input per ui.md Decisions §3). |
 | `init` | `"zero"` \| `"zones"` | ui.md Decisions §3, `match.STARTS` | The winning start: LM runs from the first `STARTS` entry (zero) and from the next one (zero + zone brightness shadows −50 / midtone +30) only if the previous run made fewer than `STUCK = 5` accepted iterations; the lower final cost wins. Refits start from the same fixed starts, never from the previous version. |
 | `starts` | `{name: cost}` | `match.Matcher.starts` | Final cost of each start that ran. |
+| `detail` | `null` \| `{values: {clarity, mid_sharpening}, raw, cost, cost0, pairs}` | `detailfit.solve` (`lib/detail-fit.js`) | The detail fit after the color fit (ui.md decision #19): `values` (step 0.25, ±5) are already in `control`; `raw` unrounded; `cost` / `cost0` the mean normalized band residual with the fitted / the render's own values; `pairs` the pairs used. `null` when the fit message had no `detail` input or no pair had enough usable pixels. Input: the fit message's `detail: {meta, bin, pairs: [{name, lin, ty, w, h, scale}]}` — the detail model and, per pair, the gained linear frame on the compare grid (Float32 RGB, NaN outside the source) and the target's Y' on the same grid, `scale` in full-frame px per grid pixel. Progress: `{type: "progress", stage: "detail", done, total}`. |
 
 ### 3.3 `control` object (np3.Control, `match.control`)
 
@@ -170,7 +171,8 @@ JSON shape identical to `control_json` in `web/make_golden.py`:
 ```
 
 Fixed values from `fit.control`: `sharpening=2.0, mid_sharpening=1.0, clarity=0` (the
-default detail values); `contrast/highlights/shadows/white/black = 0` (ignored whenever
+default detail values; the fit worker's detail step then replaces `mid_sharpening` and `clarity`,
+§3.2 `detail` — `runFreeFit` itself and the level-1f goldens keep the defaults); `contrast/highlights/shadows/white/black = 0` (ignored whenever
 a curve exists); `name = "NPF-" + name.upper()[-15:]` (`match.write`).
 Blender/grade hue/chroma/brightness, saturation, blending, balance are
 `int(round(·))` — **Python banker's rounding** (`np.round` semantics); the browser must

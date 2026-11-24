@@ -23,6 +23,7 @@ WebGL) that applies and exports NP3 profiles.
 - `color.py`, `model.py`, `devmodel.py`, `profile_model.py`, `detail.py`,
   `ceiling.py`, `vignette.py`, `wbmap.py` — color science and response models
 - `fit.py` — shared fitting core (parameter packing, LM solver)
+- `detailfit.py` — fits Clarity / Mid-range after the color fit (`web/lib/detail-fit.js` is its port)
 - `match.py` — fits an NP3 profile to target renders; `analyze.py` — candidate
   scoring helpers used by `match.py`
 - `render.py`, `rawdev.py`, `pairs.py`, `devpairs.py`, `scene.py`,
@@ -52,6 +53,7 @@ present locally; a fresh clone only supports the tests below.
 ## Tests
 
 - `python3 test_np3.py` — NP3 round-trip against official samples (always runs)
+- `python3 test_detailfit.py` — the detail fit on synthetic frames (always runs)
 - `cd web && node test.mjs --only 1k` — the UI translation dictionaries (Node, instant)
 - `cd web && node test.mjs` — full browser pipeline suite (needs Firefox and
   `puppeteer-core` from `web/node_modules`); levels 1/1a/8 additionally need

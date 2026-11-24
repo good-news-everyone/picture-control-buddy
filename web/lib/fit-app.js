@@ -32,6 +32,7 @@ import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { computeAdvice, frameOf } from "./coverage-view.js";
 import { viewRemap, applyRemap } from "./pair-prepare.js";
+import { resizeF } from "./resample.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
          makeRefitVersion, prepSlots } from "./session.js";
@@ -175,16 +176,45 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
     rgb[i] = rgba[j]; rgb[i + 1] = rgba[j + 1]; rgb[i + 2] = rgba[j + 2];
   }
+  return applyRemap({ data: rgb, w: img.w, h: img.h }, compareMap(pair));
+}
+
+// the warpToView geometry as one cached inverse map (built once per preparation; a pair
+// switch or a strength/version change is a ~30 ms gather instead of ~1 s of resampling)
+function compareMap(pair) {
+  const img = pair.raw.image;
   const unrotate = (4 - (DECODER_TURNS[pair.raw.info.orientation] ?? 0)) % 4;
-  // the warpToView geometry as one cached inverse map (built once per preparation; a pair
-  // switch or a strength/version change is a ~30 ms gather instead of ~1 s of resampling)
   let map = compareMaps.get(pair.prepared);
   if (!map || map.fw !== img.w || map.fh !== img.h || map.unrotate !== unrotate) {
     map = viewRemap(pair.prepared, img.w, img.h, unrotate);
     map.unrotate = unrotate;
     compareMaps.set(pair.prepared, map);
   }
-  return applyRemap({ data: rgb, w: img.w, h: img.h }, map);
+  return map;
+}
+
+// The detail fit's input for a pair (lib/detail-fit.js, spec/ui.md decision #19): the gained
+// linear frame on the compare grid (NaN outside the source; the worker develops it and renders
+// the fitted profile with its detail, as the Renderer draws Compare) and the target's Y' box-
+// resized to the same grid. scale — full-frame px per grid pixel (the detail model's radii).
+function detailInput(pair, meta) {
+  const img = gainedFrame(pair);
+  const map = compareMap(pair);
+  const lin = applyRemap({ data: img.rgb, w: img.w, h: img.h }, map).data;
+  for (let i = 0; i < map.sx.length; i++)
+    if (map.sx[i] !== map.sx[i]) lin[3 * i] = lin[3 * i + 1] = lin[3 * i + 2] = NaN;
+  const tg = pair.target;
+  const tr = resizeF(tg.rgb, map.w, map.h, tg.width, tg.height, "box", 3).data;
+  const [yr, yg, yb] = meta.YW;
+  const ty = new Float32Array(map.w * map.h);
+  for (let i = 0, p = 0; i < ty.length; i++, p += 3) ty[i] = yr * tr[p] + yg * tr[p + 1] + yb * tr[p + 2];
+  // frame px per grid px along the middle row (crops and the alignment scale included)
+  const r = Math.floor(map.h / 2) * map.w;
+  let a = -1, b = -1;
+  for (let x = 0; x < map.w; x++) if (map.sx[r + x] === map.sx[r + x]) { if (a < 0) a = x; b = x; }
+  const step = b > a ? Math.hypot(map.sx[r + b] - map.sx[r + a], map.sy[r + b] - map.sy[r + a]) / (b - a) : 1;
+  const scale = meta.SENSOR_LONG / Math.max(img.w, img.h) * Math.max(step, 1e-6);
+  return { name: String(pair.id), lin, ty, w: map.w, h: map.h, scale };
 }
 
 const compareView = createCompare({ state,
@@ -355,6 +385,8 @@ function fitModelBytes() {
     fetch("model/dev_lut.bin").then((r) => r.arrayBuffer()),
     fetch("model/profile.json").then((r) => r.json()),
     fetch("model/profile.bin").then((r) => r.arrayBuffer()),
+    fetch("model/detail.json").then((r) => r.json()),
+    fetch("model/detail.bin").then((r) => r.arrayBuffer()),
   ]);
   return fitModelBytesPromise;
 }
@@ -362,6 +394,16 @@ function fitModelBytes() {
 fitWorker.onmessage = (e) => {
   const m = e.data;
   if (!fitPending || m.id !== fitPending.id) return;    // stale: nothing is applied
+  if (m.type === "progress" && m.stage === "detail") {
+    // the detail fit after the color fit (decision #19): per pair, the bar stays full
+    setStatus(t("Fitting detail: frame {i} of {n}", { i: Math.min(m.done + 1, m.total), n: m.total }));
+    start.setFitProgress(1);
+    if (fitPending.kind === "refit") {
+      const rb = $("cmp-refit");
+      if (rb) rb.dataset.sub = t("Detail {i}/{n}", { i: Math.min(m.done + 1, m.total), n: m.total });
+    }
+    return;
+  }
   if (m.type === "progress") {
     // no LM cost in the UI (UX review, decision #15): the iteration and a progress bar
     setStatus(fitPending.kind === "refit"
@@ -448,8 +490,13 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
   refreshPairsUI();
   setStatus(kind === "refit" ? t("Refitting…") : t("Fitting…"));
   try {
-    const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
+    const [devMeta, devLut, profileMeta, profileBin, detailMeta, detailBin] = await fitModelBytes();
     if (!state.fitting) return false;      // superseded while the models were fetched
+    // the detail step is optional: a pair whose input cannot be built is left out of it
+    const detailPairs = [];
+    for (const p of pairs) {
+      try { detailPairs.push(detailInput(p, detailMeta)); } catch (err) { void err; }
+    }
     const payload = {
       type: "fit", id: ++fitSeq, generation: { session: 0, pair: 0, task: ++fitGen },
       seed: 0, iters: 30, baseName,         // decision #3: the zero init, the seed of the draft
@@ -466,6 +513,7 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
         },
         gain: p.prepared.gain.slice(),
       })),
+      detail: { meta: detailMeta, bin: detailBin, pairs: detailPairs },   // the bin is cloned (cached)
     };
     const transfer = [];
     for (const q of payload.pairs) {
@@ -473,6 +521,7 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
                     q.masks.clipMask.buffer, q.masks.reportMask.buffer,
                     q.masks.validMask.buffer, q.masks.nearWhiteMask.buffer);
     }
+    for (const q of detailPairs) transfer.push(q.lin.buffer, q.ty.buffer);
     if (!state.fitting) return true;       // cancelled while the payload was assembled
     fitPending = { id: payload.id, kind, parentId, baseName };
     if (kind === "fit") start.setFitProgress(0);

@@ -14,6 +14,7 @@ import { scaled } from "./lib/strength.js";
 import { level1i } from "./test-node-advice.mjs";
 import { level1j } from "./test-node-stage2.mjs";
 import { level1k } from "./test-node-i18n.mjs";
+import { level1l } from "./test-node-detailfit.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));   // web/
 const ROOT = path.dirname(HERE);                             // the project root
@@ -69,6 +70,7 @@ export const LEVELS = {
   "1i": level1i,
   "1j": level1j,
   "1k": level1k,
+  "1l": level1l,
   "9": level9,
   "4": level4,
   "5": level5,

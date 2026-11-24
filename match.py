@@ -5,7 +5,7 @@ render.py), then the step-based profile model (profile_model.py, trained on NX e
 the blender, grading and curve.
 
     python3 match.py --analyze name [--adl Off] a.NEF a.jpg [b.NEF b.jpg ...]
-    python3 match.py [name] a.NEF a.jpg [b.DNG b.jpg ...]
+    python3 match.py [--no-detail] [name] a.NEF a.jpg [b.DNG b.jpg ...]
     python3 match.py --refine [new] prev render_a.TIF a.jpg [render_b.TIF b.jpg ...]
     python3 match.py --scene name a.NEF a.jpg [b.NEF b.jpg ...]
     python3 match.py --scene-refine [new] prev render_a.TIF a.jpg [render_b.TIF b.jpg ...]
@@ -32,6 +32,10 @@ its own frames to this file, and --refine advises which frame renders to add to 
 
 Rare colors weigh more in the fit (analyze.rarity); the error report goes by regions.
 
+After the color fit, Clarity and Mid-range sharpening are fitted to the targets' local contrast
+(detailfit.py) on 1536 px renders; --no-detail keeps the defaults. Sharpening keeps its default,
+and a --refine keeps the previous version's detail.
+
 Custom white balance and exposure from the finished shot's XMP are taken out of the fit:
 they are applied to the source, so they do not land in the profile.
 """
@@ -48,6 +52,7 @@ from PIL import Image
 
 import analyze as A
 import color as C
+import detailfit as DF
 import devmodel
 import devpairs
 import fit as F
@@ -289,8 +294,11 @@ class Matcher:
         return runs[self.init][0]
 
 
-def write(name: str, x: np.ndarray) -> tuple[np3.Control, str]:
+def write(name: str, x: np.ndarray, detail: dict | None = None) -> tuple[np3.Control, str]:
+    """detail: {tool: value} for the detail tools (detailfit.py, a previous version's), else the defaults."""
     ctrl = control(x, "NPF-" + name.upper()[-15:])   # end of the name: the frame and the correction number live there
+    for tool, v in (detail or {}).items():
+        setattr(ctrl, tool, v)
     out = os.path.join(HERE, "out", name, "NIKON", "CUSTOMPC")
     os.makedirs(out, exist_ok=True)
     data = np3.serialize(ctrl)
@@ -398,7 +406,7 @@ def refine(name: str, prev: str, files: list[str]):
               for (a, b, f), (_, _, whole) in zip(loaded, samples)]
     refine_coverage(analysis, frames, prev)
     x = r.fit([s[0] for s in samples])
-    ctrl, path = write(name, x)
+    ctrl, path = write(name, x, previous_detail(prev))
     known.update({os.path.abspath(b): os.path.abspath(a) for a, b, f in loaded if f["nef"] == a})
     if known:
         json.dump(known, open(os.path.join(HERE, "out", name, "pairs.json"), "w"), ensure_ascii=False, indent=1)
@@ -414,6 +422,24 @@ def refine(name: str, prev: str, files: list[str]):
     print("blender", ctrl.blender)
     print("grade", ctrl.grade)
     print("file:", path)
+
+
+def previous_detail(prev: str) -> dict | None:
+    """The detail tools of the previous version (a refine changes color and tone only)."""
+    path = os.path.join(HERE, "out", prev, "NIKON", "CUSTOMPC", "PICCON01.NP3")
+    if not os.path.exists(path):
+        return None
+    c = np3.deserialize(open(path, "rb").read())
+    return {t: getattr(c, t) for t in ("sharpening", "mid_sharpening", "clarity")}
+
+
+def fit_detail(x: np.ndarray, files: list[str], gains: list) -> dict:
+    """Clarity and Mid-range for the fitted color (detailfit.py, spec/tools/detail.md)."""
+    import render                       # render.py imports this module
+    ctrl = control(x, "DETAIL")
+    R = render.Renderer()
+    pairs = [DF.aligned(a, b, ctrl, g, R) for a, b, (g, _) in zip(files[::2], files[1::2], gains)]
+    return DF.fit_detail(pairs, {t: getattr(ctrl, t) for t in DF.TOOLS}, R.detail)
 
 
 def refine_coverage(analysis: dict, frames: list[dict], prev: str):
@@ -701,11 +727,13 @@ def main():
         run_scene(sys.argv[2], sys.argv[3:])
         return
     args = sys.argv[1:]
+    detail_on = "--no-detail" not in args          # the detail step needs the full renders (slower)
+    args = [a for a in args if a != "--no-detail"]
     if args and args[0].lower().endswith((".nef", ".dng")):   # the name may be omitted: it is taken from the first shot
         args.insert(0, os.path.splitext(os.path.basename(args[0]))[0].lower())
     name, *files = args or [""]
     if not files or len(files) % 2:
-        sys.exit("usage: python3 match.py [name] a.NEF|a.DNG a.jpg [b.NEF b.jpg ...]")
+        sys.exit("usage: python3 match.py [--no-detail] [name] a.NEF|a.DNG a.jpg [b.NEF b.jpg ...]")
     for f in files:
         if not os.path.exists(f):
             sys.exit(f"no file: {f}")
@@ -729,7 +757,11 @@ def main():
         print("  advice:", tip)
     x = m.fit(pairs)
     print("starts:", ", ".join(f"{k} {v:.4f}" for k, v in m.starts.items()), "->", m.init)
-    ctrl, path = write(name, x)
+    det = fit_detail(x, files, gains) if detail_on else None
+    if det:
+        print(f"detail: clarity {det['values']['clarity']:+.2f}, mid-range {det['values']['mid_sharpening']:+.2f} "
+              f"({det['pairs']} pairs, band residual {det['cost0']:.4f} -> {det['cost']:.4f})")
+    ctrl, path = write(name, x, det["values"] if det else None)
     A.save(name, analysis)
     json.dump({os.path.abspath(b): os.path.abspath(a) for a, b in zip(files[::2], files[1::2])},
               open(os.path.join(HERE, "out", name, "pairs.json"), "w"), ensure_ascii=False, indent=1)
