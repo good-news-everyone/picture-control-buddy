@@ -114,6 +114,55 @@ export function detailPlan(d, control, scale, { base = false } = {}) {
   return { count: ents.length, sigmas: ents.slice(0, 4).map((e) => e.sigma) };
 }
 
+/** Region rendering with a low-resolution source for the large blurs (spec/ui-zoom-plan.md D6, Z4):
+ *  a detail entry whose blur sigma, measured in pixels of the MAIN frame (sigma_fullframe / mainScale),
+ *  is at least this many pixels takes its blurred luma from the main frame's blur of the same
+ *  full-frame sigma (sampled bilinearly through the affine map); smaller sigmas are blurred on the
+ *  region itself. Measured on real frames: web/test-node-region-detail.mjs. */
+export const REGION_LOWRES_MIN_SIGMA = 4;
+
+/** Entries of a region render split by blur source: [{sigma (region px), mainSigma (main-frame px) or
+ *  null (blurred on the region)}], in the order and with the cap (4) of the combine pass. */
+export function regionEntries(d, control, scale, { base = false, lowRes = null } = {}) {
+  const ents = entries(d, control, scale, base).slice(0, 4);
+  const T = lowRes ? (lowRes.minSigma ?? REGION_LOWRES_MIN_SIGMA) : Infinity;
+  return ents.map((e) => {
+    const ms = lowRes ? e.sigma * scale / lowRes.mainScale : null;
+    return { sigma: e.sigma, mainSigma: ms !== null && ms >= T ? ms : null };
+  });
+}
+
+/** The margin (region px) a region needs around the visible rectangle so that its region-side blurs
+ *  are exact there: the largest fftKernel radius over the entries blurred on the region (0 if none).
+ *  lowRes: { mainScale, minSigma? } or null (every blur on the region). */
+export function regionMarginPx(d, control, scale, { base = true, lowRes = null } = {}) {
+  let m = 0;
+  for (const e of regionEntries(d, control, scale, { base, lowRes }))
+    if (e.mainSigma === null) m = Math.max(m, Math.max(Math.ceil(3 * e.sigma) + 1, 8));
+  return m;
+}
+
+/** Bilinear sample of a plane (row-major mw x mh) at continuous coordinates (pixel i has its center at
+ *  i + 0.5), edges clamped. The shader's mainBlur does the same on the GPU. */
+function bilinear(a, mw, mh, x, y) {
+  const u = x - 0.5, v = y - 0.5;
+  const fx = Math.floor(u), fy = Math.floor(v);
+  const tx = u - fx, ty = v - fy;
+  const x0 = clamp(fx, 0, mw - 1), x1 = clamp(fx + 1, 0, mw - 1);
+  const y0 = clamp(fy, 0, mh - 1), y1 = clamp(fy + 1, 0, mh - 1);
+  const top = a[y0 * mw + x0] * (1 - tx) + a[y0 * mw + x1] * tx;
+  const bot = a[y1 * mw + x0] * (1 - tx) + a[y1 * mw + x1] * tx;
+  return top * (1 - ty) + bot * ty;
+}
+
+/** The Rec.601 Y' luma plane (Float64Array h x w) of an rgb frame, the one the detail step blurs. */
+export function lumaOf(d, rgb, w, h) {
+  const [yr, yg, yb] = d.YW;
+  const y = new Float64Array(w * h);
+  for (let i = 0, p = 0; i < w * h; i++, p += 3) y[i] = yr * rgb[p] + yg * rgb[p + 1] + yb * rgb[p + 2];
+  return y;
+}
+
 /** Interpolation over tone: np.interp(y, GRID, table) — GRID is uniform, NB knots. */
 function tableAt(y, d, table) {
   const u = clamp(y, 0, 1) * (d.NB - 1);
@@ -162,11 +211,26 @@ function fftKernel(sigma, n, other) {
   return k;
 }
 
-/** dY for the luma y (Float64Array, row-major h x w). Port of Part.delta, summed over tools. */
-function deltaCPU(d, y, w, h, ents, scale) {
+/** dY for the luma y (Float64Array, row-major h x w). Port of Part.delta, summed over tools.
+ *  lowRes (region mode, see applyDetailCPU): entries with a main sigma take the blur of the main luma. */
+function deltaCPU(d, y, w, h, ents, scale, lowRes = null) {
   const dy = new Float64Array(y.length);
+  const T = lowRes ? (lowRes.minSigma ?? REGION_LOWRES_MIN_SIGMA) : Infinity;
   for (const e of ents) {
-    const g = gaussCPU(y, w, h, e.sigma);
+    const ms = lowRes ? e.sigma * scale / lowRes.mainScale : 0;
+    let g;
+    if (lowRes && ms >= T) {
+      lowRes.blurs = lowRes.blurs || new Map();
+      let mb = lowRes.blurs.get(ms);
+      if (!mb) { mb = gaussCPU(lowRes.mainLuma, lowRes.mainW, lowRes.mainH, ms); lowRes.blurs.set(ms, mb); }
+      const [a, b, c, dd, ee, f] = lowRes.affine;
+      g = new Float64Array(y.length);
+      for (let yy = 0; yy < h; yy++)
+        for (let xx = 0; xx < w; xx++) {
+          const X = xx + 0.5, Y = yy + 0.5;
+          g[yy * w + xx] = bilinear(mb, lowRes.mainW, lowRes.mainH, a * X + b * Y + c, dd * X + ee * Y + f);
+        }
+    } else g = gaussCPU(y, w, h, e.sigma);
     for (let i = 0; i < y.length; i++)
       dy[i] += e.value * tableAt(y[i], d, e.table) * (y[i] - g[i]);
   }
@@ -188,26 +252,31 @@ export function gaussCPU(a, w, h, sigma) {
   for (let y = 0; y < h; y++)                    // rows: n = w, stride w
     for (let x = 0; x < w; x++) {
       let s = 0;
-      for (let i = -kx.R; i <= kx.R; i++) s += kx.g[i + kx.R] * a[y * w + mir(x + i, w)];
+      if (x >= kx.R && x + kx.R < w) {           // interior: no reflection (same sums, same order)
+        const o = y * w + x;
+        for (let i = -kx.R; i <= kx.R; i++) s += kx.g[i + kx.R] * a[o + i];
+      } else for (let i = -kx.R; i <= kx.R; i++) s += kx.g[i + kx.R] * a[y * w + mir(x + i, w)];
       tmp[y * w + x] = s;
     }
-  for (let y = 0; y < h; y++)                    // columns
-    for (let x = 0; x < w; x++) {
-      let s = 0;
-      for (let i = -ky.R; i <= ky.R; i++) s += ky.g[i + ky.R] * tmp[mir(y + i, h) * w + x];
-      out[y * w + x] = s;
+  for (let y = 0; y < h; y++)                    // columns: row-wise accumulation, the same sum order per pixel
+    for (let i = -ky.R; i <= ky.R; i++) {
+      const o = y * w, r = mir(y + i, h) * w, gi = ky.g[i + ky.R];
+      for (let x = 0; x < w; x++) out[o + x] += gi * tmp[r + x];
     }
   return out;
 }
 
-/** A full detail pass on CPU: rgb (h x w x 3, row-major, row 0 at the top) -> Float64Array 0..1. */
-export function applyDetailCPU(d, rgb, w, h, control, { scale = null, base = false } = {}) {
+/** A full detail pass on CPU: rgb (h x w x 3, row-major, row 0 at the top) -> Float64Array 0..1.
+ *  lowRes (region mode, default off): { affine: [a, b, c, d, e, f], mainLuma (Float64Array mainH x mainW,
+ *  the luma of the main frame's profile output), mainW, mainH, mainScale, minSigma? }. Region pixel
+ *  centers (x + 0.5, y + 0.5) map to main continuous coordinates (a X + b Y + c, d X + e Y + f); entries
+ *  whose sigma / mainScale (main px) is >= minSigma (default REGION_LOWRES_MIN_SIGMA) use the bilinearly
+ *  sampled blur of mainLuma at the same full-frame sigma, the others blur the region itself. */
+export function applyDetailCPU(d, rgb, w, h, control, { scale = null, base = false, lowRes = null } = {}) {
   scale = scale || scaleOf(d, w, h);
   const ents = entries(d, control, scale, base);
-  const [yr, yg, yb] = d.YW;
-  const y = new Float64Array(w * h);
-  for (let i = 0, p = 0; i < w * h; i++, p += 3) y[i] = yr * rgb[p] + yg * rgb[p + 1] + yb * rgb[p + 2];
-  const dy = ents.length ? deltaCPU(d, y, w, h, ents, scale) : new Float64Array(w * h);
+  const y = lumaOf(d, rgb, w, h);
+  const dy = ents.length ? deltaCPU(d, y, w, h, ents, scale, lowRes) : new Float64Array(w * h);
   const out = new Float64Array(rgb.length);
   for (let i = 0, p = 0; i < w * h; i++, p += 3)
     for (let c = 0; c < 3; c++) out[p + c] = clamp(rgb[p + c] + dy[i], 0, 1);
@@ -319,6 +388,7 @@ function ctxOf(gl, d) {
     luma: compile(gl, LUMA_FRAG),
     blur: compile(gl, BLUR_FRAG),
     combine: compile(gl, COMBINE_FRAG),
+    regionCombine: compile(gl, COMBINE_REGION_FRAG),
     fbo: gl.createFramebuffer(),
     tex: {},
   };
@@ -476,4 +546,209 @@ export function applyDetailGL(gl, d, rgba, w, h, control, { scale = null, srcTex
   const out = new Float32Array(w * h * 4);
   gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, out);
   return out;
+}
+
+// ---------- WebGL2: region mode (spec/ui-zoom-plan.md Z4) ----------
+//
+// The region path never touches the textures of applyDetailGL (ctxOf's c.tex / c.dims, the renderer's
+// detail reuse cache): it takes the compiled programs from the shared context cache and keeps all
+// textures in a caller-owned store (createDetailStore / disposeDetailStore).
+
+/** A bag of textures for the region path; the renderer owns it and deletes it with disposeDetailStore. */
+export function createDetailStore() {
+  return { tex: {}, dims: {} };
+}
+
+export function disposeDetailStore(gl, st) {
+  for (const t of Object.values(st.tex)) gl.deleteTexture(t);
+  st.tex = {};
+  st.dims = {};
+}
+
+/** The shared (main path) blur texture b0..b3 / luma y of applyDetailGL's context, read-only use by the
+ *  renderer when the main detail cache already holds the wanted blur. null if the context is unset. */
+export function mainDetailTexture(gl, name) {
+  const c = ctxCache.get(gl);
+  return c ? c.tex[name] : null;
+}
+
+function stTex(gl, st, name) {
+  let t = st.tex[name];
+  if (!t) {
+    t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+    for (const k of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE);
+    st.tex[name] = t;
+  }
+  return t;
+}
+
+/** Allocates (once per size/format) and returns store texture `name`, bound to `unit`. */
+export function storeTexture(gl, st, name, unit, internal, format, type, w, h) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  const known = !!st.tex[name];
+  const t = stTex(gl, st, name);
+  if (known) gl.bindTexture(gl.TEXTURE_2D, t);
+  const dim = `${w}x${h}x${internal}`;
+  if (st.dims[name] !== dim) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+    st.dims[name] = dim;
+  }
+  return t;
+}
+
+function storeDraw(gl, c, st, name, unit, internal, format, type, w, h, prog, setup) {
+  gl.useProgram(prog);
+  setup(prog);
+  const t = storeTexture(gl, st, name, unit, internal, format, type, w, h);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  gl.viewport(0, 0, w, h);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return t;
+}
+
+/** Luma (R32F) of an RGBA32F source texture into store texture `name`. */
+export function lumaPassGL(gl, d, st, name, srcTex, w, h) {
+  const c = ctxOf(gl, d);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, srcTex);
+  return storeDraw(gl, c, st, name, 1, gl.R32F, gl.RED, gl.FLOAT, w, h, c.luma, (p) => {
+    gl.uniform1i(gl.getUniformLocation(p, "uSrc"), 0);
+    gl.uniform3f(gl.getUniformLocation(p, "uYW"), d.YW[0], d.YW[1], d.YW[2]);
+  });
+}
+
+/** Gaussian blur (fftKernel, reflect edges) of a luma texture (w x h, R32F) into store texture
+ *  `outName`, through the temporary `tmpName`. */
+export function blurPassGL(gl, d, st, lumaTex, w, h, sigma, outName, tmpName) {
+  const c = ctxOf(gl, d);
+  const kx = fftKernel(sigma, w, h), ky = fftKernel(sigma, h, w);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, lumaTex);
+  const upload = (k) => {
+    gl.activeTexture(gl.TEXTURE8);
+    gl.bindTexture(gl.TEXTURE_2D, stTex(gl, st, "kern"));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, k.g.length, 1, 0, gl.RED, gl.FLOAT, Float32Array.from(k.g));
+  };
+  const setup = (R, src, dirX) => (p) => {
+    gl.uniform1i(gl.getUniformLocation(p, "uSrc"), src);
+    gl.uniform1i(gl.getUniformLocation(p, "uKern"), 8);
+    gl.uniform2i(gl.getUniformLocation(p, "uSize"), w, h);
+    gl.uniform1i(gl.getUniformLocation(p, "uRadius"), R);
+    gl.uniform2f(gl.getUniformLocation(p, "uDir"), dirX, 1 - dirX);
+  };
+  upload(kx);
+  storeDraw(gl, c, st, tmpName, 2, gl.R32F, gl.RED, gl.FLOAT, w, h, c.blur, setup(kx.R, 1, 1));
+  upload(ky);
+  return storeDraw(gl, c, st, outName, 4, gl.R32F, gl.RED, gl.FLOAT, w, h, c.blur, setup(ky.R, 2, 0));
+}
+
+// The region combine pass: rgb + sum value*table(Y)*(Y - blur), with the blur of each entry either the
+// region's own (texelFetch at the pixel) or the main frame's (uMode 1: bilinear at the affine-mapped
+// main coordinate, edges clamped; manual bilinear since linear filtering of R32F needs an extension).
+const COMBINE_REGION_FRAG = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+#define MAXE 4
+uniform sampler2D uImg;
+uniform sampler2D uY;
+uniform sampler2D uB0, uB1, uB2, uB3;
+uniform int uNB;
+uniform int uCount;
+uniform int uMode[MAXE];
+uniform float uVal[MAXE];
+uniform float uTab[MAXE * 12];
+uniform ivec2 uMainSize;
+uniform vec3 uAx;           // mainX = a X + b Y + c
+uniform vec3 uAy;           // mainY = d X + e Y + f
+out vec4 o;
+float bil(sampler2D s, vec2 q) {
+  vec2 u = q - 0.5;
+  vec2 f0 = floor(u);
+  vec2 t = u - f0;
+  ivec2 hi = uMainSize - 1;
+  ivec2 a = clamp(ivec2(f0), ivec2(0), hi);
+  ivec2 b = clamp(ivec2(f0) + 1, ivec2(0), hi);
+  float top = texelFetch(s, ivec2(a.x, a.y), 0).r * (1.0 - t.x) + texelFetch(s, ivec2(b.x, a.y), 0).r * t.x;
+  float bot = texelFetch(s, ivec2(a.x, b.y), 0).r * (1.0 - t.x) + texelFetch(s, ivec2(b.x, b.y), 0).r * t.x;
+  return top * (1.0 - t.y) + bot * t.y;
+}
+float blured(int e, ivec2 p, vec2 q) {
+  bool m = uMode[e] == 1;
+  if (e == 0) return m ? bil(uB0, q) : texelFetch(uB0, p, 0).r;
+  if (e == 1) return m ? bil(uB1, q) : texelFetch(uB1, p, 0).r;
+  if (e == 2) return m ? bil(uB2, q) : texelFetch(uB2, p, 0).r;
+  return m ? bil(uB3, q) : texelFetch(uB3, p, 0).r;
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 X = gl_FragCoord.xy;   // (x + 0.5, y + 0.5)
+  vec2 q = vec2(dot(uAx, vec3(X, 1.0)), dot(uAy, vec3(X, 1.0)));
+  float y = texelFetch(uY, p, 0).r;
+  float dy = 0.0;
+  for (int e = 0; e < MAXE; e++) {
+    if (e >= uCount) break;
+    float u = clamp(y, 0.0, 1.0) * float(uNB - 1);
+    int i = min(int(u), uNB - 2);
+    float f = u - float(i);
+    float t = mix(uTab[e * 12 + i], uTab[e * 12 + i + 1], f);
+    dy += uVal[e] * t * (y - blured(e, p, q));
+  }
+  o = vec4(clamp(texelFetch(uImg, p, 0).rgb + dy, 0.0, 1.0), 1.0);
+}`;
+
+/**
+ * Detail of a region on GPU (the shader twin of applyDetailCPU with lowRes). srcTex — the region's
+ * RGBA32F frame (w x h, row 0 at the top), dstTex — an RGBA32F texture of the same size to draw into.
+ * store — createDetailStore() (luma, blurs of the region live there). Without lowRes every blur runs
+ * on the region. lowRes: { affine, mainW, mainH, mainScale, minSigma?, mainBlur(mainSigma, slot) ->
+ * WebGLTexture } — mainBlur returns the R32F blur (mainW x mainH) of the main frame's luma with the
+ * fftKernel of that sigma; the texture must stay valid until this call returns. Returns the number of
+ * entries (0 means no active tool: dstTex is not written, the caller uses the input).
+ */
+export function applyDetailRegionGL(gl, d, srcTex, w, h, control, { scale, base = false, lowRes = null,
+  store, dstTex } = {}) {
+  const c = ctxOf(gl, d);
+  const ents = entries(d, control, scale, base).slice(0, 4);
+  if (!ents.length) return 0;
+  const split = regionEntries(d, control, scale, { base, lowRes });
+  const yTex = lumaPassGL(gl, d, store, "y", srcTex, w, h);
+  const blurTex = ents.map((e, i) => {
+    if (split[i].mainSigma !== null) return lowRes.mainBlur(split[i].mainSigma, i);
+    return blurPassGL(gl, d, store, yTex, w, h, e.sigma, "b" + i, "h");
+  });
+  const U = (n) => gl.getUniformLocation(c.regionCombine, n);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, srcTex);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, yTex);
+  for (let i = 0; i < 4; i++) {
+    gl.activeTexture(gl.TEXTURE4 + i);
+    gl.bindTexture(gl.TEXTURE_2D, blurTex[i] || yTex);     // unused slots: any valid texture
+  }
+  gl.useProgram(c.regionCombine);
+  gl.uniform1i(U("uImg"), 0);
+  gl.uniform1i(U("uY"), 1);
+  for (let i = 0; i < 4; i++) gl.uniform1i(U("uB" + i), 4 + i);
+  gl.uniform1i(U("uNB"), d.NB);
+  gl.uniform1i(U("uCount"), ents.length);
+  const vals = new Float32Array(4), tabs = new Float32Array(48), modes = new Int32Array(4);
+  ents.forEach((e, i) => {
+    vals[i] = e.value;
+    modes[i] = split[i].mainSigma !== null ? 1 : 0;
+    for (let k = 0; k < d.NB; k++) tabs[i * 12 + k] = e.table[k];
+  });
+  gl.uniform1iv(U("uMode"), modes);
+  gl.uniform1fv(U("uVal"), vals);
+  gl.uniform1fv(U("uTab"), tabs);
+  const A = lowRes ? lowRes.affine : [1, 0, 0, 0, 1, 0];
+  gl.uniform2i(U("uMainSize"), lowRes ? lowRes.mainW : 1, lowRes ? lowRes.mainH : 1);
+  gl.uniform3f(U("uAx"), A[0], A[1], A[2]);
+  gl.uniform3f(U("uAy"), A[3], A[4], A[5]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+  gl.viewport(0, 0, w, h);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return ents.length;
 }

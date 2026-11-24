@@ -7,10 +7,12 @@
 // be imported and edited before any RAW is opened; a ?np3= share link is applied at start.
 import { t, register, initLang, reTranslate } from "./i18n.js";
 import { mountLangMenu } from "./lang-select.js";
+import { mountInfoPop } from "./info-pop.js";
 import DICT_RU from "./i18n-editor-ru.js";
 import DICT_DE from "./i18n-editor-de.js";
 import DICT_FR from "./i18n-editor-fr.js";
 import { createEditorCore, $ } from "./editor-core.js";
+import { createEditorZoom } from "./editor-zoom.js";
 
 // The editor pages are translated (EN / RU / DE / FR, the landing's languages): the language is
 // picked before the core builds the panel, so every widget is created in it. A switch made later
@@ -20,14 +22,27 @@ register("de", DICT_DE);
 register("fr", DICT_FR);
 initLang();
 
-const core = await createEditorCore({ extraState: { step: "edit" } });
+const hooks = {};   // the desktop zoom (lib/editor-zoom.js) plugs its onDrawn / onFrame in below
+const core = await createEditorCore({ extraState: { step: "edit" }, hooks });
 const { state, setStatus, renderer, loader, panel, hist, curveEditor, blendingView, gradingView,
         beforeAfter, transfer, renderCurrent, getBaseline, setBaseline } = core;
+
+// ---------- 100% zoom (desktop page only: spec/ui-zoom-plan.md "Profile editor") ----------
+// The loader transfers the RAW bytes to its worker, so the zoom's hold re-reads the File: kept by loader
+// generation (the frame event carries the generation). The mobile page has no zoom markup and no hooks.
+const rawFiles = new Map();
+const zoom = core.isMobile ? null : createEditorZoom({ core, hooks, getFile: (gen) => rawFiles.get(gen) ?? null });
 
 // ---------- opening a RAW: the picker, the drop zone, a drop anywhere on the page ----------
 // A new RAW replaces the frame; the profile and the strength are kept.
 function openRaw(file) {
-  return loader.open(file);
+  const p = loader.open(file);
+  if (zoom) {
+    rawFiles.set(loader.generation, file);          // open() bumps the generation synchronously
+    for (const g of [...rawFiles.keys()]) if (g < loader.generation - 4) rawFiles.delete(g);
+    zoom.decodeStarted(p);                          // the zoom's decoder jobs wait for this decode (D4)
+  }
+  return p;
 }
 
 const drop = $("drop");
@@ -71,13 +86,15 @@ if ($("lang-btn")) mountLangMenu($("lang-btn"), $("lang-menu"), (lang) => {
   shownLang = lang;
   if ($("status")) $("status").textContent = state.status;
 });
+// the hotkeys behind the (i) of the icon row (the desktop page; the mobile one has its Info sheet)
+if ($("info-btn")) mountInfoPop($("info-btn"), $("hotkeys"));
 transfer.importFromUrl(); // the ?np3= share parameter, if any
 
 // For the end-to-end tests and lib/mobile.js: the state and the entry points. `mobile` and
 // `onStatus` are the core's hooks (mobile.js registers its shell and its toast listener).
 window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, blendingView,
                     gradingView, transfer, beforeAfter, hist, getBaseline, setBaseline, routeFile,
-                    openRaw, shell: core.shell };
+                    openRaw, shell: core.shell, zoom };
 Object.defineProperties(window.__np3app, {
   mobile: { get: () => core.mobile, set: (m) => { core.mobile = m; }, enumerable: true },
   onStatus: { get: () => core.onStatus, set: (fn) => { core.onStatus = fn; }, enumerable: true },

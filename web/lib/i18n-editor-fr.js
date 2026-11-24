@@ -123,4 +123,12 @@ export default {
   "or click to choose": "ou cliquez pour choisir",
   "unpacking {name}…": "décompression de {name}…",
   "{name}: JPEG targets are used by the fitting wizard (picture-control-jpg-fit.html)": "{name} : les JPEG cibles servent à l’assistant d’ajustement (picture-control-jpg-fit.html)",
+  "Fit view": "Ajuster",
+  "Fit to the screen (0)": "Ajuster à l’écran (0)",
+  "One RAW pixel per screen pixel (Z)": "Un pixel RAW par pixel d’écran (Z)",
+  "Zoom: 100% is one RAW pixel per screen pixel": "Zoom : 100 % correspond à un pixel RAW par pixel d’écran",
+  "Rendering the detailed view…": "Calcul de la vue détaillée…",
+  "Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit": "Molette — zoom, glisser — déplacer, double-clic — 100 % / ajuster, Z — 100 %, 0 — ajuster",
+  "Picture Control Buddy — home page": "Picture Control Buddy — page d’accueil",
+  "Hotkeys": "Raccourcis clavier",
 };

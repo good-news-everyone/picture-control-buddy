@@ -9,19 +9,19 @@
 <title data-i18n="NP3 profile editor">NP3 profile editor</title>
 <link rel="stylesheet" href="css/common.css">
 <link rel="stylesheet" href="css/i18n.css">
+<link rel="stylesheet" href="css/brand.css">
 <style>
   /* The palette is a copy of web/bench.html: a neutral grey around the frame. */
-  body { display: grid; grid-template-columns: 260px 1fr 330px; }   /* no report column on the editor page */
+  body { display: grid; grid-template-columns: 260px 1fr 380px; }   /* the wizard's columns: 260 left, 380 right */
   aside { background: var(--panel); overflow: auto; padding: 14px; }
   #files { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   #files > :last-child { margin-bottom: 2px; }
-  #hotkeys { margin-top: auto; padding-top: 14px; font-size: 11px; opacity: .85; }
-  #hotkeys div { margin-top: 3px; }
-  #known { padding-top: 10px; font-size: 11px; opacity: .85; }
+  /* the bottom of the column: the limitations, the file buttons, the icons (the hotkeys are behind (i)) */
+  #known { margin-top: auto; padding-top: 14px; font-size: 11px; opacity: .85; }
   #known div { margin-top: 3px; }
-  #known div.link { margin-top: 10px; }
-  #known .icon-row { margin: 10px 0 0 -7px; }   /* the icons line up with the text */
-  #known .langpick { margin-top: 0; }
+  #file-btns { margin-top: 12px; }
+  #files .icon-row { margin: 10px 0 0 -7px; }   /* the icons line up with the text */
+  #to-mobile { margin-top: 10px; }
   #panel { border-left: 1px solid var(--line); overflow: hidden; padding: 0;
     display: flex; flex-direction: column; }
   /* The panel content scrolls, Reset is in a separate footer, always pinned to the bottom */
@@ -42,6 +42,33 @@
     align-items: center; justify-content: center; gap: 8px; padding: 16px; }
   #c { display: block; max-width: 100%; max-height: calc(100vh - 90px); background: #000; }
   #c[hidden] { display: none; }   /* empty state: without the canvas there is no black 16x16 square */
+  #view:focus { outline: none; }
+  /* 100% zoom (spec/ui-zoom-plan.md "Profile editor", lib/editor-zoom.js): once zoomed, #zv draws #c through the view
+     transform exactly over it (it takes no pointer events: the wheel / drag / double click go to #c) */
+  #zv { position: absolute; left: 0; top: 0; pointer-events: none; background: #000; }
+  #zv[hidden] { display: none; }
+  /* the zoom overlay at the bottom right of the image: the loader, the readout, Fit view / 100% (as Compare's) */
+  #zoomtip { position: absolute; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 2px;
+    padding: 3px; border-radius: 6px; background: rgba(32, 32, 32, .9); backdrop-filter: blur(2px);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+    font-size: 11px; line-height: 1; user-select: none; }
+  #zoomtip[hidden] { display: none; }
+  #zoomtip button { padding: 4px 8px; font-size: 11px; border: 0; border-radius: 4px;
+    background: transparent; color: #cfcfcf; }
+  #zoomtip button:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
+  #zoom-val { font-variant-numeric: tabular-nums; color: #b8b8b8; min-width: 38px;
+    padding: 0 4px; text-align: right; }
+  #zoom-val:empty { display: none; }
+  /* the zoom loader (D4): appears after a short delay so quick renders do not flash it */
+  #zoom-spin { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; animation: fade-in .2s .35s both; }
+  #zoom-spin[hidden] { display: none; }
+  #zoom-spin .spin { display: inline-block; width: 12px; height: 12px; margin: 0;
+    border: 2px solid #4a4a4a; border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { #zoom-spin .spin { animation: none; border-top-color: #4a4a4a; } }
   #ba-slot { position: absolute; top: 10px; right: 12px; text-align: right; }
   .ba-label { color: var(--dim); font-size: 12px; margin-bottom: 3px; }
   .ba-hint { color: var(--dim); font-size: 11px; opacity: .8; }
@@ -79,6 +106,10 @@
 
 
 <aside id="files">
+  <!-- the project name: the landing's logo, a link back to the landing (css/brand.css) -->
+  <a class="brand" href="index.html" title="Picture Control Buddy — home page" data-i18n-title="Picture Control Buddy — home page">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#EDEDEA"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="var(--brand-hole)" stroke-width="2.5"/><circle cx="16" cy="16" r="2.6" fill="#E2B23C"/><circle cx="24.5" cy="8.5" r="2.2" fill="#E2B23C"/></svg>
+    <span>Picture Control Buddy</span></a>
   <h1 data-i18n="NP3 profile editor">NP3 profile editor</h1>
   <div class="hint" data-i18n="RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.">
     RAW is unpacked and rendered in this browser: WebAssembly and WebGL2. The server only serves files; nothing is uploaded.</div>
@@ -87,7 +118,17 @@
   <div id="drop"><span data-i18n="Drop a NEF or DNG">Drop a NEF or DNG</span><br><span data-i18n="or click to choose">or click to choose</span></div>
   <input type="file" id="file" accept=".nef,.NEF,.dng,.DNG" hidden>
   <dl id="info" style="margin-top:10px"><dt>—</dt><dd></dd></dl>
-  <div class="col" style="margin-top:8px">
+  <div id="warn" class="bad" hidden></div>
+  <div id="status" class="hint"></div>
+  <div id="known" class="hint">
+    <h2 data-i18n="Known limitations">Known limitations</h2>
+    <div data-i18n="Neutral development is calibrated for the Nikon Z f.">
+      Neutral development is calibrated for the Nikon Z f.</div>
+    <div data-i18n="NEF High Efficiency RAW is not supported — convert it to DNG (without JPEG XL) first.">
+      NEF High Efficiency RAW is not supported — convert it to DNG (without JPEG XL) first.</div>
+  </div>
+  <!-- the file buttons at the bottom of the column, above the icons (2026-11-24) -->
+  <div class="col" id="file-btns">
     <button id="import" disabled>
       <!-- upload, Lucide (ISC) -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -107,37 +148,47 @@
       <span data-i18n="Copy link">Copy link</span>
     </button>
   </div>
-  <div id="warn" class="bad" hidden></div>
-  <div id="status" class="hint"></div>
-  <div id="hotkeys" class="hint">
-    <div data-i18n="Space — hold to view neutral (before/after)">Space — hold to view neutral (before/after)</div>
-    <div data-i18n="Ctrl+Z — undo the last change">Ctrl+Z — undo the last change</div>
-    <div data-i18n="Ctrl+Shift+Z / Ctrl+Y — redo">Ctrl+Shift+Z / Ctrl+Y — redo</div>
-  </div>
-  <div id="known" class="hint">
-    <h2 data-i18n="Known limitations">Known limitations</h2>
-    <div data-i18n="Neutral development is calibrated for the Nikon Z f.">
-      Neutral development is calibrated for the Nikon Z f.</div>
-    <div data-i18n="NEF High Efficiency RAW is not supported — convert it to DNG (without JPEG XL) first.">
-      NEF High Efficiency RAW is not supported — convert it to DNG (without JPEG XL) first.</div>
-    <!-- GitHub and the language menu, icons only (lib/lang-select.js fills the menu) -->
-    <div class="icon-row">
-      <a class="icon-btn" href="https://github.com/good-news-everyone/picture-control-buddy" target="_blank" rel="noopener"
-         title="Source code on GitHub" aria-label="Source code on GitHub" data-i18n-title="Source code on GitHub" data-i18n-aria="Source code on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
-      <div class="langpick">
-        <button type="button" class="icon-btn" id="lang-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-menu"
-                title="Language" aria-label="Language" data-i18n-title="Language" data-i18n-aria="Language"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></svg></button>
-        <ul class="lang-menu" id="lang-menu" role="menu" aria-labelledby="lang-btn" hidden></ul>
+  <!-- the hotkeys (i), GitHub and the language menu, icons only (lib/info-pop.js, lib/lang-select.js) -->
+  <div class="icon-row">
+    <div class="infopick">
+      <button type="button" class="icon-btn" id="info-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="hotkeys"
+              title="Hotkeys" aria-label="Hotkeys" data-i18n-title="Hotkeys" data-i18n-aria="Hotkeys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></button>
+      <div class="info-pop" id="hotkeys" role="dialog" aria-labelledby="hotkeys-h" hidden>
+        <h2 id="hotkeys-h" data-i18n="Hotkeys">Hotkeys</h2>
+        <div data-i18n="Space — hold to view neutral (before/after)">Space — hold to view neutral (before/after)</div>
+        <div data-i18n="Ctrl+Z — undo the last change">Ctrl+Z — undo the last change</div>
+        <div data-i18n="Ctrl+Shift+Z / Ctrl+Y — redo">Ctrl+Shift+Z / Ctrl+Y — redo</div>
+        <div data-i18n="Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit">Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit</div>
       </div>
     </div>
-    <div id="to-mobile" class="link" hidden>
-      <button type="button" data-i18n="Mobile version" data-i18n-title="Opens the other version with the current profile; the photo has to be opened again.">Mobile version</button>
+    <a class="icon-btn" href="https://github.com/good-news-everyone/picture-control-buddy" target="_blank" rel="noopener"
+       title="Source code on GitHub" aria-label="Source code on GitHub" data-i18n-title="Source code on GitHub" data-i18n-aria="Source code on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+    <div class="langpick">
+      <button type="button" class="icon-btn" id="lang-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-menu"
+              title="Language" aria-label="Language" data-i18n-title="Language" data-i18n-aria="Language"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></svg></button>
+      <ul class="lang-menu" id="lang-menu" role="menu" aria-labelledby="lang-btn" hidden></ul>
     </div>
+  </div>
+  <div id="to-mobile" class="link" hidden>
+    <button type="button" data-i18n="Mobile version" data-i18n-title="Opens the other version with the current profile; the photo has to be opened again.">Mobile version</button>
   </div>
 </aside>
 
-<main id="view">
+<main id="view" tabindex="-1">
   <canvas id="c" width="16" height="16"></canvas>
+  <canvas id="zv" hidden aria-hidden="true"></canvas>
+  <!-- zoom: a small overlay at the bottom right of the image — the loader, the readout, Fit view / 100%
+       (one RAW pixel per screen pixel); lib/editor-zoom.js positions it over the image and shows it with the frame -->
+  <div id="zoomtip" hidden>
+    <div id="zoom-spin" hidden role="status" title="Rendering the detailed view…"
+         data-i18n-title="Rendering the detailed view…"><span class="spin"></span></div>
+    <span id="zoom-val" title="Zoom: 100% is one RAW pixel per screen pixel"
+          data-i18n-title="Zoom: 100% is one RAW pixel per screen pixel"></span>
+    <button type="button" id="zoom-fit" data-i18n="Fit view"
+            title="Fit to the screen (0)" data-i18n-title="Fit to the screen (0)">Fit view</button>
+    <button type="button" id="zoom-100"
+            title="One RAW pixel per screen pixel (Z)" data-i18n-title="One RAW pixel per screen pixel (Z)">100%</button>
+  </div>
   <div id="caption" class="hint" data-i18n="Approximate calculation in the browser — not an exact NX Studio render.">
     Approximate calculation in the browser — not an exact NX Studio render.</div>
   <div id="ba-slot"></div>

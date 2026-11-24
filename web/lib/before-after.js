@@ -50,9 +50,12 @@ export function createBeforeAfter(slot, { state, renderCurrent, hint: showHint =
 
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== " " || ev.repeat) return;
-    // only the manual-editor step (in a text field space is the native input undo anyway);
-    // on the Comparison screen space is the hold-key image swap (compare-view.js)
-    if (editableTarget(ev.target) || !state.raw || state.step !== "edit") return;
+    // the editor ("edit": the profile editor and the wizard's quick editor) and the wizard's Compare
+    // screen; never in a text field. The wizard has no state.raw: its pairs carry the frames
+    const hasFrame = state.raw || state.pairs?.some?.((p) => p.prepared);
+    if (editableTarget(ev.target) || !hasFrame || (state.step !== "edit" && state.step !== "compare")) return;
+    // on Compare Space also presses a focused button or pair tile: leave those alone
+    if (state.step === "compare" && ev.target.closest?.("button, [role='button']")) return;
     ev.preventDefault();   // do not scroll the page with space
     show(true);
   });

@@ -18,7 +18,9 @@
 // optional vigAB (values from golden, like levels 2/2a).
 import { neutralGLSL, bindModel, texture } from "./neutral.js";
 import { buildLUT } from "./profile.js";
-import { applyDetailGL, detailPlan, scaleOf } from "./detail.js";
+import { applyDetailGL, detailPlan, scaleOf, applyDetailRegionGL, regionEntries, regionMarginPx,
+  REGION_LOWRES_MIN_SIGMA, createDetailStore, disposeDetailStore, storeTexture, lumaPassGL, blurPassGL,
+  mainDetailTexture } from "./detail.js";
 import { serialize, COLORS, ZONES } from "./np3.js";
 
 const NEUTRAL_FRAG = `#version 300 es
@@ -129,6 +131,10 @@ export class Renderer {
     this.lutN = 33;             // the interactive preview sets less (app.js, see plan §5)
     this._detail = null;        // the detail luma/blur cache
     this.finalKey = null;       // the key of the final frame in the "final" texture (before/after)
+    this._region = null;        // renderRegion's texture store (disposeRegion)
+    this._regionMain = null;    // the main frame's luma/blurs computed for renderRegion (own textures)
+    this._lastScale = null;     // the detail scale of the last render(): the default main scale of lowRes
+    this.regionLowResMinSigma = REGION_LOWRES_MIN_SIGMA;   // main-frame px, see renderRegion
     this.stats = { develops: 0, neutrals: 0, luts: 0, reads: 0, lutDrops: 0, detailSkips: 0 };
     gl.bindVertexArray(gl.createVertexArray());
   }
@@ -336,6 +342,7 @@ export class Renderer {
     });
     const d = this.models.detail;
     const k = scale || scaleOf(d, w, h);
+    this._lastScale = k;
     // with the NX base detail (spec/ui.md decision #18): every render, not a profile field
     const plan = detailPlan(d, this.control, k, { base: true });
     const reuse = plan.count > 0 && this._detailMatch(plan, k, w, h);
@@ -360,6 +367,166 @@ export class Renderer {
       return null;
     }
     return out;
+  }
+
+  // ---------- region rendering (spec/ui-zoom-plan.md D5/D6, Z4) ----------
+  // Own textures (the stores below) and no writes to anything the main path caches: neutralCache,
+  // _profSize, _detail and its luma/blur textures, the final texture. The main path rebinds every
+  // texture unit it samples before each pass (profile: 7 and 3; detail: 0, 1, 4-7; blits: 7), and the
+  // program uniforms it relies on are set at each use (only the devmodel ones are set once and not
+  // touched here), so a following render()/blitFinal() is unaffected.
+
+  /** The neutral pass of an rgb frame into the store texture p+"A" (RGBA32F w x h); returns it. */
+  _regionNeutral(st, p, rgb, w, h) {
+    const gl = this.gl;
+    const lin = storeTexture(gl, st, p + "lin", 0, gl.RGB32F, gl.RGB, gl.FLOAT, w, h);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGB, gl.FLOAT, rgb);
+    gl.useProgram(this.neutralProg);
+    gl.uniform1i(gl.getUniformLocation(this.neutralProg, "uLin"), 0);
+    gl.uniform2i(gl.getUniformLocation(this.neutralProg, "uSize"), w, h);
+    gl.uniform2f(gl.getUniformLocation(this.neutralProg, "vigAB"), 0, 0);
+    const A = storeTexture(gl, st, p + "A", 7, gl.RGBA32F, gl.RGBA, gl.FLOAT, w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, lin);
+    this._draw(A, w, h, () => {});
+    return A;
+  }
+
+  /** neutral -> profile LUT of an rgb frame into store textures p+"A" (neutral) and p+"B" (profile
+   *  output), RGBA32F w x h. neutralTex — an already computed neutral texture of this frame (skips
+   *  the neutral pass, A is then not written). Returns the profile output texture. */
+  _regionProfile(st, p, rgb, w, h, lut, neutralTex = null) {
+    const gl = this.gl;
+    const A = neutralTex || this._regionNeutral(st, p, rgb, w, h);
+    const B = storeTexture(this.gl, st, p + "B", 4, gl.RGBA32F, gl.RGBA, gl.FLOAT, w, h);
+    gl.activeTexture(gl.TEXTURE7);
+    gl.bindTexture(gl.TEXTURE_2D, A);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_3D, lut.tex);
+    gl.useProgram(this.profileProg);
+    gl.uniform1i(gl.getUniformLocation(this.profileProg, "uBase"), 7);
+    gl.uniform1i(gl.getUniformLocation(this.profileProg, "uProf"), 3);
+    gl.uniform1i(gl.getUniformLocation(this.profileProg, "uProfN"), lut.n);
+    this._draw(B, w, h, () => {});
+    return B;
+  }
+
+  _dropStoreTextures(st, names) {
+    for (const n of names) {
+      if (st.tex[n]) this.gl.deleteTexture(st.tex[n]);
+      delete st.tex[n];
+      delete st.dims[n];
+    }
+  }
+
+  /** The blur (R32F texture, main frame size) of the main frame's profile luma with the sigma
+   *  `ms` (main px): the main render's cached blur if it is current, else a region-owned one. */
+  _regionMainBlur(ms, mainScale, lut) {
+    const gl = this.gl, d = this.models.detail;
+    const { w: mw, h: mh } = this.frame;
+    const key = `${this.lutKey}/${this.lutN}`;
+    const same = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(1, b);
+    const t = this._detail;
+    if (t && t.tag === this.frameTag && t.key === key && t.w === mw && t.h === mh && same(t.k, mainScale)) {
+      const j = t.sig.findIndex((s) => same(s, ms));
+      if (j >= 0) return mainDetailTexture(gl, "b" + j);
+    }
+    const m = this._regionMain || (this._regionMain = { store: createDetailStore(), key: null, sig: [], used: new Set() });
+    const mkey = `${this.frameTag}|${key}|${mw}x${mh}`;
+    if (m.key !== mkey) { m.key = mkey; m.sig = []; m.haveY = false; }
+    if (!m.haveY) {
+      const nc = this.neutralCache;
+      const B = this._regionProfile(m.store, "m", this.frame.rgb, mw, mh, lut,
+        nc && nc.key === `${mw}x${mh}:0,0` ? nc.tex : null);
+      lumaPassGL(gl, d, m.store, "y", B, mw, mh);
+      this._dropStoreTextures(m.store, ["mlin", "mA", "mB"]);
+      m.haveY = true;
+    }
+    let slot = m.sig.findIndex((s) => same(s, ms));
+    if (slot < 0) {
+      if (m.sig.length < 4) slot = m.sig.length;
+      else for (slot = 0; m.used.has(slot); slot++);
+      m.sig[slot] = ms;
+      blurPassGL(gl, d, m.store, m.store.tex.y, mw, mh, ms, "mb" + slot, "mh");
+    }
+    m.used.add(slot);
+    return m.store.tex["mb" + slot];
+  }
+
+  /**
+   * Develops a region (a crop of a larger frame at another scale) with the current profile: neutral ->
+   * the profile LUT of lutCacheKey(lutN) -> detail. rgb — Float32Array w*h*3 linear camera RGB (row 0
+   * at the top, gain applied, same units as setFrame); scale — full-frame px per region px (used for
+   * the detail radii exactly as render({ scale }); the NX base detail follows detailPlan(base: true)).
+   * lowRes (optional): { affine: [a, b, c, d, e, f], mainScale?, minSigma? } — region pixel centers
+   * (x + 0.5, y + 0.5) map to the main frame's continuous coordinates (a X + b Y + c, d X + e Y + f);
+   * detail entries with sigma_fullframe / mainScale >= minSigma (default this.regionLowResMinSigma)
+   * take their blurred luma from the main frame's blur of the same full-frame sigma (bilinear).
+   * mainScale defaults to the scale of the last render() (else scaleOf the main frame). Needs setFrame.
+   * neutralOnly (opt-in, default false): returns the region's Nikon neutral only (neutral pass, no profile /
+   * LUT / detail; the other arguments are ignored), the same values neutralToScreen shows for a frame.
+   * Returns Float32Array RGBA (w*h*4, row 0 at the top), or null if the LUT is not uploaded yet.
+   */
+  renderRegion({ rgb, w, h, scale, lowRes = null, neutralOnly = false }) {
+    const gl = this.gl, d = this.models.detail;
+    if (neutralOnly) {   // the Nikon neutral of the region (the editor's before view): no profile, LUT or detail
+      const nst = this._region || (this._region = createDetailStore());
+      const N = this._regionNeutral(nst, "r", rgb, w, h);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, N, 0);
+      const nres = new Float32Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, nres);
+      return nres;
+    }
+    if (!this.control) throw new Error("renderRegion: no profile (setProfile)");
+    const lut = this.lutCache.get(this.lutCacheKey(this.lutN));
+    if (!lut) return null;
+    if (!(scale > 0)) throw new Error("renderRegion: scale must be positive");
+    let low = null;
+    if (lowRes) {
+      if (!this.frame) throw new Error("renderRegion: lowRes needs the main frame (setFrame)");
+      const mainScale = lowRes.mainScale ?? this._lastScale ?? scaleOf(d, this.frame.w, this.frame.h);
+      low = {
+        affine: lowRes.affine, mainW: this.frame.w, mainH: this.frame.h, mainScale,
+        minSigma: lowRes.minSigma ?? this.regionLowResMinSigma,
+        mainBlur: (ms) => this._regionMainBlur(ms, mainScale, lut),
+      };
+      if (this._regionMain) this._regionMain.used.clear();
+    }
+    const st = this._region || (this._region = createDetailStore());
+    const prof = this._regionProfile(st, "r", rgb, w, h, lut);
+    let out = prof;
+    const n = regionEntries(d, this.control, scale, { base: true, lowRes: low }).length;
+    if (n > 0) {
+      const A = st.tex.rA;
+      applyDetailRegionGL(gl, d, prof, w, h, this.control, { scale, base: true, lowRes: low, store: st, dstTex: A });
+      out = A;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out, 0);
+    const res = new Float32Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, res);
+    return res;
+  }
+
+  /** The margin (region px) a region needs around the visible rectangle for its region-side blurs, with
+   *  the current profile: opts { scale, lowRes: { mainScale?, minSigma? } | null }. 0 if no tool is on. */
+  regionMargin({ scale, lowRes = null }) {
+    const d = this.models.detail;
+    const low = lowRes ? {
+      mainScale: lowRes.mainScale ?? this._lastScale ?? (this.frame ? scaleOf(d, this.frame.w, this.frame.h) : scale),
+      minSigma: lowRes.minSigma ?? this.regionLowResMinSigma,
+    } : null;
+    return regionMarginPx(d, this.control, scale, { base: true, lowRes: low });
+  }
+
+  /** Deletes the region textures (they can be hundreds of MB); the next renderRegion reallocates. */
+  disposeRegion() {
+    if (this._region) disposeDetailStore(this.gl, this._region);
+    if (this._regionMain) disposeDetailStore(this.gl, this._regionMain.store);
+    this._region = null;
+    this._regionMain = null;
   }
 
   /** The Y' luma histogram (detail.YW weights) of the neutral frame: 256 bins 0..255, normalized

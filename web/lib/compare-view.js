@@ -25,11 +25,35 @@ import { isRawReady, isTargetReady, canAttachTarget, pickTargetFile,
          refitPairIds } from "./session.js";
 import { renderCoverage, pairHints } from "./coverage-view.js";
 import { fitCount } from "./start.js";
+import { unsharpRGBA } from "./display-sharpen.js";
+import { pickLevel, visibleRect, rectContains } from "./zoom-plan.js";
 
 const $ = (id) => document.getElementById(id);
 
 // The compare modes (spec/ui.md step 2; the key-toggle mode is removed, decision #8).
 const MODES = ["side", "curtain"];
+
+// Display sharpening of the render side at the fitted view (spec/ui-zoom-plan.md D9, Z1).
+// s = the image's on-screen long side in device px / the render bitmap's long side. Calibrated on
+// the SA frames: at s ~ 0.6 the plain render already matches the target's top octave, at s ~ 1.2
+// (the render upscaled) the target has ~1.3x more, and sigma 1.0 / amount 1.0 closes the gap.
+// By eye (user review 2026-11-24, dpr 1, s ~ 0.75) the plain render already looks a little crisper
+// than the target, so the measured ramp (0 at s = 0.6, 1 at s = 1.2) over-sharpened: the metric
+// reads ~10-15% more target detail than the eye sees. The ramp now starts where the render is
+// stretched: 0 up to s = 0.9, 1 at s = 1.5. `?dsharp=<amount>` overrides the amount (0 disables).
+const DSHARP_SIGMA = 1.0;
+const DSHARP_S0 = 0.9, DSHARP_S1 = 1.5;
+const dsharpOverride = (() => {
+  try {
+    const v = new URLSearchParams(globalThis.location?.search ?? "").get("dsharp");
+    const x = v == null || v === "" ? NaN : parseFloat(v);
+    return Number.isFinite(x) ? Math.min(2, Math.max(0, x)) : null;
+  } catch { return null; }
+})();
+export function displaySharpenAmount(s) {
+  if (dsharpOverride != null) return dsharpOverride;
+  return Math.min(1, Math.max(0, (s - DSHARP_S0) / (DSHARP_S1 - DSHARP_S0)));
+}
 
 // A pair is selectable for the comparison: decoded, prepared and not blocked (a RAW error,
 // a failed alignment — ncc_low — or a too-small target excludes it, as in the fit).
@@ -43,7 +67,15 @@ export function inVersion(p, v) {
   return !!v && (v.pairIds ?? []).includes(String(p.id));
 }
 
-export function createCompare({ state, renderSide, onStrength,
+// The zoom (spec/ui-zoom-plan.md Z3): the pyramid is driven here, the ROI renders by fit-app's `zoom` API
+// ({ geometry(pair) -> { spw }, render(pair, version, strength, rect, level, gen), release(), trim(),
+// level1Ok(), supported, busy }; null — no zoom, the view only stretches the compare render).
+const ZOOM_SETTLE_MS = 100;          // the ROI is requested this long after the last zoom / pan input
+const ZOOM_MAX_PERCENT = 4;          // the wheel range: up to 400% of D1 (one sensor px = one device px)
+const ZOOM_PIXELATE_FROM = 3;        // device px per ROI px from which the ROI is drawn pixelated
+const CROP_PAD = 0.25, CROP_MAX_PX = 6e6;   // the target crop (D8): ~25% pad, never above ~6 MP
+
+export function createCompare({ state, renderSide, zoom = null, onStrength,
                                 onManual, onPairSelected, onAddRaws, onAddTarget, onRemovePair,
                                 onRefit, onCancelRefit, onRevert, refitRestoresFit = () => false, onDownload, onShare, setStatus = () => {} }) {
   const canvas = $("cc");
@@ -67,7 +99,18 @@ export function createCompare({ state, renderSide, onStrength,
   let pending = false;           // a request is outstanding (its result not yet applied/discarded)
   let region = null;             // the report row highlight: { labels, group } (stage 5B)
   let regionCv = null;           // the cached overlay canvas (rebuilt when `region` changes)
+  let sharpCache = null;         // the sharpened device-size render canvas (D9), see fitSharpened()
   let mapCv = null;              // the report error-map canvas overlaid on the image (stage 5B)
+  // the zoom layers (D2, D8): the ROI render and the target crop, each over the stretched base in the
+  // same working-space mapping
+  let zoomImg = null;            // { cv, rect, level, wanted } — rect: the working-space rectangle it covers
+  let zoomCrop = null;           // { cv, rect, tg } — the full-resolution target around the view
+  let zoomGen = 0;               // the generation of the latest ROI request
+  let zoomPending = false;       // an ROI request is outstanding (a decode, hold or render in flight)
+  let zoomTimer = 0;
+  let zoomPair = null;           // the pair the zoom layers and the hold belong to
+  let mouse = null;              // the cursor over the canvas, CSS px (the Z key's anchor)
+  let hovering = false;
 
   const pair = () => state.pairs.find((p) => p.id === state.selectedPairId);
   const version = () => state.versions.find((v) => v.id === state.selectedVersionId);
@@ -122,6 +165,7 @@ export function createCompare({ state, renderSide, onStrength,
     if (!p || !v || !compareUsable(p)) return;
     const gen = ++requestedGen;
     pending = true;
+    dropRoi();                               // the profile / strength / pair may have changed: the ROI is stale
     renderSide(p, v, state.strength, gen).then((side) => {
       if (gen !== requestedGen) return;      // superseded: the newer request owns the flag
       if (side) {                            // null — the LUT is still building; the ready
@@ -130,8 +174,137 @@ export function createCompare({ state, renderSide, onStrength,
         renderCv = toCanvas(side);
         appliedGen = gen;
         draw();
+        scheduleZoom();                      // beyond the fitted view: the ROI for the new render
       }
     }).catch(() => { if (gen === requestedGen) pending = false; });
+  }
+
+  // ---------- the zoom pyramid (D2): geometry, level, the ROI and target-crop requests ----------
+  const spinEl = $("cmp-spin"), zoomValEl = $("cmp-zoom-val");
+  const showSpin = (on) => { if (spinEl) spinEl.hidden = !on; };
+  // sensor px per working px of the selected pair (null before it is usable): 100% = D1, one sensor px per device px
+  function zoomGeo() {
+    const p = pair();
+    if (!zoom || !p || !compareUsable(p)) return null;
+    try { return zoom.geometry(p); } catch { return null; }
+  }
+  // the zoom as device px per sensor px (1 = 100%)
+  function zoomPercent(scale = view.scale) {
+    const g = zoomGeo();
+    return g && g.spw > 0 ? base() * dpr * scale / g.spw : null;
+  }
+  const scaleForPercent = (pc) => { const g = zoomGeo(); return g ? pc * g.spw / (base() * dpr) : null; };
+  const maxScale = () => scaleForPercent(ZOOM_MAX_PERCENT) ?? 40;
+  function wantLevel() {
+    const p = pair();
+    if (!zoom || !p || !compareUsable(p) || !renderCv) return 0;
+    const pc = zoomPercent();
+    return pc == null ? 0 : pickLevel({ percent: pc, scale: view.scale, level1: zoom.level1Ok() });
+  }
+  // the render viewport's visible rectangle of the working space (both halves show the same one)
+  function visibleNow() {
+    const p = pair();
+    if (!p?.prepared) return null;
+    const { w: W, h: H } = p.prepared.size;
+    return visibleRect(viewports()[0], view, base() * view.scale, W, H);
+  }
+
+  function dropRoi() {                       // the ROI is stale or not wanted: the stretched render shows
+    zoomImg = null;
+    zoomGen++;
+    zoomPending = false;
+    showSpin(false);
+    clearTimeout(zoomTimer); zoomTimer = 0;
+  }
+  function resetZoomLayers({ release = false } = {}) {
+    dropRoi();
+    zoomCrop = null;
+    if (release) zoom?.release(); else zoom?.trim();
+  }
+  function scheduleZoom() {
+    if (!zoom) return;
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(requestZoom, ZOOM_SETTLE_MS);
+  }
+
+  // The full-resolution target around the view (D8): a crop of pair.target.rgb as a canvas, only where the
+  // capped display canvas is coarser than the target itself and the crop stays small enough.
+  function ensureTargetCrop(p, vis) {
+    const tg = p.target;
+    if (!tg?.rgb) { zoomCrop = null; return; }
+    if (targetCanvases(tg).display.width >= tg.width) { zoomCrop = null; return; }
+    if (zoomCrop && zoomCrop.tg === tg && rectContains(zoomCrop.rect, vis)) return;
+    const { w: W, h: H } = p.prepared.size;
+    const fx = tg.width / W, fy = tg.height / H;
+    for (const pad of [CROP_PAD, 0]) {
+      const x0 = Math.max(0, Math.floor((vis.x - pad * vis.w) * fx)), x1 = Math.min(tg.width, Math.ceil((vis.x + vis.w * (1 + pad)) * fx));
+      const y0 = Math.max(0, Math.floor((vis.y - pad * vis.h) * fy)), y1 = Math.min(tg.height, Math.ceil((vis.y + vis.h * (1 + pad)) * fy));
+      const cw2 = x1 - x0, ch2 = y1 - y0;
+      if (cw2 < 1 || ch2 < 1) break;
+      if (cw2 * ch2 > CROP_MAX_PX) continue;
+      const cv = document.createElement("canvas");
+      cv.width = cw2; cv.height = ch2;
+      const cx = cv.getContext("2d");
+      const im = cx.createImageData(cw2, ch2);
+      for (let y = 0; y < ch2; y++) {
+        let i = ((y0 + y) * tg.width + x0) * 3, o = y * cw2 * 4;
+        for (let x = 0; x < cw2; x++, i += 3, o += 4) {
+          im.data[o] = Math.round(255 * Math.min(1, Math.max(0, tg.rgb[i])));
+          im.data[o + 1] = Math.round(255 * Math.min(1, Math.max(0, tg.rgb[i + 1])));
+          im.data[o + 2] = Math.round(255 * Math.min(1, Math.max(0, tg.rgb[i + 2])));
+          im.data[o + 3] = 255;
+        }
+      }
+      cx.putImageData(im, 0, 0);
+      zoomCrop = { cv, tg, rect: { x: x0 / fx, y: y0 / fy, w: cw2 / fx, h: ch2 / fy } };
+      return;
+    }
+    zoomCrop = null;
+  }
+
+  // After the zoom / pan settles: the target crop at once, the ROI render through fit-app (the decoder jobs
+  // wait for any RAW decode in flight; while one is outstanding the loader shows and the stretched render stays).
+  function requestZoom() {
+    zoomTimer = 0;
+    const p = pair(), v = version();
+    const lv = wantLevel();
+    if (!lv || !v) {
+      if (zoomImg || zoomCrop || zoomPending) resetZoomLayers();
+      draw();
+      return;
+    }
+    const vis = visibleNow();
+    if (!vis) return;
+    ensureTargetCrop(p, vis);
+    draw();
+    if (!zoom.supported) return;
+    if (zoomImg && zoomImg.wanted === lv && rectContains(zoomImg.rect, vis)) return;   // still inside the ROI
+    const gen = ++zoomGen;
+    zoomPending = true;
+    showSpin(true);
+    zoom.render(p, v, state.strength, vis, lv, gen).then((res) => {
+      if (gen !== zoomGen) return;           // superseded: the newer request owns the flag
+      zoomPending = false;
+      showSpin(false);
+      if (!res) return;                      // null: the LUT builds (the ready path re-renders), no zoom in this wasm, ...
+      const cv = document.createElement("canvas");
+      cv.width = res.w; cv.height = res.h;
+      cv.getContext("2d").putImageData(new ImageData(res.rgba, res.w, res.h), 0, 0);
+      zoomImg = { cv, rect: res.rect, level: res.level, wanted: res.wanted };
+      draw();
+    }).catch(() => { if (gen === zoomGen) { zoomPending = false; showSpin(false); } });
+  }
+
+  // The layers over the stretched base, drawn in the working-space transform of place(): the target crop on
+  // the target side, the ROI on the render side. Smoothed unless the zoom is far beyond the ROI's resolution.
+  function drawZoomLayer(which) {
+    const layer = which === "render" ? zoomImg : zoomCrop;
+    if (!layer || view.scale <= 1) return;
+    const r = layer.rect;
+    const devPerPx = base() * view.scale * dpr * r.w / layer.cv.width;
+    ctx.imageSmoothingEnabled = devPerPx < ZOOM_PIXELATE_FROM;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(layer.cv, r.x, r.y, r.w, r.h);
   }
 
   // ---------- drawing ----------
@@ -242,7 +415,37 @@ export function createCompare({ state, renderSide, onStrength,
              y: rect.y + rect.h / 2 + view.y + (v2 * H - H / 2) * s };
   }
 
+  // The fitted view's render side as a canvas of its exact on-screen size in device pixels,
+  // sharpened (D9). Returns null when the plain path applies: another zoom, no render, or an
+  // amount of 0. Cached by (render canvas, device size, dpr, amount).
+  function fitSharpInfo() {
+    const p = pair();
+    if (view.scale !== 1 || !renderBitmap || !renderCv || !p?.prepared) return null;
+    const { w: W, h: H } = p.prepared.size;
+    const k = base() * dpr;
+    const dw = Math.max(1, Math.round(W * k)), dh = Math.max(1, Math.round(H * k));
+    const sc = Math.max(dw, dh) / Math.max(renderBitmap.w, renderBitmap.h);
+    return { dw, dh, s: sc, sigma: DSHARP_SIGMA, amount: displaySharpenAmount(sc) };
+  }
+  function fitSharpened(info) {
+    const c = sharpCache;
+    if (c && c.src === renderCv && c.dw === info.dw && c.dh === info.dh && c.dpr === dpr
+        && c.amount === info.amount) return c.cv;
+    const cv = document.createElement("canvas");
+    cv.width = info.dw; cv.height = info.dh;
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.imageSmoothingEnabled = true;
+    cx.imageSmoothingQuality = "high";
+    cx.drawImage(renderCv, 0, 0, info.dw, info.dh);
+    const im = cx.getImageData(0, 0, info.dw, info.dh);
+    cx.putImageData(new ImageData(unsharpRGBA(im.data, info.dw, info.dh,
+      { sigma: info.sigma, amount: info.amount }), info.dw, info.dh), 0, 0);
+    sharpCache = { src: renderCv, dw: info.dw, dh: info.dh, dpr, amount: info.amount, cv };
+    return cv;
+  }
+
   function place(img, rect, clip, label) {
+    const sharp = img === renderCv ? fitSharpInfo() : null;
     ctx.save();
     ctx.beginPath();
     ctx.rect(rect.x, rect.y, rect.w, rect.h);
@@ -255,12 +458,26 @@ export function createCompare({ state, renderSide, onStrength,
     const p = pair();
     const { w: W, h: H } = p.prepared.size;
     const s = base() * view.scale;
+    if (sharp && sharp.amount > 0) {
+      // 1:1 to device pixels: the clip stays (set above under the dpr transform), the
+      // translation is snapped to whole device pixels so the browser does not resample again
+      const tx = Math.round((rect.x + rect.w / 2 + view.x) * dpr - sharp.dw / 2);
+      const ty = Math.round((rect.y + rect.h / 2 + view.y) * dpr - sharp.dh / 2);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(fitSharpened(sharp), tx, ty);
+      ctx.restore();
+      if (label) drawLabel(label, rect.x + 6, rect.y + 6);
+      return;
+    }
     ctx.translate(rect.x + rect.w / 2 + view.x, rect.y + rect.h / 2 + view.y);
     ctx.scale(s, s);
     ctx.translate(-W / 2, -H / 2);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, 0, 0, W, H);
+    if (img === renderCv) drawZoomLayer("render");
+    else if (img === targetCv) drawZoomLayer("target");
     ctx.restore();
     if (label) drawLabel(label, rect.x + 6, rect.y + 6);
   }
@@ -279,15 +496,23 @@ export function createCompare({ state, renderSide, onStrength,
     ctx.restore();
   }
 
+  function paintZoomReadout() {
+    if (!zoomValEl) return;
+    const pc = zoomPercent();
+    zoomValEl.textContent = pc == null ? "" : `${Math.round(100 * pc)}%`;
+  }
+
   function draw() {
     sizeCanvas();
+    paintZoomReadout();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, cw, ch);
     const p = pair();
     if (!p || !renderCv || !targetCv) return;
     const full = { x: 0, y: 0, w: cw, h: ch };
-    const labelR = t("RAW + NP3"), labelT = t("Target");
+    // Space held (before-after.js): the render side shows the Nikon neutral without the profile
+    const labelR = state.showNeutral ? t("Before — neutral") : t("RAW + NP3"), labelT = t("Target");
     if (mode === "side") {
       place(renderCv, { x: 0, y: 0, w: cw / 2, h: ch }, null, labelR);
       place(targetCv, { x: cw / 2, y: 0, w: cw / 2, h: ch }, null, labelT);
@@ -320,21 +545,41 @@ export function createCompare({ state, renderSide, onStrength,
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
+    zoomAt(Math.min(maxScale(), Math.max(0.2, view.scale * Math.exp(-e.deltaY * 0.002))), mx, my);
+  }, { passive: false });
+
+  // zoom to the cursor: keep the image point under (mx, my) fixed
+  function zoomAt(next, mx, my) {
     const rect = viewportAt(mx);
-    const next = Math.min(40, Math.max(0.2, view.scale * Math.exp(-e.deltaY * 0.002)));
     const s0 = base() * view.scale, s1 = base() * next;
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
-    // zoom to the cursor: keep the image point under the cursor fixed
     view.x = mx - cx - (mx - cx - view.x) * (s1 / s0);
     view.y = my - cy - (my - cy - view.y) * (s1 / s0);
     view.scale = next;
+    viewChanged();
+  }
+  // a view change: redraw now, the ROI / target crop once the input settles (a level-0 view drops them at once)
+  function viewChanged() {
     draw();
-  }, { passive: false });
+    if (wantLevel() === 0 && (zoomImg || zoomCrop || zoomPending)) resetZoomLayers();
+    else scheduleZoom();
+  }
+  // 100% (D1): one sensor px per device px, anchored at (mx, my) — the middle of the render viewport by default
+  function zoom100(mx = null, my = null) {
+    const target = scaleForPercent(1);
+    if (target == null) return;
+    if (mx == null) {
+      const r = viewportAt(0);
+      mx = r.x + r.w / 2; my = r.y + r.h / 2;
+    }
+    zoomAt(Math.min(maxScale(), Math.max(0.2, target)), mx, my);
+  }
 
   let drag = null;
   canvas.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
+    canvas.parentElement.focus({ preventScroll: true });   // preventDefault above stops the native focus: the keys (Z, 0) need it
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
     // in the curtain mode a drag on the divider moves it; anywhere else pans
@@ -350,6 +595,8 @@ export function createCompare({ state, renderSide, onStrength,
     return dx <= 8 || Math.hypot(dx, y - ch / 2) <= 14;
   }
   canvas.addEventListener("mousemove", (e) => {
+    const r0 = canvas.getBoundingClientRect();
+    mouse = { x: e.clientX - r0.left, y: e.clientY - r0.top };
     if (drag) return;
     const r = canvas.getBoundingClientRect();
     canvas.style.cursor = nearDivider(e.clientX - r.left, e.clientY - r.top) ? "col-resize" : "";
@@ -366,14 +613,17 @@ export function createCompare({ state, renderSide, onStrength,
     }
     draw();
   });
-  window.addEventListener("mouseup", () => { if (drag) canvas.style.cursor = ""; drag = null; });
-  window.addEventListener("resize", () => draw());
+  window.addEventListener("mouseup", () => {
+    if (drag) { canvas.style.cursor = ""; if (!drag.curtain) scheduleZoom(); }
+    drag = null;
+  });
+  window.addEventListener("resize", () => viewChanged());
   // The box also changes size without a window resize — the step switch (editor -> compare)
   // lays the screen out after the first draw, the report panel fills in, a scrollbar comes or
   // goes. A canvas buffer sized for the old box is then stretched by CSS (the image shows
   // shrunk/offset until the next interaction); redraw whenever the box itself changes.
   if (typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(() => { if (canvas.getBoundingClientRect().width > 0) draw(); })
+    new ResizeObserver(() => { if (canvas.getBoundingClientRect().width > 0) viewChanged(); })
       .observe(canvas.parentElement);
   }
 
@@ -381,21 +631,55 @@ export function createCompare({ state, renderSide, onStrength,
   // decision #8: there is no "Reset view" button)
   function resetView() {
     view.scale = 1; view.x = 0; view.y = 0;
-    draw();
+    viewChanged();
   }
-  canvas.addEventListener("dblclick", (e) => { e.preventDefault(); resetView(); });
+  // a double click: below 100% it zooms to 100% at the cursor, at 100% or more it returns to the fit
+  // (user review 2026-11-24; without the zoom geometry it only fits, as before)
+  canvas.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    const pc = zoomPercent();
+    if (pc == null || pc >= 0.995) { resetView(); return; }
+    const r = canvas.getBoundingClientRect();
+    zoom100(e.clientX - r.left, e.clientY - r.top);
+  });
+  // Fit / 100% buttons, the keys Z (100% at the cursor) and 0 (fit) while the canvas area is hovered or focused
+  $("cmp-fit")?.addEventListener("click", () => resetView());
+  $("cmp-100")?.addEventListener("click", () => zoom100());
+  const box = canvas.parentElement;
+  box.addEventListener("mouseenter", () => { hovering = true; });
+  box.addEventListener("mouseleave", () => { hovering = false; mouse = null; });
+  window.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (e.key !== "z" && e.key !== "Z" && e.key !== "0") return;
+    if (e.target?.closest?.("input, textarea, select, [contenteditable]")) return;   // never steal typing
+    if (!canvas.offsetParent || (!hovering && !box.contains(document.activeElement))) return;
+    if (!pair()?.prepared || !renderCv) return;
+    e.preventDefault();
+    if (e.key === "0") resetView();
+    else zoom100(mouse?.x ?? null, mouse?.y ?? null);
+  });
   $("cmp-manual").addEventListener("click", () => onManual());
   $("cmp-revert")?.addEventListener("click", () => onRevert?.());
   $("cmp-download").addEventListener("click", () => onDownload?.());
   $("cmp-share")?.addEventListener("click", () => onShare?.());
   refitBtn.addEventListener("click", () => (state.fitting ? onCancelRefit() : onRefit()));
 
+  // A mouse click on the view controls or a pair tile hands the keyboard focus to the image box, so
+  // Space (the neutral preview), Z and 0 keep working instead of pressing the focused control again
+  // (user review 2026-11-24). Capture phase: a tile click rebuilds the strip and detaches the target.
+  // Keyboard activation (detail 0) keeps the focus where it is.
+  document.addEventListener("click", (e) => {
+    if (e.detail === 0 || !canvas.offsetParent) return;
+    if (!e.target.closest?.("#cmp-modes button, #cmp-zoomtip button, #cmp-strip .cmp-th, #cmp-strip .cmp-add")) return;
+    box.focus({ preventScroll: true });
+  }, true);
+
   for (const btn of document.querySelectorAll("#cmp-modes button")) {
     btn.addEventListener("click", () => {
       mode = btn.dataset.mode;
       for (const b of document.querySelectorAll("#cmp-modes button"))
         b.classList.toggle("active", b === btn);
-      draw();
+      viewChanged();
     });
   }
 
@@ -693,6 +977,11 @@ export function createCompare({ state, renderSide, onStrength,
   // ---------- refresh ----------
   function refresh() {
     refreshPairs();
+    const sel = pair() ?? null;
+    if (sel !== zoomPair) {                  // another pair: its own hold, ROI and crop (D11)
+      zoomPair = sel;
+      resetZoomLayers({ release: true });
+    }
     strengthInput.value = String(state.strength);
     paintStrength();
     const p = pair();
@@ -714,6 +1003,16 @@ export function createCompare({ state, renderSide, onStrength,
       requestedGen, appliedGen, pending,
       base: base(),
       working: p?.prepared ? { ...p.prepared.size } : null,
+      displaySharpen: (() => {
+        const i = fitSharpInfo();
+        return { active: !!i && i.amount > 0, sigma: DSHARP_SIGMA, amount: i?.amount ?? 0, s: i?.s ?? null };
+      })(),
+      zoom: (() => {
+        const pc = zoomPercent();
+        return { percent: pc == null ? null : 100 * pc, level: zoomImg?.level ?? 0, wanted: wantLevel(),
+                 roiRect: zoomImg ? { ...zoomImg.rect } : null, crop: !!zoomCrop,
+                 busy: zoomPending || !!zoom?.busy };
+      })(),
       aligned: renderBitmap ? { w: renderBitmap.w, h: renderBitmap.h } : null,
       mapPoint,
     };
@@ -726,6 +1025,8 @@ export function createCompare({ state, renderSide, onStrength,
   }
 
   return { refresh, refreshPairs, draw, scheduleRender, debug, syncStrength,
+           // the zoom (Z3): the Fit / 100% buttons' actions, for the tests and the keys
+           zoom100: () => zoom100(), fitView: () => resetView(),
            // stage 5B: the report view's overlays on the compare image
            showRegion(labels, group) {
              region = labels && group != null ? { labels, group } : null;

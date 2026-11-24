@@ -53,6 +53,10 @@ export const rawErrorText = (code) => t(ERRORS[code] || code);
  *                            current control itself (the wizard's quick editor on Compare);
  *   hooks.hasFrame()       — true when the renderer holds a frame though no RAW is open in the
  *                            editor (the curve backdrop histogram then reads it);
+ *   hooks.onDrawn()        — after renderCurrent put a frame on the canvas (the result, the cached
+ *                            final or the neutral); hooks.onFrame(st) — applyEditorFrame took a new
+ *                            frame (state.raw is already the new one). Both are optional; only the
+ *                            desktop editor's zoom (lib/editor-zoom.js) uses them;
  *   transfer       — setupTransfer options (import on/off, the share target).
  * Resolves to the core API once the models are loaded and the renderer exists.
  */
@@ -131,6 +135,7 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
     if (state.showNeutral) {           // "before" — the Nikon neutral without any NP3 tools
       reveal();
       renderer.neutralToScreen();
+      hooks.onDrawn?.();
       return;
     }
     const ctl = scaled(state.control, state.strength);
@@ -141,8 +146,9 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
       return;                          // the previous frame stays until the LUT is ready
     }
     reveal();
-    if (renderer.hasFinal()) { renderer.blitFinal(); return; }   // before/after: the result without a full render
+    if (renderer.hasFinal()) { renderer.blitFinal(); hooks.onDrawn?.(); return; }   // before/after: the result without a full render
     renderer.render({ toScreen: true });
+    hooks.onDrawn?.();
   }
 
   function reveal() {
@@ -280,6 +286,7 @@ export async function createEditorCore({ extraState = {}, statusIds = [], hooks 
     state.raw = { bytes: null, image: st.image, info: st.info, name: st.name };
     pendingFrame = st.image;
     renderer.setFrame(null);                 // the frame is from the Worker (or a pair), develop is not called
+    hooks.onFrame?.(st);                     // the desktop editor's zoom: a new frame ends the old view and its hold
     hist.clear();                            // changing RAW resets the edit history
     hist.push();                             // base snapshot: the current profile on the new frame
     curveEditor.sync();                      // the backdrop histogram moves to the new frame

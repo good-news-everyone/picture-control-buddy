@@ -891,7 +891,12 @@ function alignedAt(o, prepared, OW, OH) {
 // every strength/version change is a gather (~20 ms). Not bit-identical to warpToView (point
 // Catmull-Rom instead of the box/bicubic kernels): display only — the report keeps warpToWorking.
 // Level 1e checks it against warpToView. Outside the source (the align/crop fill) -> sx = NaN.
-export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null } = {}) {
+// window = { x0, y0, w, h } (integers, inside the OW×OH grid, w, h >= 1) restricts the map to that
+// rectangle of the output grid: sx/sy/g then have w*h entries, row-major over the window, and every
+// value equals the full map's value at the same output pixel (same arithmetic; level 1n checks it).
+// The result carries k, fullW = OW, fullH = OH and the window origin x0, y0 (0, 0 without a window);
+// w/h are the map's own size (the window's size with a window, OW×OH without).
+export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null, window = null } = {}) {
   const tr = prepared.transform;
   const W = prepared.size.w, H = prepared.size.h;
   const unr = ((unrotate ?? 0) % 4 + 4) % 4;
@@ -920,6 +925,17 @@ export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null
   const wd = r2 % 2 ? ch : cw, hd = r2 % 2 ? cw : ch;              // D: oriented
   const kk = k ?? Math.max(1 / BOX, Math.min(maxLong / Math.max(W, H), wd / W, hd / H));
   const OW = Math.max(1, Math.round(W * kk)), OH = Math.max(1, Math.round(H * kk));
+  let wx0 = 0, wy0 = 0, ww = OW, wh = OH;
+  if (window != null) {
+    const { x0: qx, y0: qy, w: qw, h: qh } = window;
+    if (![qx, qy, qw, qh].every(Number.isInteger))
+      throw new Error("viewRemap: window { x0, y0, w, h } must be integers");
+    if (qw < 1 || qh < 1)
+      throw new Error("viewRemap: window w and h must be >= 1");
+    if (qx < 0 || qy < 0 || qx + qw > OW || qy + qh > OH)
+      throw new Error(`viewRemap: window ${qx},${qy} ${qw}x${qh} is outside the ${OW}x${OH} grid`);
+    wx0 = qx; wy0 = qy; ww = qw; wh = qh;
+  }
   // the align affine (transform semantics) and the radial at OW×OH
   const sc = 1 / tr.warpScale;
   const shx = tr.shiftX * (OW / W), shy = tr.shiftY * (OH / H);
@@ -929,10 +945,11 @@ export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null
   const denB = w1 * w1 / 4 + h1 * h1 / 4;
   const denV = Math.hypot(w1 / 2, h1 / 2);
   const va = prepared.vignette.a, vb = prepared.vignette.b;
-  const n = OW * OH;
+  const n = ww * wh;
   const sx = new Float32Array(n), sy = new Float32Array(n), g = new Float32Array(n);
-  for (let y = 0, i = 0; y < OH; y++) {
-    for (let x = 0; x < OW; x++, i++) {
+  for (let y = wy0; y < wy0 + wh; y++) {
+    for (let x = wx0; x < wx0 + ww; x++) {
+      const i = (y - wy0) * ww + (x - wx0);
       // G -> F (affine, center coords -> index coords)
       const xin = m0 * (x + 0.5) + m2, yin = m4 * (y + 0.5) + m5;
       if (xin < 0 || xin >= OW || yin < 0 || yin >= OH) { sx[i] = NaN; continue; }
@@ -992,7 +1009,7 @@ export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null
       sx[i] = px; sy[i] = py;
     }
   }
-  return { sx, sy, g, w: OW, h: OH, fw, fh, k: kk };
+  return { sx, sy, g, w: ww, h: wh, fw, fh, k: kk, fullW: OW, fullH: OH, x0: wx0, y0: wy0 };
 }
 
 // Catmull-Rom weights of the four taps around a sample at fraction t (a = -0.5).

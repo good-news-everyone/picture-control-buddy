@@ -21,9 +21,10 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 - **Share link** stays in step 3.1 (decided 2026-11-20): it copies the editor link `picture-control-editor.html?np3=…` with the current profile (see "Share links"), never a wizard link — the wizard has no URL state. The link opens the profile in the standalone editor; the pairs, versions and report are not part of it.
 - **Languages** (decided 2026-11-20): EN / RU / DE / FR, the rules of "Profile editor" → "Languages".
   `lib/fit-app.js` registers the editor dictionaries (the shared modules, the quick editor) and
-  `lib/i18n-fit-{ru,de,fr}.js` (the wizard's own strings, no editor key repeated). The globe sits
-  right of the GitHub icon at the title of the Start screen only (the menu opens downwards; Compare
-  has none, decided 2026-11-20). A switch re-translates the static texts,
+  `lib/i18n-fit-{ru,de,fr}.js` (the wizard's own strings, no editor key repeated). Two globes, each right
+  of a GitHub icon (the bottom one after (i)): at the top of the Start screen (the menu opens downwards) and at the bottom of
+  the wizard panel on Compare and in the quick editor (it opens upwards, as in the profile editor;
+  decided 2026-11-24, superseding "Start only"). A switch re-translates the static texts,
   re-renders the Start cards, the Compare strip, the coverage, the Refit button, the canvas labels
   and the report; the session, a running fit and the quick editor are untouched. The colour groups
   of the coverage and the report table are translated (keys = `analyze.GROUPS`; the narrow tables
@@ -31,6 +32,19 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
   tooltip; a context key without a translation falls back to its plain key's), so are the report
   parameter rows ("Red Hue" …). Plural strings ("{n} pairs will be fitted", the Refit sub-label)
   use `{ one, few, many, other }` translations.
+- **Layout** (decided 2026-11-24): Compare and the quick editor use the profile editor's three
+  columns — 260 px left, the viewer, 380 px right; both side columns are `--panel` with a
+  `--line` border. The left column is the wizard panel `#cmp-sidepanel` at full height, ordered
+  like the editor's `#files`: the project name (see "Project name"), the title "Fitting wizard"
+  with a one-line explanation, the status, the colour coverage; at the bottom the actions
+  stacked as the editor's file buttons (an icon before the label: Manual adjustments, Revert to
+  fit, Download NP3 — still the primary button — and Copy link to the profile editor), then the
+  icon row (i) / GitHub / language. The hotkeys are not shown in the column: (i) opens them in a
+  small panel above it (`lib/info-pop.js`; Escape or a click outside closes it). The middle
+  column keeps the pair strip with Refit, the mode / strength bar, the canvas and under it the
+  editor's caption "Approximate calculation in the browser — not an exact NX Studio render."; the
+  right column is the report (Compare) or the parameter panel (quick editor). The Start screen keeps its centred column, with the project
+  name above the title.
 - **Desktop only.** No mobile layout, no router. On a phone (the router's auto rule: `pointer: coarse` and the short screen side < 600 px) the page opens as is with a non-blocking banner: "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory." The banner can be closed; nothing is stored.
 
 ## Profile editor (`picture-control-editor.html` / `-mobile.html`)
@@ -39,6 +53,21 @@ Fitting a profile to JPEG targets and editing an NP3 on a RAW are **different fl
 - **No pairs, no JPEG targets, no fit, no report, no versions.** The page has no Start screen: it opens straight into the editor with the empty state ("Open a RAW to see the profile"); an NP3 can be imported and edited before any RAW is opened, as today.
 - A dropped JPEG gets the status "JPEG targets are used by the fitting wizard" with a link to `picture-control-jpg-fit.html`.
 - The mobile page is the M0–M3 implementation of [ui-mobile-plan.md](ui-mobile-plan.md) (branch `mobile`, `_local/_cloud_transfer/mobile.bundle`) **without its Start screen**: the "Start screen on mobile" section of ui-mobile.md and the Start parts of level 9b are dropped.
+
+- **Columns** (desktop): 260 px left (`#files`), the viewer, 380 px right (`#panel`) — the wizard's
+  widths (decided 2026-11-24; the right panel was 330 px).
+- **Left column** (desktop, decided 2026-11-24): the project name, the title, Files (drop zone,
+  frame info), the status; at the bottom the known limitations, the file buttons (Import /
+  Export NP3, Copy link) and the icon row (i) / GitHub / language. The hotkeys sit behind (i), as
+  in the wizard.
+
+### Project name
+
+Decided 2026-11-24. The desktop editor and the wizard show the project name at the top of the
+left column (on the wizard's Start screen: at the top of the page, left of GitHub and the
+globe): the landing's logo (its dark-theme colours) and "Picture Control Buddy", one link to the
+landing `index.html` (tooltip "Picture Control Buddy — home page"). The name is not translated.
+Styles: `css/brand.css`, linked by both pages. The mobile editor has none yet.
 
 ### Languages
 
@@ -117,6 +146,7 @@ for photographers, not engineers: plain words, few of them.
 |---|---|---|
 | `lib/editor-core.js` (new, extracted from `app.js`) | renderer + LUT worker, loader, panels, curve editor, blender, grading, history, before/after, transfer, `renderCurrent`, `setStatus(text, kind)`, the `NP3_SHELL` options | both entries |
 | `lib/editor-app.js` (new) | the editor pages: one RAW, NP3 import/export/share, neutral reset, the page drop router (RAW / NP3; JPEG → hint) | `picture-control-editor*.html` |
+| `lib/editor-zoom.js` (new) | the desktop editor's 100% zoom: overlay canvas over `#c`, the detailed ROI layer, Fit / 100% overlay, Z / 0 keys ([ui-zoom-plan.md](ui-zoom-plan.md) "Profile editor"); plugs in through the optional `hooks.onDrawn` / `hooks.onFrame` of the core | `picture-control-editor.html` only |
 | `lib/fit-app.js` (new, the rest of today's `app.js`) | the wizard: session, `start.js`, `compare-view.js`, `report-view.js`, `more-view.js`, fit/pair/report workers, versions, baseline, leave warning; step 3.1 mounts the editor core | `picture-control-jpg-fit.html` |
 | `lib/view-route.js` | router (new page names) | editor pages |
 | `css/common.css`, `css/mobile.css` | from M0/M1 of the mobile branch; the wizard and the desktop editor link `common.css` and keep their own layout inline | all but the landing |
