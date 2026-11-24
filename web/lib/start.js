@@ -121,7 +121,7 @@ export function fitCountText(state) {
 // The pair-preparation stages of pair-worker.js (pair-prepare.js onProgress order) in user
 // words, with the bar span of each stage: [code, label, from, to, expected ms]. The spans follow
 // the measured share of each stage (2026-11-20, a Z f NEF + JPEG in Chromium: align ~65% of the
-// time, orient ~14%, radial ~10%); "queued" waits for the previous pair (one serialized chain).
+// time, orient ~14%, radial ~10%); "queued" waits for a free preparation Worker (one, or two on a >= 8 GB desktop: decision #17).
 const PREP_STEPS = [
   ["queued", "Waiting for the previous pair", 0, 0.03, 600],
   ["decode", "Reading the RAW", 0.03, 0.07, 500],

@@ -87,7 +87,8 @@ class Renderer:
         return out.reshape(GRID, GRID, GRID, 3).astype(np.float32)
 
     def apply(self, base: np.ndarray, c: np3.Control, sharp: bool = False) -> np.ndarray:
-        """Color and tone per pixel; with sharp=True also Clarity and sharpening (detail.py), frames (h, w, 3) only.
+        """Color and tone per pixel; with sharp=True also Clarity and sharpening plus the NX base
+        detail (detail.py), frames (h, w, 3) only.
 
         No detail by default: fitting and color comparison run on profiles without it.
         """
@@ -98,7 +99,7 @@ class Renderer:
             d = (self.W @ (self.R.color(p).reshape(-1, 3) - self.patches)).reshape(GRID, GRID, GRID, 3).astype(np.float32)
             out = np.clip(M.apply_curve(base, p.curve) + trilinear(d, base), 0, 1)
         if sharp and out.ndim == 3:
-            out = self.detail(out, c)
+            out = self.detail(out, c, base=True)       # with the NX base detail (decision #18)
         return out
 
     def unrendered(self, c: np3.Control) -> list[str]:

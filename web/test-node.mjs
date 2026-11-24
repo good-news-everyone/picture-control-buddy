@@ -346,10 +346,10 @@ async function level1e(ctx) {
         + ` k=2 6×6-shrunk mean |Δ| ${mad.toExponential(2)} (tol ${VIEW_TOL}), default k ${def.k.toFixed(3)}`
         + ` -> ${def.w}×${def.h}`);
     }
-    // the fast compare path (viewRemap + applyRemap, what app.js draws): one bilinear gather
+    // the fast compare path (viewRemap + applyRemap, what app.js draws): one bicubic gather
     // through the composed inverse map vs the seven-pass warpToView — same size, the same
     // fill, mean |Δ| ≤ 2 % of the mean level (measured ≤ 1.1 %; bilinear vs the box/bicubic
-    // kernels). A wrong turn, crop offset or shift misplaces the content and fails.
+    // kernels; bicubic since decision #18). A wrong turn, crop offset or shift misplaces the content and fails.
     {
       const frame = { data: new Float32Array(linB.buffer, linB.byteOffset, linB.byteLength / 4),
                       w: inj.inputs.linear.w, h: inj.inputs.linear.h };

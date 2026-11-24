@@ -220,6 +220,30 @@ export async function level1i(ctx) {
     report(ok && v2.id === "r2" && v2.name === "foo_r2" && v2.parentId === "draft",
       `1i makeRefitVersion: ${v.id}/${v.name} then ${v2.id}/${v2.name}, inputs unmutated`);
   }
+
+  // ---- session.js: the pair preparation concurrency (decision #17) ----
+  {
+    const SAF = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
+    const CHR = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    const FFX = "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0";
+    const IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+    const AND = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+    const cases = [
+      [{ userAgent: CHR, hardwareConcurrency: 8, deviceMemory: 8 }, "", 2, "Chrome 8 GB"],
+      [{ userAgent: CHR, hardwareConcurrency: 8, deviceMemory: 4 }, "", 1, "Chrome 4 GB"],
+      [{ userAgent: CHR, hardwareConcurrency: 2, deviceMemory: 8 }, "", 1, "Chrome 2 cores"],
+      [{ userAgent: SAF, hardwareConcurrency: 8, maxTouchPoints: 0 }, "", 2, "desktop Safari"],
+      [{ userAgent: SAF, hardwareConcurrency: 8, maxTouchPoints: 5 }, "", 1, "iPad desktop site"],
+      [{ userAgent: IOS, hardwareConcurrency: 6 }, "", 1, "iPhone Safari"],
+      [{ userAgent: AND, hardwareConcurrency: 8, deviceMemory: 8 }, "", 1, "Android"],
+      [{ userAgent: FFX, hardwareConcurrency: 16 }, "", 1, "Firefox (no deviceMemory)"],
+      [{ userAgent: FFX, hardwareConcurrency: 16 }, "?prep=3", 3, "Firefox ?prep=3"],
+      [{ userAgent: CHR, hardwareConcurrency: 8, deviceMemory: 8 }, "?a=1&prep=1", 1, "?prep=1"],
+    ];
+    const bad = cases.filter(([nav, q, want]) => S.prepSlots(nav, q) !== want)
+      .map(([nav, q, want, name]) => `${name}: ${S.prepSlots(nav, q)} != ${want}`);
+    report(!bad.length, `1i prepSlots: parallel only on a known >= 8 GB desktop (${cases.length} cases)${bad.length ? "; " + bad.join("; ") : ""}`);
+  }
 }
 
 // standalone: node web/test-node-advice.mjs

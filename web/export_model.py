@@ -31,8 +31,11 @@ detail (data/detail_model.npz, reference-test level 6):
   detail.bin — for each tool and scale: plus and minus, flat (len(sigmas), NB).
   detail.json: {
     tools, NB, SENSOR_LONG, GRID (linspace(0, 1, NB)), YW (Rec.601 luma),
+    BASE ("base"), BASE_RANGE,
     parts: {tool: {str(scale): {sigmas, plus: {offset, count}, minus: {offset, count}}}}
   }
+  parts.base is the NX base detail (detail.BASE, decision #18): not a profile tool, value 1 in
+  renders, only within BASE_RANGE of its scale.
   Scales are strings because they are json keys: "2", "4". An empty parts dict means the model
   is not trained (detail.Detail.load without a file), tools are skipped as in Python.
 
@@ -149,7 +152,8 @@ def export_detail(out: str):
         np.concatenate(bins).tofile(os.path.join(out, "detail.bin"))
     meta = {"version": 1, "tools": list(detail.TOOLS), "NB": detail.NB,
             "SENSOR_LONG": detail.SENSOR_LONG, "GRID": detail.GRID.tolist(),
-            "YW": detail.YW.tolist(), "parts": parts, "bin": "detail.bin"}
+            "YW": detail.YW.tolist(), "BASE": detail.BASE, "BASE_RANGE": detail.BASE_RANGE,
+            "parts": parts, "bin": "detail.bin"}
     json.dump(meta, open(os.path.join(out, "detail.json"), "w"))
     print("model/detail.json, model/detail.bin:", {t: list(v) for t, v in parts.items()})
 

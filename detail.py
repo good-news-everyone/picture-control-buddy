@@ -27,6 +27,18 @@ spec/camera-response.md):
     python3 detail.py collect tools     # renders/sweep/tools -> data/detail_tools.npz (Clarity, scale 4)
     python3 detail.py collect detail    # renders/sweep/detail (full size) -> data/detail_full.npz
     python3 detail.py                   # training -> data/detail_model.npz and a dE report
+    python3 detail.py base              # NX base detail (below) -> the "base" part of data/detail_model.npz
+
+Base detail (spec/ui.md decision #18). NX Studio's own export is crisper than our development at the
+same size even with Sharpening, Mid-range and Clarity at 0: on the 10 NEUTRAL exports of the tools
+pack (1512 px, scale 4) the amplitude of the top octave of Y' is 1.06-1.44x ours at Nyquist
+(geometric mean 1.21), the same below 0.2 cycles/px. A full AHD demosaic shrunk with Lanczos is no
+crisper than our half-size development, so it is NX's resampling / its own detail step, not lost
+data. The "base" part is a fixed Y' high-pass that matches that amplitude: the Part form with
+value 1 and a constant gain table, at the Sharpening x4 radius (0.5 full-frame px) so the web
+shader merges the two. It runs only in renders (render.py, the web Renderer), only near the scale
+it was measured at (BASE_RANGE), never in fitting; the frequencies it lifts are mostly not coherent
+with NX's (NX adds detail our development does not have), so it matches the look, not the pixels.
 """
 from __future__ import annotations
 
@@ -60,6 +72,10 @@ CANDIDATES = {
 }
 SAMPLES = {1: 400_000, 2: 300_000, 4: 150_000}   # pixels per frame and profile when collecting
 SEED = 20261110
+BASE = "base"             # the NX base detail part (not a profile tool: always value 1 in renders)
+BASE_SIGMA = 0.5          # full-frame px: the Sharpening x4 radius, so the shader merges both
+BASE_RANGE = 1.5          # the base part applies only within this factor of the scale it was measured at
+BASE_FREQS = np.array([0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5])   # cycles/px
 VISIBLE = 0.02           # minimum improvement in Y' error (share of export noise), else the tool at this scale = 0
 
 
@@ -123,8 +139,18 @@ class Detail:
             return None
         return by[min(by, key=lambda k: abs(np.log(k / scale)))]
 
-    def __call__(self, rgb: np.ndarray, c: np3.Control, scale: float | None = None) -> np.ndarray:
-        """rgb (h, w, 3) sRGB 0..1 after color. Tools without a model are skipped."""
+    def base_part(self, scale: float) -> Part | None:
+        """The NX base detail at this scale: only near a measured scale (BASE_RANGE), else None."""
+        by = self.parts.get(BASE)
+        if not by:
+            return None
+        k = min(by, key=lambda k: abs(np.log(k / scale)))
+        return by[k] if abs(np.log(k / scale)) <= np.log(BASE_RANGE) else None
+
+    def __call__(self, rgb: np.ndarray, c: np3.Control, scale: float | None = None,
+                 base: bool = False) -> np.ndarray:
+        """rgb (h, w, 3) sRGB 0..1 after color. Tools without a model are skipped; base=True adds
+        the NX base detail (renders only, decision #18)."""
         scale = scale or scale_of(rgb)
         y = luma(rgb)
         dy = np.zeros_like(y)
@@ -133,6 +159,9 @@ class Detail:
             p = self.part(tool, scale) if v else None
             if p is not None:
                 dy += p.delta(y, v, scale)
+        p = self.base_part(scale) if base else None
+        if p is not None:
+            dy += p.delta(y, 1.0, scale)
         return np.clip(rgb + dy[..., None], 0, 1)
 
     def save(self, path: str = PATH):
@@ -449,6 +478,9 @@ def train() -> Detail:
                 if r:
                     parts.setdefault(tool, {})[k] = r[0]
                     print(f"[{name}] {r[1]}")
+    old = Detail.load()
+    if old.parts.get(BASE):                     # trained separately (python3 detail.py base): kept
+        parts[BASE] = old.parts[BASE]
     model = Detail(parts)
     for name, s in sets:
         print(f"[{name}] scale {s.k}, dE on all frames (the model was trained on them):")
@@ -456,8 +488,84 @@ def train() -> Detail:
     return model
 
 
+# ---------- the NX base detail (decision #18) ----------
+
+def amplitude(a: np.ndarray, b: np.ndarray, tile: int = 128) -> np.ndarray:
+    """Radial power of a and b over Hann-windowed tiles at BASE_FREQS: (len(BASE_FREQS), 2)."""
+    win = np.outer(np.hanning(tile), np.hanning(tile))
+    f = np.hypot(np.fft.fftfreq(tile)[:, None], np.fft.fftfreq(tile)[None, :])
+    rings = [np.abs(f - q) < 0.025 for q in BASE_FREQS]
+    out = np.zeros((len(BASE_FREQS), 2))
+    h, w = a.shape
+    for y in range(0, h - tile, tile // 2):
+        for x in range(0, w - tile, tile // 2):
+            for j, img in enumerate((a, b)):
+                t = img[y:y + tile, x:x + tile]
+                p = np.abs(np.fft.fft2((t - t.mean()) * win)) ** 2
+                out[:, j] += [p[m].sum() for m in rings]
+    return out
+
+
+def base_response(gain: float, scale: float) -> np.ndarray:
+    """Amplitude response of y + gain * (y - gauss(y, BASE_SIGMA / scale)) at BASE_FREQS."""
+    s = BASE_SIGMA / scale
+    return 1 + gain * (1 - np.exp(-2 * (np.pi * s * BASE_FREQS) ** 2))
+
+
+def base_pairs(folder: str):
+    """(name, our neutral Y', NX NEUTRAL Y') for every <frame>-NEUTRAL.NEF + .TIF in folder."""
+    import glob
+    from PIL import Image
+    import make_pack
+    import render
+    r = render.Renderer()
+    c = make_pack.neutral("NEUTRAL")
+    for nef in sorted(glob.glob(os.path.join(folder, "*-NEUTRAL.NEF"))):
+        tif = nef[:-4] + ".TIF"
+        if not os.path.exists(tif):
+            continue
+        nx = np.asarray(Image.open(tif).convert("RGB"), np.float32) / 255
+        ours = r.apply(r.neutral(render.linear(nef)), c)
+        if ours.shape != nx.shape:
+            print(f"{os.path.basename(nef)}: size {ours.shape[:2]} vs NX {nx.shape[:2]}, skipped")
+            continue
+        yield os.path.basename(nef)[:-12], luma(ours), luma(nx), SENSOR_LONG / max(nx.shape[:2])
+
+
+def train_base(folder: str = os.path.join(HERE, "renders", "sweep", "tools")) -> tuple[int, Part]:
+    """The gain that matches the geometric-mean amplitude ratio NX / ours over the frames
+    (least squares over BASE_FREQS); a leave-one-frame-out spread is printed."""
+    ratios, scales = {}, set()
+    for name, yo, yn, k in base_pairs(folder):
+        p = amplitude(yo, yn)
+        ratios[name] = np.sqrt(p[:, 1] / p[:, 0])
+        scales.add(round(k))
+        print(f"{name}  NX/ours amplitude at {BASE_FREQS.tolist()}: " + " ".join(f"{v:.2f}" for v in ratios[name]))
+    if not ratios or len(scales) != 1:
+        sys.exit(f"base: need NEUTRAL NEF + TIF pairs of one export scale in {folder}")
+    k = scales.pop()
+    basis = base_response(1.0, k) - 1
+
+    def fit(names):
+        target = np.exp(np.mean([np.log(ratios[n]) for n in names], 0)) - 1
+        return float(basis @ target / (basis @ basis))
+    gain = fit(list(ratios))
+    loo = [fit([m for m in ratios if m != n]) for n in ratios]
+    target = np.exp(np.mean([np.log(v) for v in ratios.values()], 0))
+    print(f"scale {k}: gain {gain:.3f} (leave-one-out {min(loo):.3f}..{max(loo):.3f}); geometric-mean target "
+          + " ".join(f"{v:.3f}" for v in target) + "; model " + " ".join(f"{v:.3f}" for v in base_response(gain, k)))
+    table = np.full((1, NB), gain)
+    return k, Part((BASE_SIGMA,), table, table.copy())
+
+
 def main():
-    if sys.argv[1:2] == ["collect"] and len(sys.argv) == 3 and sys.argv[2] in DATA:
+    if sys.argv[1:] == ["base"]:
+        k, part = train_base()
+        m = Detail.load()
+        m.parts[BASE] = {k: part}
+        m.save()
+        print("file:", PATH)
+    elif sys.argv[1:2] == ["collect"] and len(sys.argv) == 3 and sys.argv[2] in DATA:
         collect(sys.argv[2])
     elif len(sys.argv) == 1:
         m = train()

@@ -2,6 +2,13 @@
 // set (one key set with i18n-fit-ru.js and i18n-fit-fr.js).
 
 export default {
+  "Back to fit": "Zurück",
+  "Back to the fitted profile {name}: the manual adjustments are discarded": "Angepasstes Profil {name} wiederhergestellt: Die Feinabstimmung ist verworfen",
+  "Discards the manual adjustments and returns to the fitted profile": "Verwirft die Feinabstimmung und stellt das angepasste Profil wieder her",
+  "Revert to fit": "Zur Anpassung zurück",
+  "Revert to the fitted profile: the manual adjustments of {name} will be lost.": "Zum angepassten Profil zurück: Die Feinabstimmung von {name} geht verloren.",
+  "The pairs have not changed, so a refit gives the fitted profile again — it is restored at once: the manual adjustments of {name} will be lost.": "Die Paare sind unverändert, eine Neuanpassung ergibt wieder das angepasste Profil — es wird sofort wiederhergestellt: Die Feinabstimmung von {name} geht verloren.",
+  "The pairs have not changed: Refit restores the fitted profile at once, without recomputing": "Die Paare sind unverändert: „Neu anpassen“ stellt das angepasste Profil sofort wieder her, ohne Neuberechnung",
   "{changes} pair": "{changes} Paar",
   "{changes} pairs": "{changes} Paare",
   "{group}: {coverage}% ({level}) — add to the fit: {names}": "{group}: {coverage} % ({level}) – zur Anpassung hinzufügen: {names}",
@@ -87,6 +94,7 @@ export default {
   "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory.": "Die Anpassung ist für den Desktop gedacht: Sie braucht Minuten Rechenzeit und mehrere hundert MB Speicher.",
   "Fitting: iteration {it} of up to {total}": "Anpassung: Iteration {it} von bis zu {total}",
   "Fitting…": "Anpassung …",
+  "For a universal profile, pick different but typical scenes: unusual frames (night, very light portraits) can make it worse on everyday shots": "Für ein universelles Profil verschiedene, aber typische Szenen wählen: ungewöhnliche Bilder (Nacht, sehr helle Porträts) können es bei alltäglichen Aufnahmen verschlechtern",
   "Frames": "Bild",
   "Frames are processed locally in the browser and are never sent anywhere.": "Die Bilder werden lokal im Browser verarbeitet und nirgendwohin gesendet.",
   "Geometry: crop": "Geometrie: Zuschnitt",
@@ -205,7 +213,6 @@ export default {
   "The JPEG is made from the same RAW with one preset, without manual edits and local masks": "Das JPEG stammt aus demselben RAW mit einem Preset, ohne manuelle Korrekturen oder lokale Masken",
   "The more different colors the better: greys, skin, greenery, sky, saturated warm colors": "Je mehr verschiedene Farben, desto besser: Grautöne, Haut, Grün, Himmel, kräftige warme Farben",
   "The profile is already fitted on these pairs": "Das Profil ist bereits auf diese Paare angepasst",
-  "The profile strength this report is computed at: 100% is the fitted profile, less blends it toward the Nikon neutral, more strengthens it.": "Die Profilstärke, mit der dieser Bericht berechnet ist: 100 % ist das angepasste Profil, weniger blendet es Richtung Nikon-Neutral, mehr verstärkt es.",
   "the profile will make the other frames darker by about as much": "das Profil macht die anderen Bilder um etwa so viel dunkler",
   "the profile will make the other frames lighter by about as much": "das Profil macht die anderen Bilder um etwa so viel heller",
   "The RAW is unreadable — remove this card": "Das RAW ist unlesbar – entferne diese Karte",

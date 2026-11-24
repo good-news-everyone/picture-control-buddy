@@ -11,6 +11,13 @@
 // its full name.
 
 export default {
+  "Back to fit": "К подбору",
+  "Back to the fitted profile {name}: the manual adjustments are discarded": "Возвращён подобранный профиль {name}: ручная настройка отменена",
+  "Discards the manual adjustments and returns to the fitted profile": "Отменяет ручную настройку и возвращает подобранный профиль",
+  "Revert to fit": "Вернуть к подбору",
+  "Revert to the fitted profile: the manual adjustments of {name} will be lost.": "Вернуть подобранный профиль: ручная настройка {name} пропадёт.",
+  "The pairs have not changed, so a refit gives the fitted profile again — it is restored at once: the manual adjustments of {name} will be lost.": "Пары не менялись, поэтому повторный подбор даст тот же подобранный профиль — он вернётся сразу, без пересчёта: ручная настройка {name} пропадёт.",
+  "The pairs have not changed: Refit restores the fitted profile at once, without recomputing": "Пары не менялись: «Подобрать заново» сразу вернёт подобранный профиль, без пересчёта",
   "{changes} pair": "{changes} пара",
   "{changes} pairs": { "one": "{changes} пара", "few": "{changes} пары", "many": "{changes} пар", "other": "{changes} пары" },
   "{group}: {coverage}% ({level}) — add to the fit: {names}": "{group}: {coverage}% ({level}) — добавь в подбор: {names}",
@@ -96,6 +103,7 @@ export default {
   "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory.": "Подбор рассчитан на компьютер: он занимает минуты процессорного времени и несколько сотен МБ памяти.",
   "Fitting: iteration {it} of up to {total}": "Подбор: итерация {it} (максимум {total})",
   "Fitting…": "Подбор…",
+  "For a universal profile, pick different but typical scenes: unusual frames (night, very light portraits) can make it worse on everyday shots": "Для универсального профиля бери разные, но типичные сцены: необычные кадры (ночь, очень светлые портреты) могут сделать его хуже на обычных снимках",
   "Frames": "Кадр",
   "Frames are processed locally in the browser and are never sent anywhere.": "Кадры обрабатываются локально в браузере и никуда не отправляются.",
   "Geometry: crop": "Геометрия: кадрирование",
@@ -214,7 +222,6 @@ export default {
   "The JPEG is made from the same RAW with one preset, without manual edits and local masks": "JPEG сделан из того же RAW одним пресетом, без ручных правок и локальных масок",
   "The more different colors the better: greys, skin, greenery, sky, saturated warm colors": "Чем больше разных цветов, тем лучше: серые, кожа, зелень, небо, насыщенные тёплые",
   "The profile is already fitted on these pairs": "Профиль уже подобран по этим парам",
-  "The profile strength this report is computed at: 100% is the fitted profile, less blends it toward the Nikon neutral, more strengthens it.": "Сила профиля, с которой посчитан отчёт: 100% — подобранный профиль, меньше — ближе к нейтральному Nikon, больше — сильнее.",
   "the profile will make the other frames darker by about as much": "профиль сделает остальные кадры темнее примерно на столько же",
   "the profile will make the other frames lighter by about as much": "профиль сделает остальные кадры светлее примерно на столько же",
   "The RAW is unreadable — remove this card": "RAW не читается — удали эту карточку",

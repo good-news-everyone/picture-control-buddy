@@ -32,7 +32,7 @@ export async function runLevel8({ browser, port, report, skip }) {
       if (r.method() !== "GET") netBad.push(`${r.method()} ${r.url()}`);
     });
     page.on("pageerror", (e) => pageErrors.push(e.message));
-    await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html`);
+    await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html?prep=2`);
     await page.waitForFunction(
       `window.__np3app && window.__np3app.state.step === "start"`,
       { timeout: 120000, polling: 200 });
@@ -140,7 +140,7 @@ export async function runLevel8({ browser, port, report, skip }) {
       report(ui.bullets.length === 3 && /dE ≈ 1\.85/.test(ui.bullets[0]) && /Z f/.test(ui.bullets[1])
              && /locally/i.test(ui.bullets[2]),
         `8 Start: the DISCLAIMER stub with the three required bullets (dE 1.85 / Z f / local)`);
-      report(ui.recs === 6, `8 Start: the pair recommendations (draft, ${ui.recs} items)`);
+      report(ui.recs === 7, `8 Start: the pair recommendations (draft, ${ui.recs} items)`);
       report(ui.zones && ui.name === "" && ui.fitDisabled,
         "8 Start: one RAW drop zone (no JPEG zone), an empty name, Fit disabled");
     }
@@ -418,7 +418,7 @@ export async function runLevel8({ browser, port, report, skip }) {
     // the browser's leave prompt (if it shows one) is accepted
     const acceptLeave = (d) => { if (d.type() === "beforeunload") d.accept().catch(() => {}); };
     page.on("dialog", acceptLeave);
-    await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html`);
+    await page.goto(`http://127.0.0.1:${port}/web/picture-control-jpg-fit.html?prep=2`);
     page.off("dialog", acceptLeave);
     await page.waitForFunction(
       `window.__np3app && window.__np3app.state.step === "start"`,
@@ -610,6 +610,18 @@ export async function runLevel8({ browser, port, report, skip }) {
           "8 prepare: replacing the JPEG mid-preparation cancels the task, no stale NCC lands on the card");
       }
       await ev(() => window.__t8.dropOnCard(2, [["/test1/DSC_5584.jpg", "SKL_3024.JPG"]]));
+      // decision #17: the level runs the page with ?prep=2 (whatever the browser reports about
+      // its memory) — the second pair prepares alongside the first, in its own Worker
+      {
+        let both = false;
+        try {
+          await page.waitForFunction(`window.__np3app.state.pairs.filter((p) => p.preparing && p.prepStage
+              && p.prepStage !== "queued").length === 2`, { timeout: 120000, polling: 50 });
+          both = true;
+        } catch { /* reported below */ }
+        const slots = await ev(() => window.__np3app.prepSlots);
+        report(slots === 2 && both, `8 prepare: with ?prep=2 two pairs prepare at once (slots ${slots})`);
+      }
       await page.waitForFunction(
         "window.__np3app.state.pairs.every((p) => p.prepared && !p.preparing)",
         { timeout: 600000, polling: 500 });
@@ -1313,6 +1325,48 @@ export async function runLevel8({ browser, port, report, skip }) {
           report(clean.step === "compare" && clean.same,
             "8 stage 6: Done without edits leaves at once and keeps the profile");
 
+          // decision #17: over a manual profile Revert to fit shows and Refit (the same pairs) is a
+          // way back to the fit; the editor marks the manual edits against the fit, Cancel keeps them
+          const rv0 = await ev(() => {
+            const rv = document.getElementById("cmp-revert"), rf = document.getElementById("cmp-refit");
+            return { shown: !rv.hidden, disabled: rv.disabled, refitOn: !rf.disabled, sub: rf.dataset.sub };
+          });
+          report(rv0.shown && !rv0.disabled && rv0.refitOn && rv0.sub === "Back to fit",
+            `8 decision #17: a manual profile shows Revert to fit, Refit is on ("${rv0.sub}")`);
+          await ev(() => document.getElementById("cmp-manual").click());
+          await page.waitForFunction(`window.__np3app.state.step === "edit"`, { timeout: 60000, polling: 200 });
+          await settle();
+          const me = await ev((json0) => {
+            const A = window.__np3app, S = window.__t8.s6;
+            const v = A.state.versions[0];
+            const r = { marks: S.marks(), baseIsFit: JSON.stringify(A.getBaseline().control) === json0,
+                        ctlIsManual: JSON.stringify(A.state.control) === JSON.stringify(v.control) };
+            document.getElementById("adj-cancel").click();
+            return { ...r, step: A.state.step, id: A.state.versions[0].id, manualId: v.id,
+                     ctlKept: JSON.stringify(A.state.control) === JSON.stringify(v.control) };
+          }, draftJson0);
+          report(me.marks >= 1 && me.baseIsFit && me.ctlIsManual && me.step === "compare" && me.id === me.manualId && me.ctlKept,
+            `8 decision #17: the editor on a manual profile marks against the fit (${me.marks} marks), Cancel keeps the manual profile`);
+          await cmpSettle();
+          const back = await ev((json0) => {
+            const A = window.__np3app;
+            document.getElementById("cmp-revert").click();
+            const box = document.getElementById("confirm-box");
+            const asked = !box.hidden;
+            document.getElementById("confirm-yes").click();
+            const v = A.state.versions[0];
+            const rf = document.getElementById("cmp-refit");
+            return { asked, id: v.id, manual: !!v.manual, n: A.state.versions.length,
+                     fitSame: JSON.stringify(v.control) === json0,
+                     ctlSame: JSON.stringify(A.state.control) === json0,
+                     revertHidden: document.getElementById("cmp-revert").hidden,
+                     refitSub: rf.dataset.sub, modal: window.__t8.modal };
+          }, draftJson0);
+          report(back.asked && back.id === "draft" && !back.manual && back.n === 1 && back.fitSame && back.ctlSame
+                 && back.revertHidden && back.refitSub === "Up to date" && back.modal === 0,
+            `8 decision #17: Revert to fit asks, then the fitted profile is current again (${back.id}, Refit "${back.refitSub}")`);
+          await cmpSettle();
+
           // a replaced profile rebaselines: r1 -> its control, its marks, a fresh history
           await ev(() => window.__np3app.adoptVersion(window.__t8.r1V));
           await cmpSettle();
@@ -1360,12 +1414,12 @@ export async function runLevel8({ browser, port, report, skip }) {
           const txt = (id) => document.getElementById(id)?.textContent ?? null;
           return { renderDE: rep.summary.renderDE, neutralDE: rep.summary.neutralDE,
                    binMean: rep.summary.binMean,
-                   ui: { strength: txt("rep-strength"), renderDE: txt("rep-render-de"),
+                   ui: { strength: document.getElementById("rep-body").dataset.strength, noLine: !document.getElementById("rep-strength"), renderDE: txt("rep-render-de"),
                          neutralDE: txt("rep-neutral-de"), binMean: txt("rep-bin-mean"),
                          deltaHidden: document.getElementById("rep-delta")?.hidden ?? null,
                          deltaDtHidden: document.getElementById("rep-delta-dt")?.hidden ?? null } };
         });
-        report(s.ui.strength === "100%" && s.ui.renderDE === s.renderDE.toFixed(2)
+        report(s.ui.strength === "100" && s.ui.noLine && s.ui.renderDE === s.renderDE.toFixed(2)
                && s.ui.neutralDE === s.neutralDE.toFixed(2) && s.ui.binMean === s.binMean.toFixed(2)
                && s.ui.deltaHidden === true && s.ui.deltaDtHidden === true,
           `8 report: the summary shows the worker DTO numbers (dE ${s.ui.renderDE}),` +
@@ -1373,7 +1427,7 @@ export async function runLevel8({ browser, port, report, skip }) {
         // every summary line explains itself on hover: the term and the value carry one tip
         const tips = await ev(() => [...document.querySelectorAll("#rep-body .rep-kv dt")].map((dt) => ({
           term: dt.textContent, tip: dt.title, same: dt.nextElementSibling?.title === dt.title })));
-        report(tips.length === 5 && tips.every((x) => x.tip.length > 40 && x.same)
+        report(tips.length === 4 && tips.every((x) => x.tip.length > 40 && x.same)
                && /dE2000/.test(tips.find((x) => x.term === "Render vs target")?.tip ?? "")
                && /color bins/.test(tips.find((x) => x.term === "Bin mean")?.tip ?? ""),
           `8 report: hovering a summary line explains it (${tips.map((x) => x.term).join(", ")})`);
@@ -1627,13 +1681,13 @@ export async function runLevel8({ browser, port, report, skip }) {
           const row = document.querySelector('#rep-params .rep-prow[data-path="saturation"]');
           const out = { base: row.children[1].title, result: row.children[1].firstChild.textContent,
                         clip: row.classList.contains("clip"),
-                        summaryStrength: document.getElementById("rep-strength").textContent };
+                        summaryStrength: document.getElementById("rep-body").dataset.strength };
           p.report = orig;
           A.report.refresh();
           return out;
         });
         report(/: 80$/.test(cl.base) && cl.result === "100" && cl.clip
-               && cl.summaryStrength === "150%",
+               && cl.summaryStrength === "150",
           `8 report: at strength 150% a clipped field is highlighted (${cl.base} -> ${cl.result})`);
       }
 
@@ -1775,7 +1829,7 @@ export async function runLevel8({ browser, port, report, skip }) {
         // itself (with the previous report's cell still in place), then for the final report.
         const updating = `(() => { const b = document.getElementById("rep-updating");
                          return !b.hidden && document.getElementById("rep-body").classList.contains("updating")
-                                && document.getElementById("rep-strength").textContent === "100%"; })()`;
+                                && document.getElementById("rep-body").dataset.strength === "100"; })()`;
         try {
           await page.waitForFunction(updating, { timeout: 60000, polling: 50 });
           report(true, "8 report: while a slider drags the previous report stays with an \"updating…\" state");
@@ -1783,7 +1837,7 @@ export async function runLevel8({ browser, port, report, skip }) {
           const mid = await ev(() => ({
             badge: document.getElementById("rep-updating").hidden,
             dimmed: document.getElementById("rep-body").classList.contains("updating"),
-            strengthCell: document.getElementById("rep-strength").textContent,
+            strengthCell: document.getElementById("rep-body").dataset.strength,
           }));
           report(false, `8 report: while a slider drags the previous report stays with an "updating…" state` +
                         ` (badge hidden: ${mid.badge}, dimmed: ${mid.dimmed}, cell: ${mid.strengthCell})`);
@@ -1793,12 +1847,12 @@ export async function runLevel8({ browser, port, report, skip }) {
           { timeout: 120000, polling: 200 });
         const s75 = await ev(() => {
           const rep = window.__np3app.state.pairs[0].report;
-          return { cell: document.getElementById("rep-strength").textContent,
+          return { cell: document.getElementById("rep-body").dataset.strength,
                    badge: document.getElementById("rep-updating").hidden,
                    resultSat: document.querySelector('#rep-params .rep-prow[data-path="saturation"]')?.children[1]?.firstChild?.textContent,
                    wantSat: String(rep.parameters.result.saturation) };
         });
-        report(s75.cell === "75%" && s75.badge === true && s75.resultSat === s75.wantSat,
+        report(s75.cell === "75" && s75.badge === true && s75.resultSat === s75.wantSat,
           "8 report: on release the final report lands (strength 75%, the value at the strength, the badge clears)");
         await ev(() => {
           const inp = document.getElementById("cmp-strength");

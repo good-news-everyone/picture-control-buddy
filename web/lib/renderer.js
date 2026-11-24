@@ -336,7 +336,8 @@ export class Renderer {
     });
     const d = this.models.detail;
     const k = scale || scaleOf(d, w, h);
-    const plan = detailPlan(d, this.control, k);
+    // with the NX base detail (spec/ui.md decision #18): every render, not a profile field
+    const plan = detailPlan(d, this.control, k, { base: true });
     const reuse = plan.count > 0 && this._detailMatch(plan, k, w, h);
     if (reuse) this.stats.detailSkips++;
     const fin = toScreen ? this._ensureFinal(w, h) : null;
@@ -347,7 +348,7 @@ export class Renderer {
       this._detail = null;
     } else {
       out = applyDetailGL(gl, d, null, w, h, this.control, {
-        scale: k, srcTex: profOut, reuseLuma: reuse, reuseBlurs: reuse, dstTex: fin,
+        scale: k, base: true, srcTex: profOut, reuseLuma: reuse, reuseBlurs: reuse, dstTex: fin,
       });
       if (plan.count > 0 && !reuse)
         this._detail = { tag: this.frameTag, key: `${this.lutKey}/${this.lutN}`, k, w, h, sig: plan.sigmas };

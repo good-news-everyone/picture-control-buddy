@@ -30,6 +30,7 @@ export function loadDetail(meta, buf) {
   }
   return {
     tools: meta.tools, NB: meta.NB, SENSOR_LONG: meta.SENSOR_LONG,
+    BASE: meta.BASE ?? "base", BASE_RANGE: meta.BASE_RANGE ?? 1.5,
     GRID: Float64Array.from(meta.GRID), YW: Float64Array.from(meta.YW),
     parts,
   };
@@ -61,16 +62,46 @@ export function partOf(d, tool, scale) {
   return by[best];
 }
 
-// Enabled tools: (part, sigma, table, value) for each sigma of an active tool.
-function entries(d, control, scale) {
-  const out = [];
+/** The NX base detail part at this scale (detail.Detail.base_part): only within BASE_RANGE of a
+ *  measured scale, else null. */
+export function basePartOf(d, scale) {
+  const by = d.parts[d.BASE];
+  if (!by) return null;
+  let best = null, bestD = Infinity;
+  for (const k of Object.keys(by)) {
+    const dd = Math.abs(Math.log(Number(k) / scale));
+    if (dd < bestD) { bestD = dd; best = Number(k); }
+  }
+  return bestD <= Math.log(d.BASE_RANGE) + 1e-12 ? by[best] : null;
+}
+
+// Enabled tools: (sigma, table, value) for each sigma of an active tool, plus the NX base detail
+// (value 1) when `base` (renders only, spec/ui.md decision #18). Contributions with the same
+// sigma are merged into one (table = the value-weighted sum, value 1) — the same dY, since dY is
+// linear in the tables — so the base part, which shares the Sharpening x4 radius, takes no
+// extra blur in the shader (MAXE = 4).
+function entries(d, control, scale, base = false) {
+  const raw = [];
+  const add = (p, v) => {
+    const tab = v > 0 ? p.plus : p.minus;
+    p.sigmas.forEach((s, i) => raw.push({ sigma: s / scale, table: tab.subarray(i * d.NB, (i + 1) * d.NB), value: v }));
+  };
   for (const tool of d.tools) {
     const v = Number(control[tool]);
     if (!v) continue;
     const p = partOf(d, tool, scale);
-    if (p === null) continue;
-    const tab = v > 0 ? p.plus : p.minus;
-    p.sigmas.forEach((s, i) => out.push({ sigma: s / scale, table: tab.subarray(i * d.NB, (i + 1) * d.NB), value: v }));
+    if (p !== null) add(p, v);
+  }
+  const bp = base ? basePartOf(d, scale) : null;
+  if (bp) add(bp, 1);
+  const out = [];
+  for (const e of raw) {
+    const same = out.find((o) => o.sigma === e.sigma);
+    if (!same) { out.push(e); continue; }
+    const t = new Float64Array(d.NB);
+    for (let k = 0; k < d.NB; k++) t[k] = same.value * same.table[k] + e.value * e.table[k];
+    same.table = t;
+    same.value = 1;
   }
   return out;
 }
@@ -78,8 +109,8 @@ function entries(d, control, scale) {
 /** A detail plan for caching: the number of active contributions and their sigmas (≤4). Luma
  *  and blurs depend only on the input frame and sigma — when only tool values/tables change
  *  (the same sigma set), they can be left alone, only the combine pass (renderer.js, plan §5 P2). */
-export function detailPlan(d, control, scale) {
-  const ents = entries(d, control, scale);
+export function detailPlan(d, control, scale, { base = false } = {}) {
+  const ents = entries(d, control, scale, base);
   return { count: ents.length, sigmas: ents.slice(0, 4).map((e) => e.sigma) };
 }
 
@@ -170,9 +201,9 @@ export function gaussCPU(a, w, h, sigma) {
 }
 
 /** A full detail pass on CPU: rgb (h x w x 3, row-major, row 0 at the top) -> Float64Array 0..1. */
-export function applyDetailCPU(d, rgb, w, h, control, { scale = null } = {}) {
+export function applyDetailCPU(d, rgb, w, h, control, { scale = null, base = false } = {}) {
   scale = scale || scaleOf(d, w, h);
-  const ents = entries(d, control, scale);
+  const ents = entries(d, control, scale, base);
   const [yr, yg, yb] = d.YW;
   const y = new Float64Array(w * h);
   for (let i = 0, p = 0; i < w * h; i++, p += 3) y[i] = yr * rgb[p] + yg * rgb[p + 1] + yb * rgb[p + 2];
@@ -319,10 +350,10 @@ function ctxOf(gl, d) {
  * in the control — a copy of the input, the passes are not needed anyway.
  */
 export function applyDetailGL(gl, d, rgba, w, h, control, { scale = null, srcTex = null,
-  reuseLuma = false, reuseBlurs = false, dstTex = null } = {}) {
+  reuseLuma = false, reuseBlurs = false, dstTex = null, base = false } = {}) {
   const c = ctxOf(gl, d);
   scale = scale || scaleOf(d, w, h);
-  const ents = entries(d, control, scale);
+  const ents = entries(d, control, scale, base);
   const float = rgba instanceof Float32Array;
 
   // input image: bound after ctxOf — its first initialization rebinds

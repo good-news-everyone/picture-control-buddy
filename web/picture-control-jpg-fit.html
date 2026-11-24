@@ -389,6 +389,7 @@
   /* the actions at the bottom of the side panel */
   #cmp-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   #cmp-actions button { width: 100%; padding: 8px; }
+  #cmp-actions button[hidden] { display: none; }
   #cmp-bar { display: flex; align-items: center; gap: 12px; padding: 8px 14px;
     flex-wrap: wrap; }
   #cmp-modes { width: 260px; margin: 0; }
@@ -468,6 +469,8 @@
       <li data-i18n="The more different colors the better: greys, skin, greenery, sky, saturated warm colors">
         The more different colors the better: greys, skin, greenery, sky, saturated warm colors</li>
       <li data-i18n="More than 6 frames usually does not help the fit">More than 6 frames usually does not help the fit</li>
+      <li data-i18n="For a universal profile, pick different but typical scenes: unusual frames (night, very light portraits) can make it worse on everyday shots">
+        For a universal profile, pick different but typical scenes: unusual frames (night, very light portraits) can make it worse on everyday shots</li>
     </ul>
 
     <h2 data-i18n="Pairs">Pairs</h2>
@@ -527,6 +530,9 @@
       <div id="cmp-status" class="hint" role="status" aria-live="polite"></div>
       <div id="cmp-actions">
         <button type="button" id="cmp-manual" data-i18n="Manual adjustments">Manual adjustments</button>
+        <button type="button" id="cmp-revert" hidden data-i18n="Revert to fit"
+                title="Discards the manual adjustments and returns to the fitted profile"
+                data-i18n-title="Discards the manual adjustments and returns to the fitted profile">Revert to fit</button>
         <button type="button" id="cmp-download" class="primary" data-i18n="Download NP3">Download NP3</button>
         <button type="button" id="cmp-share" data-i18n="Copy link to the profile editor"
                 title="Copies a picture-control-editor.html link that opens this profile"
