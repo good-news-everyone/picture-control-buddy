@@ -15,6 +15,28 @@ same copy's .nksc. In NX Studio all that remains is to select everything and exp
     python3 sweep.py colors-sa # 6 South Africa frames (sky, vest, bright warm colors, skin, water), 103 profiles: blender sets
                                # and colors as in training, strong +-100 of blue, cyan, orange, red, two finished profiles
     python3 sweep.py extract colors_sa   # -> data/sweep5.npz
+    python3 sweep.py zones     # 6 South Africa frames, 113 profiles: zone brightness x low Blending / Balance,
+                               # color + brightness at hard masks, fit-like combos, random recipes in that regime
+    python3 sweep.py extract zones       # -> data/sweep6.npz
+    python3 sweep.py zones2    # 4 South Africa frames, 253 profiles: the Blending x Balance grid for zone
+                               # brightness and zone color, fit-like combos with Balance, random recipes
+    python3 sweep.py extract zones2      # -> data/sweep7.npz
+    python3 sweep.py zones3    # the zones2 frames, 293 profiles: Balance +-35/+-75 for zone brightness, zone color
+                               # at four hues on a Blending x Balance subgrid, two-zone additivity, random recipes
+    python3 sweep.py extract zones3      # -> data/sweep8.npz
+    python3 sweep.py zones4    # the zones2 frames, 401 profiles: extreme Balance at hard masks (brightness, color
+                               # at four hues), two-zone interaction on a hard-mask subgrid, random recipes
+    python3 sweep.py extract zones4      # -> data/sweep9.npz
+    python3 sweep.py zones5    # the zones2 frames, 621 profiles: zone color at eight hues and three chroma
+                               # levels, color + brightness in one zone at extreme Balance, random recipes
+    python3 sweep.py extract zones5      # -> data/sweep10.npz
+    python3 sweep.py zones6    # the zones2 frames, 393 profiles: color in two and three zones at once, color in
+                               # one zone with brightness in another, random recipes with and without the rest
+    python3 sweep.py extract zones6      # -> data/sweep11.npz
+    python3 sweep.py zones7    # the zones2 frames, 537 profiles: zone color on eight hues at Balance +-20/+-50
+    python3 sweep.py extract zones7      # -> data/sweep12.npz
+    python3 sweep.py zones8    # the zones2 frames, 489 profiles: high zone chroma over the Blending x Balance grid
+    python3 sweep.py extract zones8      # -> data/sweep13.npz
     python3 sweep.py chart     # continuous-tone chart for shooting off the screen -> renders/sweep/chart/hue_chart.png
     python3 sweep.py chart-pack DSC_xxxx   # the same profile set on a chart shot -> renders/sweep/chart_colors
 
@@ -64,11 +86,30 @@ PAIR = 40                 # level in pairs: single probes at this level are in d
 SHRINK = 4                # 1512 px export -> 378 px
 DATA = {"full": os.path.join(HERE, "data", "sweep2.npz"), "colors": os.path.join(HERE, "data", "sweep3.npz"),
         "chart_colors": os.path.join(HERE, "data", "sweep_chart.npz"),
-        "tools": os.path.join(HERE, "data", "sweep4.npz"), "colors_sa": os.path.join(HERE, "data", "sweep5.npz")}
+        "tools": os.path.join(HERE, "data", "sweep4.npz"), "colors_sa": os.path.join(HERE, "data", "sweep5.npz"),
+        "zones": os.path.join(HERE, "data", "sweep6.npz"),
+        "zones2": os.path.join(HERE, "data", "sweep7.npz"),
+        "zones3": os.path.join(HERE, "data", "sweep8.npz"),
+        "zones4": os.path.join(HERE, "data", "sweep9.npz"),
+        "zones5": os.path.join(HERE, "data", "sweep10.npz"),
+        "zones6": os.path.join(HERE, "data", "sweep11.npz"),
+        "zones7": os.path.join(HERE, "data", "sweep12.npz"),
+        "zones8": os.path.join(HERE, "data", "sweep13.npz")}
 TONE = ("contrast", "highlights", "shadows", "white", "black")   # incompatible with a curve in NP3
 TOOL_LEVELS = (25, 50, 100)
 TOOLS_RANDOM = 30
 SEED4 = 20261110
+SEED6 = 20261123
+SEED7 = 20261124
+ZONES2_FRAMES = ("DSC_6296", "DSC_6455", "DSC_6975", "DSC_7203")
+GRID_BLENDINGS = (0, 10, 25, 50, 100)
+GRID_BALANCES = (-100, -50, -20, 20, 50, 100)
+SEED8 = 20261125
+SEED9 = 20261126
+SEED10 = 20261127
+SEED11 = 20261128
+SEED12 = 20261129
+SEED13 = 20261130
 COLOR_LEVEL = 40
 GRADE_HUES3 = tuple(range(0, 360, 45))
 GRADE_CHROMA3 = (15, 25, 40)
@@ -462,6 +503,389 @@ def tools() -> list[tuple[str, bytes]]:
     return out
 
 
+def zones() -> list[tuple[str, bytes]]:
+    """Zone brightness with hard or shifted zone masks: the regime the fit runs into.
+
+    The tools pack measured zone brightness only at Blending 50 / Balance 0, and Blending /
+    Balance only with zone color. A check against NX (2026-11-23, renders/sweep/nxcheck) showed
+    the model is off by 2-3 dE when strong zone brightness meets Blending 0-4, while each alone
+    is within 1 dE. Probes: brightness x Blending, brightness x Balance (at 50 and at 5), color +
+    brightness at hard masks, the fitted shadows -100 / midtone +67 / highlights -6 combination
+    at several Blending / Balance values, and random recipes in the regime for validation.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v))
+
+    out = [control("NEUTRAL")]
+    for zone, z in np3.ZONE_TAG.items():
+        for v in (-100, -50, 50, 100):
+            for b in (0, 10, 25, 100):
+                out.append(control(f"ZB{z}{sign(v)}B{b}", grade={zone: (0, 0, v)}, blending=b))
+        for v in (-100, 100):
+            out.append(control(f"ZB{z}{sign(v)}B50", grade={zone: (0, 0, v)}))
+            for bal in (-50, 50):
+                out.append(control(f"ZB{z}{sign(v)}L{sign(bal)}", grade={zone: (0, 0, v)}, balance=bal))
+            for bal in (-20, 20):
+                out.append(control(f"ZB{z}{sign(v)}B5L{sign(bal)}", grade={zone: (0, 0, v)}, blending=5, balance=bal))
+    toned = {"shadows": (225, 40), "midtone": (45, 40), "highlights": (135, 40)}
+    for zone, z in np3.ZONE_TAG.items():
+        for b in (0, 25):
+            for v in (-60, 60):
+                out.append(control(f"ZC{z}{sign(v)}B{b}", grade={zone: (*toned[zone], v)}, blending=b))
+    fitted = {"shadows": (118, 5, -100), "midtone": (41, 5, 67), "highlights": (54, 1, -6)}
+    for b in (0, 4, 10, 25, 50):
+        for bal in (-14, 0):
+            out.append(control(f"ZFITB{b}L{sign(bal) if bal else 0}", grade=fitted, blending=b, balance=bal))
+    rng = random.Random(SEED6)
+    for i in range(12):
+        grade = {zz: (rng.randint(0, 359), rng.randint(0, 30), rng.randint(-100, 100))
+                 for zz in np3.ZONES if rng.random() < .8}
+        blender = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+        out.append(control(f"ZR{i:02d}", grade=grade, blender=blender, blending=rng.randint(0, 40),
+                           balance=max(-100, min(100, round(rng.gauss(0, 20)))),
+                           saturation=max(-100, min(100, round(rng.gauss(0, 20))))))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones2() -> list[tuple[str, bytes]]:
+    """The Blending x Balance grid: the zones pack showed the two do not add up at hard masks.
+
+    Zone brightness +-100 and zone color (chroma 40) on every Blending x Balance cell (Balance 0
+    cells are in the zones pack), fit-like combos with Balance, random recipes over the whole
+    Blending / Balance range for validation.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v))
+
+    out = [control("NEUTRAL")]
+    toned = {"shadows": (225, 40), "midtone": (45, 40), "highlights": (135, 40)}
+    for zone, z in np3.ZONE_TAG.items():
+        for b in GRID_BLENDINGS:
+            for bal in GRID_BALANCES:
+                for v in (100, -100):
+                    out.append(control(f"Q{z}{'P' if v > 0 else 'M'}B{b}L{sign(bal)}", grade={zone: (0, 0, v)},
+                                       blending=b, balance=bal))
+                if abs(bal) in (20, 50) or b == 0:
+                    out.append(control(f"QC{z}B{b}L{sign(bal)}", grade={zone: (*toned[zone], 0)}, blending=b, balance=bal))
+        for b in (0, 10, 25, 100):
+            out.append(control(f"QC{z}B{b}L0", grade={zone: (*toned[zone], 0)}, blending=b))
+    fitted = {"shadows": (118, 5, -100), "midtone": (41, 5, 67), "highlights": (54, 1, -6)}
+    for b in (0, 4, 10):
+        for bal in (-30, -14, 14):
+            out.append(control(f"QFITB{b}L{sign(bal)}", grade=fitted, blending=b, balance=bal))
+    rng = random.Random(SEED7)
+    for i in range(12):
+        grade = {zz: (rng.randint(0, 359), rng.randint(0, 30), rng.randint(-100, 100))
+                 for zz in np3.ZONES if rng.random() < .8}
+        blender = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+        out.append(control(f"QR{i:02d}", grade=grade, blender=blender, blending=rng.randint(0, 100),
+                           balance=rng.randint(-100, 100), saturation=max(-100, min(100, round(rng.gauss(0, 20))))))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones3() -> list[tuple[str, bytes]]:
+    """Densifies the zones2 grid where it was not enough (2026-11-23 cross-validation).
+
+    Zone brightness: Balance +-35 and +-75 on every Blending level (the 50..100 gap is nonlinear).
+    Zone color: four hues (0/90/180/270, chroma 40) on Blending {0, 25, 50, 100} x Balance
+    {-75, 0, 75}, so the color shift can be learned across hues, not for one hue per zone.
+    Two zones at once (additivity) and random recipes over the full range for validation.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v))
+
+    out = [control("NEUTRAL")]
+    for zone, z in np3.ZONE_TAG.items():
+        for b in GRID_BLENDINGS:
+            for bal in (-75, -35, 35, 75):
+                for v in (100, -100):
+                    out.append(control(f"R{z}{'P' if v > 0 else 'M'}B{b}L{sign(bal)}", grade={zone: (0, 0, v)},
+                                       blending=b, balance=bal))
+        for b in (0, 25, 50, 100):
+            for bal in (-75, 0, 75):
+                if b == 50 and bal == 0:
+                    continue
+                for hue in (0, 90, 180, 270):
+                    out.append(control(f"RC{z}{hue}B{b}L{sign(bal) if bal else 0}", grade={zone: (hue, 40, 0)},
+                                       blending=b, balance=bal))
+    pairs_ = (("shadows", "midtone"), ("midtone", "highlights"), ("shadows", "highlights"))
+    for a, c in pairs_:
+        for b, bal in ((0, 0), (0, 50), (25, -50), (100, 75)):
+            for vs in ((100, 100), (100, -100)):
+                tag = f"RP{np3.ZONE_TAG[a]}{np3.ZONE_TAG[c]}{'S' if vs[1] > 0 else 'O'}B{b}L{sign(bal) if bal else 0}"
+                out.append(control(tag, grade={a: (0, 0, vs[0]), c: (0, 0, vs[1])}, blending=b, balance=bal))
+    rng = random.Random(SEED8)
+    for i in range(16):
+        grade = {zz: (rng.randint(0, 359), rng.randint(0, 30), rng.randint(-100, 100))
+                 for zz in np3.ZONES if rng.random() < .8}
+        blender = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+        out.append(control(f"RR{i:02d}", grade=grade, blender=blender, blending=rng.randint(0, 100),
+                           balance=rng.randint(-100, 100), saturation=max(-100, min(100, round(rng.gauss(0, 20))))))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones4() -> list[tuple[str, bytes]]:
+    """The remainder after zones3 (2026-11-23): extreme Balance at hard masks and two-zone interaction.
+
+    Zone brightness +-100 at Balance +-85/+-95 for Blending 0/10/25, plus +-50 at +-85 / Blending 0
+    (linearity where a zone collapses). Zone color at four hues on Blending 0/25 x Balance
+    +-85/+-100. Two zones at once (all sign combinations) on Blending 0/10/25 x Balance
+    -75/-35/0/35/75, with a half-strength check at two cells. Random recipes in the hard-mask,
+    extreme-Balance corner for validation.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v))
+
+    out = [control("NEUTRAL")]
+    for zone, z in np3.ZONE_TAG.items():
+        for b in (0, 10, 25):
+            for bal in (-95, -85, 85, 95):
+                for v in (100, -100):
+                    out.append(control(f"X{z}{'P' if v > 0 else 'M'}B{b}L{sign(bal)}", grade={zone: (0, 0, v)},
+                                       blending=b, balance=bal))
+        for bal in (-85, 85):
+            for v in (50, -50):
+                out.append(control(f"X{z}{'P' if v > 0 else 'M'}50B0L{sign(bal)}", grade={zone: (0, 0, v)},
+                                   blending=0, balance=bal))
+        for b in (0, 25):
+            for bal in (-100, -85, 85, 100):
+                for hue in (0, 90, 180, 270):
+                    out.append(control(f"XC{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, 40, 0)}, blending=b, balance=bal))
+    pairs_ = (("shadows", "midtone"), ("midtone", "highlights"), ("shadows", "highlights"))
+    signs = ((100, 100), (100, -100), (-100, 100), (-100, -100))
+    for a, c in pairs_:
+        za, zc = np3.ZONE_TAG[a], np3.ZONE_TAG[c]
+        for va, vc in signs:
+            st = ("P" if va > 0 else "M") + ("P" if vc > 0 else "M")
+            for b in (0, 10, 25):
+                for bal in (-75, -35, 0, 35, 75):
+                    out.append(control(f"XP{za}{zc}{st}B{b}L{sign(bal) if bal else 0}",
+                                       grade={a: (0, 0, va), c: (0, 0, vc)}, blending=b, balance=bal))
+            for b, bal in ((0, 0), (10, 35)):
+                out.append(control(f"XQ{za}{zc}{st}B{b}L{sign(bal) if bal else 0}",
+                                   grade={a: (0, 0, va // 2), c: (0, 0, vc // 2)}, blending=b, balance=bal))
+    rng = random.Random(SEED9)
+    for i in range(16):
+        grade = {zz: (rng.randint(0, 359), rng.randint(0, 30), rng.randint(-100, 100))
+                 for zz in np3.ZONES if rng.random() < .8}
+        blender = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+        bal = rng.choice((-1, 1)) * rng.randint(60, 100)
+        out.append(control(f"XR{i:02d}", grade=grade, blender=blender, blending=rng.randint(0, 30),
+                           balance=bal, saturation=max(-100, min(100, round(rng.gauss(0, 20))))))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones5() -> list[tuple[str, bytes]]:
+    """The remainder after zones4 (2026-11-23): zone color by hue and chroma, color + brightness in one zone.
+
+    Zone color (chroma 40) at the four in-between hues 45/135/225/315 on Blending 0/10/25/50/100 x
+    Balance -75/0/75 plus Blending 0/25 x Balance +-85/+-100, and the four zones3 hues at Blending 10.
+    Chroma 15 and 80 at four hues on four cells (chroma linearity). Color and brightness +-100 in the
+    same zone at four hues on the hard-mask, extreme-Balance corner and two reference cells. Random
+    recipes over the whole range and in the corner for validation.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v)) if v else "0"
+
+    out = [control("NEUTRAL")]
+    for zone, z in np3.ZONE_TAG.items():
+        cells = [(b, bal) for b in (0, 10, 25, 50, 100) for bal in (-75, 0, 75) if (b, bal) != (50, 0)]
+        cells += [(b, bal) for b in (0, 25) for bal in (-100, -85, 85, 100)]
+        for b, bal in cells:
+            for hue in (45, 135, 225, 315):
+                out.append(control(f"YC{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, 40, 0)}, blending=b, balance=bal))
+        for bal in (-75, 0, 75):
+            for hue in (0, 90, 180, 270):
+                out.append(control(f"YC{z}{hue}B10L{sign(bal)}", grade={zone: (hue, 40, 0)}, blending=10, balance=bal))
+        for ch, c in ((15, "L"), (80, "U")):
+            for b, bal in ((0, 0), (25, -75), (0, 85), (50, 0)):
+                for hue in (0, 90, 180, 270):
+                    out.append(control(f"Y{c}{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, ch, 0)},
+                                       blending=b, balance=bal))
+        for v in (100, -100):
+            for b, bal in ((0, -100), (0, -85), (0, 85), (0, 100), (10, -95), (10, 95), (0, 0), (25, 0)):
+                for hue in (0, 90, 180, 270):
+                    out.append(control(f"YB{z}{hue}{'P' if v > 0 else 'M'}B{b}L{sign(bal)}",
+                                       grade={zone: (hue, 40, v)}, blending=b, balance=bal))
+    rng = random.Random(SEED10)
+    for i in range(32):
+        corner = i >= 16
+        grade = {zz: (rng.randint(0, 359), rng.randint(0, 60), rng.randint(-100, 100))
+                 for zz in np3.ZONES if rng.random() < .8}
+        blender = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+        b = rng.randint(0, 15) if corner else rng.randint(0, 100)
+        bal = rng.choice((-1, 1)) * rng.randint(80, 100) if corner else rng.randint(-100, 100)
+        out.append(control(f"YR{i:02d}", grade=grade, blender=blender, blending=b, balance=bal,
+                           saturation=max(-100, min(100, round(rng.gauss(0, 20))))))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+ZONE6_COMBOS = {"a": (45, 45), "b": (225, 225), "c": (0, 180), "d": (90, 270)}     # hue pairs of zones6
+ZONE6_TRIPLES = {"a": (45, 45, 45), "b": (225, 45, 135), "c": (0, 120, 240), "d": (180, 0, 180)}
+
+
+def zones6() -> list[tuple[str, bytes]]:
+    """Several zones at once (2026-11-23): the remainder after zones5 grows with the total chroma.
+
+    Color (chroma 40) in two zones at once, four hue pairs (same hue twice, opposite, crossed) on
+    Blending 0/10/25/50/100 x Balance -75/0/75; all three zones on eight cells; chroma 20 and 60 in
+    pairs on three cells; color in one zone with brightness +-100 in another on four cells. Random
+    recipes: half with zone grading only (all three zones, chroma up to 60), half with blender and
+    Saturation as well.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v)) if v else "0"
+
+    pairs_ = (("shadows", "midtone"), ("midtone", "highlights"), ("shadows", "highlights"))
+    T = np3.ZONE_TAG
+    out = [control("NEUTRAL")]
+    cells = [(b, bal) for b in (0, 10, 25, 50, 100) for bal in (-75, 0, 75)]
+    for a, c in pairs_:
+        for code, (ha, hc) in ZONE6_COMBOS.items():
+            for b, bal in cells:
+                out.append(control(f"WC{T[a]}{T[c]}{code}B{b}L{sign(bal)}", grade={a: (ha, 40, 0), c: (hc, 40, 0)},
+                                   blending=b, balance=bal))
+    for a, c in pairs_:
+        for code in ("a", "c"):
+            ha, hc = ZONE6_COMBOS[code]
+            for ch in (20, 60):
+                for b, bal in ((0, 0), (50, 0), (25, 75)):
+                    out.append(control(f"WK{T[a]}{T[c]}{code}{ch}B{b}L{sign(bal)}",
+                                       grade={a: (ha, ch, 0), c: (hc, ch, 0)}, blending=b, balance=bal))
+    for code, hues in ZONE6_TRIPLES.items():
+        for b, bal in ((0, 0), (10, 0), (25, 0), (50, 0), (100, 0), (0, -75), (0, 75), (25, -75)):
+            out.append(control(f"WT{code}B{b}L{sign(bal)}", grade={z: (h, 40, 0) for z, h in zip(np3.ZONES, hues)},
+                               blending=b, balance=bal))
+    for zc in np3.ZONES:
+        for zb in np3.ZONES:
+            if zb == zc:
+                continue
+            for v in (100, -100):
+                for code, h in (("a", 45), ("b", 225)):
+                    for b, bal in ((0, 0), (50, 0), (25, -75), (10, 95)):
+                        out.append(control(f"WX{T[zc]}{T[zb]}{'P' if v > 0 else 'M'}{code}B{b}L{sign(bal)}",
+                                           grade={zc: (h, 40, 0), zb: (0, 0, v)}, blending=b, balance=bal))
+    rng = random.Random(SEED11)
+    for i in range(48):
+        grade = {z: (rng.randint(0, 359), rng.randint(10, 60), rng.randint(-100, 100) if rng.random() < .7 else 0)
+                 for z in np3.ZONES}
+        kw = dict(grade=grade, blending=rng.randint(0, 100), balance=rng.randint(-100, 100))
+        if i >= 24:
+            kw["blender"] = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+            kw["saturation"] = max(-100, min(100, round(rng.gauss(0, 20))))
+        out.append(control(f"WR{i:02d}", **kw))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones7() -> list[tuple[str, bytes]]:
+    """Zone color between the measured Balance columns (2026-11-23): zones6 showed that NX adds the zones
+    up, and that the model's error on recipes comes from color at Balance +-20/+-50, which had only one
+    hue per zone (zones2) and was interpolated between -75, 0 and 75 (1.1-1.9 dE against 0.8-0.9).
+
+    Zone color (chroma 40) at all eight GRADE hues on Blending 0/10/25/50/100 x Balance -50/-20/20/50;
+    two zones at once at Balance +-50 (validation of the sum); random recipes with Balance within
+    +-65, half with zone grading only.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v)) if v else "0"
+
+    T = np3.ZONE_TAG
+    out = [control("NEUTRAL")]
+    for zone, z in T.items():
+        for b in (0, 10, 25, 50, 100):
+            for bal in (-50, -20, 20, 50):
+                for hue in range(0, 360, 45):
+                    out.append(control(f"VC{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, 40, 0)}, blending=b, balance=bal))
+    for a, c in (("shadows", "midtone"), ("midtone", "highlights"), ("shadows", "highlights")):
+        for code in ("a", "c"):
+            ha, hc = ZONE6_COMBOS[code]
+            for b in (0, 25):
+                for bal in (-50, 50):
+                    out.append(control(f"VP{T[a]}{T[c]}{code}B{b}L{sign(bal)}", grade={a: (ha, 40, 0), c: (hc, 40, 0)},
+                                       blending=b, balance=bal))
+    rng = random.Random(SEED12)
+    for i in range(32):
+        grade = {z: (rng.randint(0, 359), rng.randint(10, 60), rng.randint(-100, 100) if rng.random() < .7 else 0)
+                 for z in np3.ZONES}
+        kw = dict(grade=grade, blending=rng.randint(0, 100), balance=rng.choice((-1, 1)) * rng.randint(10, 65))
+        if i >= 16:
+            kw["blender"] = {c: tuple(max(-60, min(60, round(rng.gauss(0, 15)))) for _ in range(3)) for c in np3.COLORS}
+            kw["saturation"] = max(-100, min(100, round(rng.gauss(0, 20))))
+        out.append(control(f"VR{i:02d}", **kw))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
+def zones8() -> list[tuple[str, bytes]]:
+    """High zone chroma over the grid (2026-11-23): after zones7 the error of recipes grows with chroma, and
+    the chroma term (zones5, four cells) explained chroma 80 much better per cell (0.82) than shared (1.20).
+
+    Chroma 80 at four hues on Blending 0/10/25/50/100 x Balance -75/-50/-20/0/20/50/75 (without the
+    zones5 cells); chroma 60 at hues 45/225 on Blending 0/25/50/100 x Balance -50/0/50 (the form of
+    the term and hues between); random recipes with chroma 40-80 in all three zones.
+    """
+    def control(tag: str, **kw) -> tuple[str, bytes]:
+        return tag, np3.serialize(MP.neutral("NPF-" + tag, **kw))
+
+    def sign(v: int) -> str:
+        return ("P" if v > 0 else "M") + str(abs(v)) if v else "0"
+
+    out = [control("NEUTRAL")]
+    for zone, z in np3.ZONE_TAG.items():
+        for b in (0, 10, 25, 50, 100):
+            for bal in (-75, -50, -20, 0, 20, 50, 75):
+                if (b, bal) in ((0, 0), (25, -75), (50, 0)):
+                    continue
+                for hue in (0, 90, 180, 270):
+                    out.append(control(f"UU{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, 80, 0)}, blending=b, balance=bal))
+        for b in (0, 25, 50, 100):
+            for bal in (-50, 0, 50):
+                for hue in (45, 225):
+                    out.append(control(f"US{z}{hue}B{b}L{sign(bal)}", grade={zone: (hue, 60, 0)}, blending=b, balance=bal))
+    rng = random.Random(SEED13)
+    for i in range(32):
+        grade = {z: (rng.randint(0, 359), rng.randint(40, 80), rng.randint(-100, 100) if rng.random() < .5 else 0)
+                 for z in np3.ZONES}
+        out.append(control(f"UR{i:02d}", grade=grade, blending=rng.randint(0, 100), balance=rng.randint(-100, 100)))
+    names = [t for t, _ in out]
+    assert len(names) == len(set(names)) and all(len("NPF-" + t) <= 19 for t in names)
+    return out
+
+
 def detail() -> list[tuple[str, bytes]]:
     """Detail tools singly, in pairs, at default values and on top of the curve and contrast.
 
@@ -506,6 +930,22 @@ def main():
         print(pack("tools", list(FRAMES_V1), tools()))
     elif sys.argv[1:] == ["colors-sa"]:
         print(pack("colors_sa", list(SA_FRAMES), colors_sa()))
+    elif sys.argv[1:] == ["zones"]:
+        print(pack("zones", list(SA_FRAMES), zones()))
+    elif sys.argv[1:] == ["zones2"]:
+        print(pack("zones2", list(ZONES2_FRAMES), zones2()))
+    elif sys.argv[1:] == ["zones3"]:
+        print(pack("zones3", list(ZONES2_FRAMES), zones3()))
+    elif sys.argv[1:] == ["zones4"]:
+        print(pack("zones4", list(ZONES2_FRAMES), zones4()))
+    elif sys.argv[1:] == ["zones5"]:
+        print(pack("zones5", list(ZONES2_FRAMES), zones5()))
+    elif sys.argv[1:] == ["zones6"]:
+        print(pack("zones6", list(ZONES2_FRAMES), zones6()))
+    elif sys.argv[1:] == ["zones7"]:
+        print(pack("zones7", list(ZONES2_FRAMES), zones7()))
+    elif sys.argv[1:] == ["zones8"]:
+        print(pack("zones8", list(ZONES2_FRAMES), zones8()))
     elif sys.argv[1:] == ["detail"]:
         print(pack("detail", list(DETAIL_FRAMES), detail()))
     elif sys.argv[1:] == ["chart"]:

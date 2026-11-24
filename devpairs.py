@@ -111,20 +111,26 @@ def shrink(a: np.ndarray, k: int) -> np.ndarray:
     return a[:h, :w].reshape(h // k, k, w // k, k, -1).mean((1, 3))
 
 
-def matched(a: np.ndarray, t: Image.Image) -> dict:
-    """Brings the frame to the target geometry: scale, distortion, shift, shrinking."""
-    k = LONG / max(t.size)
+def matched(a: np.ndarray, t: Image.Image, long: int = LONG, box: int = BOX,
+            target_filter=Image.LANCZOS) -> dict:
+    """Brings the frame to the target geometry: scale, distortion, shift, shrinking.
+
+    long / box / target_filter: the working size, the final shrink and the target's resampling
+    (the detail fit, detailfit.aligned, works at 1536 px without a shrink and BOX-resizes the target)."""
+    k = long / max(t.size)
     size = (round(t.size[0] * k), round(t.size[1] * k))
-    t_s = t.resize(size, Image.LANCZOS)
-    small = (size[0] // 2, size[1] // 2)
+    t_s = t.resize(size, target_filter)
+    r = long // (LONG // 2)               # the search runs at 384 px whatever the working size
+    assert long % (LONG // 2) == 0
+    small = (size[0] // r, size[1] // r)
     a_s = np.stack([np.asarray(Image.fromarray(np.ascontiguousarray(a[..., c])).resize(size, Image.BOX)) for c in range(3)], -1)
     half = np.stack([np.asarray(Image.fromarray(a_s[..., c]).resize(small, Image.BOX)) for c in range(3)], -1)
     _, s, kr = fit_radial(half, t_s.resize(small, Image.BILINEAR))
     a_s = radial(a_s, s, kr)
     v, s2, dx, dy = pairs.align(to_view(a_s).resize(small, Image.BILINEAR), t_s.resize(small, Image.BILINEAR))
-    a_w = warp_float(a_s, size, s2, dx * 2, dy * 2)
+    a_w = warp_float(a_s, size, s2, dx * r, dy * r)
     y = np.asarray(t_s, dtype=np.float32) / 255
-    return {"x": shrink(a_w, BOX), "y": shrink(y, BOX), "ncc": v, "s": s * s2, "k": kr}
+    return {"x": shrink(a_w, box), "y": shrink(y, box), "ncc": v, "s": s * s2, "k": kr}
 
 
 def build(nef: str, tif: str, devignette: bool = False) -> dict:

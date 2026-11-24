@@ -153,7 +153,6 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
   // whole line (the term and the value)
   // (one literal per tip: the keys of the translation dictionaries, test level 1k)
   const TIPS = {
-    strength: "The profile strength this report is computed at: 100% is the fitted profile, less blends it toward the Nikon neutral, more strengthens it.",
     render: "Mean color difference (dE2000) between the RAW rendered with this profile and the target JPEG, over the aligned, not overexposed pixels. Lower is better: under ~2 is hard to see side by side.",
     neutral: "The same difference for the RAW rendered without a profile (the Nikon neutral look) — the starting point. The profile should bring \"Render vs target\" well below it.",
     bin: "dE2000 averaged over color bins (hue × chroma, greys by lightness) instead of over pixels: every color counts equally however small its area, so a large sky cannot hide errors in rare colors.",
@@ -167,7 +166,6 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
     return [dt, dd];
   };
   const summaryDl = h("dl", { class: "rep-kv" },
-    ...kv("strength", "Strength", "rep-strength"),
     ...kv("render", "Render vs target", "rep-render-de"),
     ...kv("neutral", "Neutral vs target", "rep-neutral-de"),
     ...kv("bin", "Bin mean", "rep-bin-mean"),
@@ -427,7 +425,9 @@ export function createReport({ state, onHighlight = null, onMapOverlay = null })
           binMean: agg.binMean,
           fittedDelta: meanFinite(reports.map((r) => r.summary.fittedDelta).filter((v) => v != null)) }
       : rep.summary;
-    document.getElementById("rep-strength").textContent = s == null || s.strength == null ? "—" : `${s.strength}%`;
+    // the strength is on the Compare slider right above, not a summary line (2026-11-24); the
+    // report body still records the strength it was computed at (the tests' sync signal)
+    body.dataset.strength = s == null || s.strength == null ? "" : String(s.strength);
     document.getElementById("rep-render-de").textContent = f2(s?.renderDE);
     document.getElementById("rep-neutral-de").textContent = f2(s?.neutralDE);
     document.getElementById("rep-bin-mean").textContent = f2(s?.binMean);

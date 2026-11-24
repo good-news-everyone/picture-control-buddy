@@ -32,9 +32,10 @@ import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { computeAdvice, frameOf } from "./coverage-view.js";
 import { viewRemap, applyRemap } from "./pair-prepare.js";
+import { resizeF } from "./resample.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
-         makeRefitVersion } from "./session.js";
+         makeRefitVersion, prepSlots } from "./session.js";
 import { isDirty } from "./baseline.js";
 import { decodeTarget, editGain, editWarningCodes, wbMultipliers, MIN_TARGET } from "./target.js";
 import { scaled } from "./strength.js";
@@ -55,6 +56,8 @@ const core = await createEditorCore({
     selectedPairId: null,
     versions: [],               // fit versions (draft, _r1, …) — created by the fitting stages
     selectedVersionId: null,
+    fitted: null,               // the last fitted (fit/refit, not manual) profile: Revert to fit, the
+                                // editor's marks and resets (decision #17)
     advice: null,               // computeAdvice() over the frame records (coverage-view.js)
     reportAggregate: null,      // the aggregate report over the pairs (spec §3)
     fitting: false,             // a fit runs in the fit Worker (progress in the status line)
@@ -173,16 +176,45 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
     rgb[i] = rgba[j]; rgb[i + 1] = rgba[j + 1]; rgb[i + 2] = rgba[j + 2];
   }
+  return applyRemap({ data: rgb, w: img.w, h: img.h }, compareMap(pair));
+}
+
+// the warpToView geometry as one cached inverse map (built once per preparation; a pair
+// switch or a strength/version change is a ~30 ms gather instead of ~1 s of resampling)
+function compareMap(pair) {
+  const img = pair.raw.image;
   const unrotate = (4 - (DECODER_TURNS[pair.raw.info.orientation] ?? 0)) % 4;
-  // the warpToView geometry as one cached inverse map (built once per preparation; a pair
-  // switch or a strength/version change is a ~30 ms gather instead of ~1 s of resampling)
   let map = compareMaps.get(pair.prepared);
   if (!map || map.fw !== img.w || map.fh !== img.h || map.unrotate !== unrotate) {
     map = viewRemap(pair.prepared, img.w, img.h, unrotate);
     map.unrotate = unrotate;
     compareMaps.set(pair.prepared, map);
   }
-  return applyRemap({ data: rgb, w: img.w, h: img.h }, map);
+  return map;
+}
+
+// The detail fit's input for a pair (lib/detail-fit.js, spec/ui.md decision #19): the gained
+// linear frame on the compare grid (NaN outside the source; the worker develops it and renders
+// the fitted profile with its detail, as the Renderer draws Compare) and the target's Y' box-
+// resized to the same grid. scale — full-frame px per grid pixel (the detail model's radii).
+function detailInput(pair, meta) {
+  const img = gainedFrame(pair);
+  const map = compareMap(pair);
+  const lin = applyRemap({ data: img.rgb, w: img.w, h: img.h }, map).data;
+  for (let i = 0; i < map.sx.length; i++)
+    if (map.sx[i] !== map.sx[i]) lin[3 * i] = lin[3 * i + 1] = lin[3 * i + 2] = NaN;
+  const tg = pair.target;
+  const tr = resizeF(tg.rgb, map.w, map.h, tg.width, tg.height, "box", 3).data;
+  const [yr, yg, yb] = meta.YW;
+  const ty = new Float32Array(map.w * map.h);
+  for (let i = 0, p = 0; i < ty.length; i++, p += 3) ty[i] = yr * tr[p] + yg * tr[p + 1] + yb * tr[p + 2];
+  // frame px per grid px along the middle row (crops and the alignment scale included)
+  const r = Math.floor(map.h / 2) * map.w;
+  let a = -1, b = -1;
+  for (let x = 0; x < map.w; x++) if (map.sx[r + x] === map.sx[r + x]) { if (a < 0) a = x; b = x; }
+  const step = b > a ? Math.hypot(map.sx[r + b] - map.sx[r + a], map.sy[r + b] - map.sy[r + a]) / (b - a) : 1;
+  const scale = meta.SENSOR_LONG / Math.max(img.w, img.h) * Math.max(step, 1e-6);
+  return { name: String(pair.id), lin, ty, w: map.w, h: map.h, scale };
 }
 
 const compareView = createCompare({ state,
@@ -204,6 +236,8 @@ const compareView = createCompare({ state,
   onAddTarget: (pair, file) => addTargetFile(pair, file),
   onRemovePair: (p) => removePair(p),
   onRefit: () => confirmRefit(),
+  onRevert: () => confirmRevert(),
+  refitRestoresFit: () => refitRestoresFit(),
   onCancelRefit: () => cancelFit(t("Refit cancelled — the session is unchanged")),
   // Download NP3 right from Compare: the current profile at the current strength (the same
   // export as the editor's, transfer.exportNow)
@@ -256,33 +290,64 @@ function refreshPairsUI() {
 // goes to the Worker pre-quantized to uint8 (the pipeline's target path is 8-bit; the
 // quantization of decodeTarget's u8/255 floats is exact) — three times less to transfer.
 const DECODER_TURNS = { 3: 2, 6: 3, 8: 1 };       // render.TURNS — the decoder's EXIF rotation
-const pairWorker = new Worker("lib/pair-worker.js", { type: "module" });
+// Decision #17: a pool of up to PREP_SLOTS pair Workers (session.prepSlots: more than one only on
+// a desktop known to have >= 8 GB); every Worker runs one preparation at a time, a request
+// waits for a free one. Each pair keeps its own generation, so parallel results never mix.
+const PREP_SLOTS = prepSlots(navigator, location.search);
+const pairSlots = [];            // [{ w: Worker, busy }] — created on demand, at most PREP_SLOTS
+const slotWaiters = [];          // resolvers of requests waiting for a free Worker
 let pairSeq = 0;
-const pairPending = new Map();
+const pairPending = new Map();   // task id -> { pair, resolve, onProgress, slot }
 
-pairWorker.onmessage = (e) => {
+function onPairMessage(e) {
   const m = e.data;
   const p = pairPending.get(m.id);
   if (!p) return;
   if (m.type === "progress") { p.onProgress?.(m.stage); return; }
   pairPending.delete(m.id);
+  releasePairSlot(p.slot);
   const stale = m.generation && m.generation.pair !== p.pair.prepGen;
   if (m.type === "ready" && !stale) p.resolve({ prepared: m.prepared });
   else if (m.type === "error" && !stale) p.resolve({ error: { code: m.code, detail: m.detail } });
   else p.resolve(null);          // stale: nothing is applied
-};
+}
+function spawnPairSlot() {
+  const s = { w: new Worker("lib/pair-worker.js", { type: "module" }), busy: false };
+  s.w.onmessage = onPairMessage;
+  pairSlots.push(s);
+  return s;
+}
+spawnPairSlot();                 // the first Worker up front, as before; the others on demand (bounded)
+function acquirePairSlot() {
+  let s = pairSlots.find((x) => !x.busy);
+  if (!s && pairSlots.length < PREP_SLOTS) s = spawnPairSlot();
+  if (s) { s.busy = true; return Promise.resolve(s); }
+  return new Promise((resolve) => slotWaiters.push(resolve));
+}
+function releasePairSlot(s) {
+  const next = slotWaiters.shift();
+  if (next) next(s);               // handed over busy
+  else s.busy = false;
+}
 
-function prepareInWorker(pair, payload, transfer, onProgress) {
+async function prepareInWorker(pair, payload, transfer, onProgress) {
+  const slot = await acquirePairSlot();
+  // superseded (a changed file, a removed pair) while it waited for a Worker: nothing to run
+  if (payload.generation.pair !== pair.prepGen || !inSession(pair)) { releasePairSlot(slot); return null; }
   const id = ++pairSeq;
   return new Promise((resolve) => {
-    pairPending.set(id, { pair, resolve, onProgress });
-    pairWorker.postMessage({ type: "prepare", id, ...payload }, transfer);
+    pairPending.set(id, { pair, resolve, onProgress, slot });
+    slot.w.postMessage({ type: "prepare", id, ...payload }, transfer);
   });
 }
 
 function cancelPreparation(pair) {
   for (const [id, p] of pairPending) {
-    if (p.pair === pair) { pairWorker.postMessage({ type: "cancel", id }); p.resolve(null); }
+    if (p.pair !== pair) continue;
+    p.slot.w.postMessage({ type: "cancel", id });   // a cancelled task posts nothing back
+    pairPending.delete(id);
+    releasePairSlot(p.slot);
+    p.resolve(null);
   }
 }
 
@@ -320,6 +385,8 @@ function fitModelBytes() {
     fetch("model/dev_lut.bin").then((r) => r.arrayBuffer()),
     fetch("model/profile.json").then((r) => r.json()),
     fetch("model/profile.bin").then((r) => r.arrayBuffer()),
+    fetch("model/detail.json").then((r) => r.json()),
+    fetch("model/detail.bin").then((r) => r.arrayBuffer()),
   ]);
   return fitModelBytesPromise;
 }
@@ -327,6 +394,16 @@ function fitModelBytes() {
 fitWorker.onmessage = (e) => {
   const m = e.data;
   if (!fitPending || m.id !== fitPending.id) return;    // stale: nothing is applied
+  if (m.type === "progress" && m.stage === "detail") {
+    // the detail fit after the color fit (decision #19): per pair, the bar stays full
+    setStatus(t("Fitting detail: frame {i} of {n}", { i: Math.min(m.done + 1, m.total), n: m.total }));
+    start.setFitProgress(1);
+    if (fitPending.kind === "refit") {
+      const rb = $("cmp-refit");
+      if (rb) rb.dataset.sub = t("Detail {i}/{n}", { i: Math.min(m.done + 1, m.total), n: m.total });
+    }
+    return;
+  }
   if (m.type === "progress") {
     // no LM cost in the UI (UX review, decision #15): the iteration and a progress bar
     setStatus(fitPending.kind === "refit"
@@ -360,6 +437,7 @@ fitWorker.onmessage = (e) => {
     const result = { ...m.result, control: { ...m.result.control, name } };
     state.versions = [draftVersion(result)];
     state.selectedVersionId = "draft";
+    state.fitted = state.versions[0];
     // the editor control follows the new profile at once: Download NP3 on Compare writes
     // state.control, which stayed the neutral NPF-MANUAL until the manual step was opened
     setBaseline(state.versions[0]);
@@ -382,6 +460,7 @@ fitWorker.onmessage = (e) => {
 function adoptVersion(v, { show = true } = {}) {
   state.versions = [v];
   state.selectedVersionId = v.id;
+  if (!v.manual) state.fitted = v;     // a manual version keeps the fit it was made from
   setBaseline(v);
   if (!show) return;
   requestReport();
@@ -411,8 +490,13 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
   refreshPairsUI();
   setStatus(kind === "refit" ? t("Refitting…") : t("Fitting…"));
   try {
-    const [devMeta, devLut, profileMeta, profileBin] = await fitModelBytes();
+    const [devMeta, devLut, profileMeta, profileBin, detailMeta, detailBin] = await fitModelBytes();
     if (!state.fitting) return false;      // superseded while the models were fetched
+    // the detail step is optional: a pair whose input cannot be built is left out of it
+    const detailPairs = [];
+    for (const p of pairs) {
+      try { detailPairs.push(detailInput(p, detailMeta)); } catch (err) { void err; }
+    }
     const payload = {
       type: "fit", id: ++fitSeq, generation: { session: 0, pair: 0, task: ++fitGen },
       seed: 0, iters: 30, baseName,         // decision #3: the zero init, the seed of the draft
@@ -429,6 +513,7 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
         },
         gain: p.prepared.gain.slice(),
       })),
+      detail: { meta: detailMeta, bin: detailBin, pairs: detailPairs },   // the bin is cloned (cached)
     };
     const transfer = [];
     for (const q of payload.pairs) {
@@ -436,6 +521,7 @@ async function startFit(pairs, { kind = "fit", parentId = null, baseName = state
                     q.masks.clipMask.buffer, q.masks.reportMask.buffer,
                     q.masks.validMask.buffer, q.masks.nearWhiteMask.buffer);
     }
+    for (const q of detailPairs) transfer.push(q.lin.buffer, q.ty.buffer);
     if (!state.fitting) return true;       // cancelled while the payload was assembled
     fitPending = { id: payload.id, kind, parentId, baseName };
     if (kind === "fit") start.setFitProgress(0);
@@ -646,7 +732,7 @@ async function prepareOne(pair) {
 // run — the inputs no longer match what the remaining pairs would prepare against.
 async function runFitPreparation() {
   if (state.fitting) return;
-  await autoChain;                            // a running auto-preparation finishes first
+  await autoPrepare();                        // the auto-preparation (parallel) finishes first
   const pairs = state.pairs.filter((p) => isCompletePair(p));
   if (!pairs.length) {
     setStatus(t("Assemble at least one RAW + JPEG pair to fit"));
@@ -675,9 +761,11 @@ async function runFitPreparation() {
 // ---------- auto-preparation, removal, refit (stages 7 and 9) ----------
 // Every complete pair is prepared as soon as both files are decoded — on Start (stage 9: the
 // card shows the alignment before Fit) and on Compare (the coverage needs the frame record
-// before any refit) — with the same checks as Fit: the size pre-check, the alignment, NCC. One serialized chain; a superseded preparation
-// just moves on to the next pair.
-let autoChain = Promise.resolve();
+// before any refit) — with the same checks as Fit: the size pre-check, the alignment, NCC. Up to
+// PREP_SLOTS pairs at once (decision #17); a pair is tried once per generation, so a superseded
+// preparation waits for its re-dropped file instead of looping. autoPrepare() resolves when
+// nothing is left to start and nothing runs; then the frames, the report and the advice follow.
+let autoRunning = 0, autoAny = false, autoIdle = null, autoIdleResolve = null;
 function sizeBlocked(p) {
   // the pre-fit check (match.MIN_TARGET): a small target is a preview inside a DNG
   if (Math.max(p.target.width, p.target.height) < MIN_TARGET) {
@@ -686,23 +774,42 @@ function sizeBlocked(p) {
   }
   return false;
 }
+function autoPump() {
+  while (autoRunning < PREP_SLOTS) {
+    const p = state.pairs.find((q) => isCompletePair(q) && !q.blocked && !q.prepared
+      && !q.preparing && !q.prepError && !q.fitBlocked && q.prepTried !== (q.prepGen ?? 0));
+    if (!p) break;
+    if (sizeBlocked(p)) { refreshPairsUI(); continue; }
+    p.prepTried = p.prepGen ?? 0;
+    if (!autoIdle) autoIdle = new Promise((resolve) => { autoIdleResolve = resolve; });
+    autoRunning++;
+    autoAny = true;
+    prepareOne(p).finally(() => {
+      autoRunning--;
+      autoPump();                               // the freed slot takes the next pair
+      if (!autoRunning) autoSettle();
+    });
+  }
+}
+function autoTail() {
+  const any = autoAny;
+  autoAny = false;
+  if (state.step !== "start") requestFrames();   // the advice records (Compare's coverage)
+  if (any && state.versions.length) requestReport();   // renderDE of the new pairs (exclusion hints)
+  updateAdvice();
+}
+function autoSettle() {
+  autoTail();
+  const resolve = autoIdleResolve;
+  autoIdle = null;
+  autoIdleResolve = null;
+  resolve?.();
+}
 function autoPrepare() {
-  autoChain = autoChain.then(async () => {
-    let any = false;
-    for (;;) {
-      const p = state.pairs.find((q) => isCompletePair(q) && !q.blocked && !q.prepared
-        && !q.preparing && !q.prepError && !q.fitBlocked);
-      if (!p) break;
-      if (sizeBlocked(p)) { refreshPairsUI(); continue; }
-      await prepareOne(p);
-      any = true;
-      if (!p.prepared && !p.prepError) break;     // superseded by a changed file: a re-drop re-queues
-    }
-    if (state.step !== "start") requestFrames();   // the advice records (Compare's coverage)
-    if (any && state.versions.length) requestReport();   // renderDE of the new pairs (exclusion hints)
-    updateAdvice();
-  });
-  return autoChain;
+  autoPump();
+  if (autoRunning) return autoIdle;
+  autoTail();
+  return Promise.resolve();
 }
 
 // "Remove from fit" (decision #7): the pair leaves the session for good — its files, decode,
@@ -902,20 +1009,40 @@ function enterEditor(pair) {
   if (!state.pairs.some((p) => p.id === state.selectedPairId && compareUsable(p))) return;
   if (state.fitting) cancelFit();      // a running refit would replace the profile under the edits
   const v = state.versions.find((x) => x.id === state.selectedVersionId) ?? state.versions[0];
-  setBaseline(v);                      // the edits start from the current profile; undo/marks/resets against it
+  // decision #17: marks and resets compare against the fitted profile (decision #2), so a reset
+  // of the whole profile is a way back to the fit; the edits start from the current profile
+  // (a manual one included) and Cancel returns to it
+  const fitted = state.fitted ?? v;
+  setBaseline(fitted);
+  editEntry = JSON.parse(JSON.stringify(v.control));
+  if (fitted !== v) {
+    Object.assign(state.control, JSON.parse(JSON.stringify(v.control)));
+    panel.refresh();
+    hist.clear();
+    hist.push();
+  }
   state.step = "edit";
   syncStep();
   compareView.refresh();               // the strip (Refit hidden), the render side with the control
 }
 
 let manualSeq = 0;                     // manual version ids: <parent>m<n>, unique in the session
+let editEntry = null;                  // the control the quick editor was entered with (Cancel)
 function exitEditor({ save }) {
   if (state.step !== "edit") return;
   const v = state.versions.find((x) => x.id === state.selectedVersionId) ?? state.versions[0];
-  const dirty = !!state.baseline && isDirty(state.control, state.baseline.control);
+  const entry = editEntry ?? v.control;
+  editEntry = null;
+  const dirty = isDirty(state.control, entry);
+  const backToFit = save && dirty && v.manual && state.fitted && !isDirty(state.control, state.fitted.control);
   state.step = "compare";
   syncStep();
-  if (save && dirty) {
+  if (backToFit) {
+    // every field reset to the fit: the fitted version itself comes back (its caches, no
+    // manual mark) rather than a manual copy equal to it
+    adoptVersion(state.fitted, { show: false });
+    setStatus(t("Back to the fitted profile {name}: the manual adjustments are discarded", { name: state.fitted.name }));
+  } else if (save && dirty) {
     // the edits become the current profile: same pairs and fit metadata, a new id (the render
     // and report caches never mix the two), marked manual — a refit asks before replacing it
     const control = JSON.parse(JSON.stringify(state.control));
@@ -923,10 +1050,9 @@ function exitEditor({ save }) {
                    control, parentId: v.id, kind: "manual", manual: true }, { show: false });
     setStatus(t("Manual adjustments saved to {name}", { name: control.name }));
   } else {
-    Object.assign(state.control, JSON.parse(JSON.stringify(state.baseline?.control ?? v.control)));
-    panel.refresh();
-    hist.clear();
-    hist.push();
+    // Cancel: back to the profile the editor started from; outside the editor the baseline is
+    // the current profile again
+    setBaseline(v);
     if (dirty) setStatus(t("Manual adjustments discarded"));
   }
   compareView.refresh();
@@ -957,8 +1083,41 @@ confirmBox.addEventListener("keydown", (e) => { if (e.key === "Escape") confirmC
 function confirmRefit() {
   const v = state.versions.find((x) => x.id === state.selectedVersionId);
   if (state.fitting || !v?.manual) { runRefit(); return; }
+  if (refitRestoresFit()) {
+    // the refit is deterministic (decision #3): over the fit's own pairs it gives the fitted
+    // profile again, so it is restored at once instead of recomputed (decision #17)
+    askConfirm(t("The pairs have not changed, so a refit gives the fitted profile again — it is restored at once: the manual adjustments of {name} will be lost.",
+                 { name: v.name }), t("Revert to fit"), () => revertToFit());
+    return;
+  }
   askConfirm(t("Refit starts from zero over the pairs: the manual adjustments of {name} will be lost.",
                { name: v.name }), t("Refit anyway"), () => runRefit());
+}
+
+// Over a manual profile with the fit's own pairs a refit equals the fitted profile.
+function refitRestoresFit() {
+  const v = state.versions.find((x) => x.id === state.selectedVersionId);
+  const f = state.fitted;
+  if (!v?.manual || !f) return false;
+  const ids = refitPairIds(state).map(String), have = (f.pairIds ?? []).map(String);
+  return ids.length === have.length && ids.every((id) => have.includes(id));
+}
+
+// "Revert to fit" (decision #17): the manual profile is dropped, the fitted one it was made
+// from is the current profile again — at once, with its renders and report from the caches.
+function revertToFit() {
+  const v = state.versions.find((x) => x.id === state.selectedVersionId);
+  const f = state.fitted;
+  if (!v?.manual || !f || state.step === "edit" || state.fitting) return;
+  adoptVersion(f);
+  setStatus(t("Back to the fitted profile {name}: the manual adjustments are discarded", { name: f.name }));
+  reportView.refresh();
+}
+function confirmRevert() {
+  const v = state.versions.find((x) => x.id === state.selectedVersionId);
+  if (!v?.manual || !state.fitted) return;
+  askConfirm(t("Revert to the fitted profile: the manual adjustments of {name} will be lost.", { name: v.name }),
+             t("Revert to fit"), () => revertToFit());
 }
 
 function showStart() {
@@ -1072,4 +1231,5 @@ window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, 
                     report: reportView, getBaseline, setBaseline,
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne, autoPrepare,
-                    runRefit, removePair, computeAdvice, adoptVersion, confirmRefit, exitEditor };
+                    runRefit, removePair, computeAdvice, adoptVersion, confirmRefit, exitEditor,
+                    revertToFit, confirmRevert, prepSlots: PREP_SLOTS };

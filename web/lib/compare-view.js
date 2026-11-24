@@ -45,7 +45,7 @@ export function inVersion(p, v) {
 
 export function createCompare({ state, renderSide, onStrength,
                                 onManual, onPairSelected, onAddRaws, onAddTarget, onRemovePair,
-                                onRefit, onCancelRefit, onDownload, onShare, setStatus = () => {} }) {
+                                onRefit, onCancelRefit, onRevert, refitRestoresFit = () => false, onDownload, onShare, setStatus = () => {} }) {
   const canvas = $("cc");
   const ctx = canvas.getContext("2d");
   const stripEl = $("cmp-strip");
@@ -385,6 +385,7 @@ export function createCompare({ state, renderSide, onStrength,
   }
   canvas.addEventListener("dblclick", (e) => { e.preventDefault(); resetView(); });
   $("cmp-manual").addEventListener("click", () => onManual());
+  $("cmp-revert")?.addEventListener("click", () => onRevert?.());
   $("cmp-download").addEventListener("click", () => onDownload?.());
   $("cmp-share")?.addEventListener("click", () => onShare?.());
   refitBtn.addEventListener("click", () => (state.fitting ? onCancelRefit() : onRefit()));
@@ -609,7 +610,10 @@ export function createCompare({ state, renderSide, onStrength,
   function renderRefit() {
     const v = version();
     const ids = refitPairIds(state);
-    const same = v && ids.length === (v.pairIds ?? []).length
+    // over a manual profile with the fit's pairs the refit is a way back to the fit
+    // (decision #17): enabled, it restores the fitted profile at once
+    const restores = refitRestoresFit();
+    const same = !restores && v && ids.length === (v.pairIds ?? []).length
       && ids.every((id) => (v.pairIds ?? []).includes(String(id)));
     const preparing = state.pairs.some((p) => p.preparing || p.raw === "pending" || p.target === "pending");
     refitBtn.dataset.pairIds = ids.join(",");
@@ -640,11 +644,13 @@ export function createCompare({ state, renderSide, onStrength,
       const n = added + removed;
       refitBtn.dataset.sub = !ids.length ? t("No pairs")
         : preparing ? t("Preparing…")
+        : restores ? t("Back to fit")
         : same ? t("Up to date")
         : n === 1 ? t("{changes} pair", { changes, n }) : t("{changes} pairs", { changes, n });
     }
     const { m, k } = fitCount(state);
-    let txt = same ? t("The profile is already fitted on these pairs") : "";
+    let txt = same ? t("The profile is already fitted on these pairs")
+      : restores ? t("The pairs have not changed: Refit restores the fitted profile at once, without recomputing") : "";
     if (m || k) {
       const skipped = [];
       if (m) skipped.push(t("{m} without a JPEG", { m }));
@@ -659,7 +665,10 @@ export function createCompare({ state, renderSide, onStrength,
   function syncActions() {
     const editing = state.step === "edit";
     const why = editing ? t("Finish the manual adjustments first (Done or Cancel)") : "";
-    for (const id of ["cmp-manual", "cmp-download", "cmp-share"]) {
+    // Revert to fit (decision #17): only while the current profile has manual adjustments
+    const rv = $("cmp-revert");
+    if (rv) rv.hidden = !(version()?.manual && state.fitted);
+    for (const id of ["cmp-manual", "cmp-revert", "cmp-download", "cmp-share"]) {
       const b = $(id);
       if (!b) continue;
       b.disabled = editing;

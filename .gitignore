@@ -13,6 +13,8 @@ out/
 renders/
 
 # Web
+# one-off diagnostic scripts (web/_diag-9b.mjs, …)
+web/_*.mjs
 web/node_modules/
 web/raw/target/
 data/vignette/

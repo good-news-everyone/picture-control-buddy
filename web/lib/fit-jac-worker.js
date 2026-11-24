@@ -13,7 +13,7 @@ self.onmessage = (e) => {
     if (m.type === "init") {
       const model = loadModel(m.profileMeta, m.profileBin);
       const qs = m.pairs.map((p) => ({
-        n: p.n, tlab: p.tlab, W: p.W, ct: p.ct, cmask: p.cmask,
+        n: p.n, tlab: p.tlab, W: p.W, sm: p.sm, ct: p.ct, cmask: p.cmask,
         px: new Pixels(model, p.rgb),
         cpx: p.crgb ? new Pixels(model, p.crgb) : null,
       }));

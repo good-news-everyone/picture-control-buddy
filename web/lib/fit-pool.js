@@ -42,7 +42,7 @@ export function createFitPool({ spawn, size, profileMeta, profileBin, qs, should
   const terminate = () => { for (const h of helpers) { try { h.w.terminate(); } catch { /* already gone */ } } };
   const unavailable = (detail) => Object.assign(new Error(`fit pool unavailable: ${detail}`), { code: "pool_unavailable" });
   const pairs = qs.map((q) => ({
-    n: q.n, rgb: q.px.rgb, tlab: q.tlab, W: q.W,
+    n: q.n, rgb: q.px.rgb, tlab: q.tlab, W: q.W, sm: q.sm,
     crgb: q.cpx ? q.cpx.rgb : null, ct: q.ct, cmask: q.cmask,
   }));
 

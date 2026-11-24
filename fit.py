@@ -85,9 +85,11 @@ def residual(x, R, tlab, mask, curve_last, anchor):
     return np.r_[r, SMOOTH * 100 * np.diff(k, 2), RIDGE * (x - anchor)[:NB + NG], WHITE * (k[-1] - 1)]
 
 
-def lm(fn, x, iters=60):
-    """Levenberg–Marquardt with a numerical jacobian and bounds on blender/grade."""
+def lm(fn, x, iters=60, info: dict | None = None):
+    """Levenberg–Marquardt with a numerical jacobian and bounds on blender/grade. info, if given,
+    receives run: the number of accepted outer iterations."""
     lam = 1e-2
+    run = 0
     r = fn(x)
     cost = r @ r
     steps = np.r_[np.full(NB + NG, 1.0), np.full(NC, 2e-3), np.full(len(x) - NB - NG - NC, 1.0)]   # tail: other sliders
@@ -111,10 +113,13 @@ def lm(fn, x, iters=60):
             if r2 @ r2 < cost:
                 x, r, cost = y, r2, r2 @ r2
                 lam = max(lam / 3, 1e-6)
+                run += 1
                 break
             lam *= 3
         else:
             break
+    if info is not None:
+        info["run"] = run
     return x, cost
 
 

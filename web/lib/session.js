@@ -174,3 +174,35 @@ export function makeRefitVersion(versions, parent, result) {
     scores: result.scores,
   };
 }
+
+// ---------- pair preparation concurrency (spec/ui.md decision #17) ----------
+// A preparation holds several full-size frames (the linear RAW, its rotated / lens-corrected /
+// cropped copies, the target, the decoded embedded JPEG): hundreds of MB on top of a session
+// that already takes up to ~4 GB. So pairs prepare in parallel only when the device is known
+// to have at least 8 GB: navigator.deviceMemory (Chromium only, rounded down to a power of two
+// and capped at 8) or a desktop Safari (every Mac it runs on has 8 GB or more). Firefox and the
+// mobile browsers report nothing usable: one preparation at a time. `?prep=N` overrides
+// (tests, a user who knows the machine).
+export const PREP_MAX = 2;          // with deviceMemory capped at 8, an 8 GB machine is the worst case
+
+/** A desktop Safari: Safari's own UA (Version/… Safari/…, no Chromium / Firefox / Edge / Opera
+ *  token) on a Macintosh without a touch screen — iPadOS "desktop site" says Macintosh too, but
+ *  reports touch points. */
+export function isDesktopSafari({ userAgent = "", maxTouchPoints = 0 } = {}) {
+  const ua = String(userAgent);
+  if (!/Version\/[\d.]+.*Safari\//.test(ua)) return false;
+  if (/Chrome|Chromium|CriOS|FxiOS|EdgiOS|Edg\/|OPR\/|Firefox|Android|iPhone|iPad|iPod|Mobile\//.test(ua)) return false;
+  return /Macintosh/.test(ua) && (maxTouchPoints ?? 0) <= 1;
+}
+
+/** How many pair preparations run at once: 1, or PREP_MAX on a known >= 8 GB desktop with at
+ *  least 4 cores; `search` — location.search, whose prep=N (1–4) overrides. */
+export function prepSlots(nav = {}, search = "") {
+  const o = /[?&]prep=(\d+)/.exec(search ?? "");
+  if (o) return Math.max(1, Math.min(4, Number(o[1])));
+  const cores = nav.hardwareConcurrency || 1;
+  if (cores < 4) return 1;
+  if (/Android|iPhone|iPad|iPod|Mobile/.test(String(nav.userAgent ?? "")) || (nav.userAgentData?.mobile)) return 1;
+  const known8 = (typeof nav.deviceMemory === "number" && nav.deviceMemory >= 8) || isDesktopSafari(nav);
+  return known8 ? Math.min(PREP_MAX, cores - 2) : 1;
+}

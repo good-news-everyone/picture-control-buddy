@@ -104,6 +104,13 @@ DETAIL_CONTROLS = [
     ("all", 2.0, (2.0, -3.0, 1.5)),
     ("allm", 4.0, (-2.0, 3.0, -1.0)),
 ]
+# with the NX base detail (detail.BASE, spec/ui.md decision #18): renders add it; base2 is outside
+# BASE_RANGE of the measured x4, so there it must change nothing
+DETAIL_BASE = [
+    ("base", 4.0, (0.0, 0.0, 0.0)),                           # the base part alone
+    ("allbase", 4.0, (2.0, 1.0, 0.5)),                        # merged with Sharpening (the same sigma)
+    ("base2", 2.0, (2.0, 0.0, 0.0)),                          # out of range: Sharpening only
+]
 
 # Finished profiles of level 5: project profiles with and without a curve, various blender/grading combos.
 PROFILE_READY = [
@@ -337,16 +344,18 @@ def main():
             RD.to_image(crop).save(os.path.join(OUT, in_png))
             # detail is computed from the same PNG the browser decodes: the input is identical
             x = np.asarray(Image.open(os.path.join(OUT, in_png))).astype(np.float64) / 255
-            for ckey, scale, (sharp, mid, clar) in DETAIL_CONTROLS:
+            for ckey, scale, (sharp, mid, clar), base in ([(*e, False) for e in DETAIL_CONTROLS]
+                                                          + [(*e, True) for e in DETAIL_BASE]):
                 c = np3.Control(name=f"GOLDEN-{ckey}", sharpening=sharp, mid_sharpening=mid, clarity=clar)
-                out = det(x, c, scale=scale)
+                out = det(x, c, scale=scale, base=base)
                 out_png = f"detail/{k}__{ci}__{ckey}.png"
                 RD.to_image(out).save(os.path.join(OUT, out_png))
                 np3_path = f"detail/{k}__{ci}__{ckey}.NP3"
                 open(os.path.join(OUT, np3_path), "wb").write(
                     np3.serialize(np3.deserialize(np3.serialize(c))))
                 man["detail"].append({"key": f"{k}__{ci}__{ckey}", "in": in_png, "out": out_png,
-                                      "np3": np3_path, "w": DETAIL_SIZE, "h": DETAIL_SIZE, "scale": scale})
+                                      "np3": np3_path, "w": DETAIL_SIZE, "h": DETAIL_SIZE, "scale": scale,
+                                      "base": base})
     print(f"detail: {len(man['detail'])} fixtures on {DETAIL_SIZE}^2 cutouts")
 
     # ---------- level 7: the whole render (neutral + profile + detail) ----------

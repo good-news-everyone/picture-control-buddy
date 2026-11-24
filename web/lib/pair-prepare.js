@@ -886,10 +886,10 @@ function alignedAt(o, prepared, OW, OH) {
 // bicubic XMP-crop rotation, orientation, the box resize, radial, affine) — ~1–1.4 s per pair
 // switch in the browser, most of it the crop rotation. For the screen the same geometry is one
 // inverse map: every output pixel is traced back through the chain to a frame coordinate (and
-// the devignette gain at the intermediate position), then one bilinear gather. The map depends
+// the devignette gain at the intermediate position), then one bicubic gather. The map depends
 // only on the preparation, the frame size and the output size, so it is built once per pair and
 // every strength/version change is a gather (~20 ms). Not bit-identical to warpToView (point
-// bilinear instead of the box/bicubic kernels): display only — the report keeps warpToWorking.
+// Catmull-Rom instead of the box/bicubic kernels): display only — the report keeps warpToWorking.
 // Level 1e checks it against warpToView. Outside the source (the align/crop fill) -> sx = NaN.
 export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null } = {}) {
   const tr = prepared.transform;
@@ -995,23 +995,48 @@ export function viewRemap(prepared, fw, fh, unrotate, { maxLong = 2048, k = null
   return { sx, sy, g, w: OW, h: OH, fw, fh, k: kk };
 }
 
-/** One bilinear gather of an RGB frame through a viewRemap map (edges clamped, NaN -> 0). */
+// Catmull-Rom weights of the four taps around a sample at fraction t (a = -0.5).
+function cubicWeights(t, w) {
+  const t2 = t * t, t3 = t2 * t;
+  w[0] = -0.5 * t3 + t2 - 0.5 * t;
+  w[1] = 1.5 * t3 - 2.5 * t2 + 1;
+  w[2] = -1.5 * t3 + 2 * t2 + 0.5 * t;
+  w[3] = 0.5 * t3 - 0.5 * t2;
+}
+
+/** One gather of an RGB frame through a viewRemap map (edges clamped, NaN -> 0): bicubic
+ *  (Catmull-Rom, 4×4 taps; it may overshoot slightly at edges — the canvas clamps). The map is near 1:1, where a bilinear gather at
+ *  random fractional offsets blurs the finest detail (about a quarter of the top band on the
+ *  compare render, spec/ui.md decision #18); Catmull-Rom keeps it. */
 export function applyRemap(frame, map) {
   const { data, w: fw, h: fh } = frame;
   const { sx, sy, g } = map;
   const out = new Float32Array(map.w * map.h * 3);
+  const wx = new Float64Array(4), wy = new Float64Array(4);
+  const xs = new Int32Array(4), ys = new Int32Array(4);
   for (let i = 0, j = 0; i < sx.length; i++, j += 3) {
     const u = sx[i];
     if (u !== u) continue;                         // NaN: outside the source
     const v = sy[i];
-    const x0 = Math.max(0, Math.min(fw - 1, Math.floor(u))), y0 = Math.max(0, Math.min(fh - 1, Math.floor(v)));
-    const x1 = Math.min(fw - 1, x0 + 1), y1 = Math.min(fh - 1, y0 + 1);
-    const fx = Math.max(0, Math.min(1, u - x0)), fy = Math.max(0, Math.min(1, v - y0));
-    const a = (y0 * fw + x0) * 3, b = (y0 * fw + x1) * 3, c = (y1 * fw + x0) * 3, d = (y1 * fw + x1) * 3;
-    const w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy, gg = g[i];
-    out[j] = (data[a] * w00 + data[b] * w01 + data[c] * w10 + data[d] * w11) * gg;
-    out[j + 1] = (data[a + 1] * w00 + data[b + 1] * w01 + data[c + 1] * w10 + data[d + 1] * w11) * gg;
-    out[j + 2] = (data[a + 2] * w00 + data[b + 2] * w01 + data[c + 2] * w10 + data[d + 2] * w11) * gg;
+    const x0 = Math.floor(u), y0 = Math.floor(v);
+    cubicWeights(u - x0, wx);
+    cubicWeights(v - y0, wy);
+    for (let k = 0; k < 4; k++) {
+      xs[k] = Math.max(0, Math.min(fw - 1, x0 - 1 + k));
+      ys[k] = Math.max(0, Math.min(fh - 1, y0 - 1 + k));
+    }
+    let r = 0, gr = 0, b = 0;
+    for (let a = 0; a < 4; a++) {
+      const row = ys[a] * fw, wa = wy[a];
+      for (let c = 0; c < 4; c++) {
+        const q = (row + xs[c]) * 3, ww = wa * wx[c];
+        r += data[q] * ww; gr += data[q + 1] * ww; b += data[q + 2] * ww;
+      }
+    }
+    const gg = g[i];
+    out[j] = r * gg;
+    out[j + 1] = gr * gg;
+    out[j + 2] = b * gg;
   }
   return { data: out, w: map.w, h: map.h };
 }

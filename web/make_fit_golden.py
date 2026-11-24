@@ -436,7 +436,8 @@ class SampledPair(match.Pair):
         self.rec["pick"], self.rec["mult"], self.rec["test"] = pick.copy(), mult.copy(), test.copy()
         self.b, self.t = b[pick], t[pick]
         self.tlab = C.srgb_to_lab(self.t)
-        self.W = C.de2000_weights(self.tlab, match.KC, match.FLAT_L) * np.sqrt(mult)[:, None, None]
+        self.sm = np.sqrt(mult)
+        self.W = C.de2000_weights(self.tlab, match.KC, match.FLAT_L) * self.sm[:, None, None]
         self.px = P.Pixels(model, self.b)
         self.tb, self.tt = b[test], t[test]
         self.ttlab = C.srgb_to_lab(self.tt)
@@ -526,29 +527,33 @@ def run_lm(fn, x0, iters, nx):
 
 
 def run_matcher_fit(m: match.Matcher, qs: list[SampledPair], iters: int = 30):
-    """The real Matcher.fit with F.lm instrumented to record the cost history."""
-    evals = []
+    """The real Matcher.fit with F.lm instrumented to record the cost history of each start; the
+    history returned is the winning start's (match.STARTS order, m.init)."""
+    runs = []
     orig_lm = F.lm
 
-    def lm_rec(fn, x, iters_):
+    def lm_rec(fn, x, iters_, info=None):
+        evals = []
+        runs.append(evals)
+
         def fn_rec(xv):
             r = fn(xv)
             evals.append((None, float(r @ r)))
             return r
-        return orig_lm(fn_rec, x, iters_)
+        return orig_lm(fn_rec, x, iters_, info)
 
     F.lm = lm_rec
     try:
         x = m.fit(qs, iters)
     finally:
         F.lm = orig_lm
-    hist = lm_history(evals, len(x))
+    hist = lm_history(runs[list(match.STARTS).index(m.init)], len(x))
     hist["requested"] = iters
     return x, hist["costs"][-1], hist
 
 
 def fit_fixture(name: str, qs: list[SampledPair], keys: list[str], m: match.Matcher, all_files: list[dict]):
-    print(f"fit {name}: {len(qs)} pair(s), zero init, seed 0", flush=True)
+    print(f"fit {name}: {len(qs)} pair(s), starts {', '.join(match.STARTS)}, seed 0", flush=True)
     x, cost, hist = run_matcher_fit(m, qs)
     ctrl = match.control(x, "NPF-" + name.upper()[-15:])
     p = M.params_of(ctrl)
@@ -559,7 +564,7 @@ def fit_fixture(name: str, qs: list[SampledPair], keys: list[str], m: match.Matc
                 "jacobianSteps": np.r_[np.full(F.NB + F.NG, 1.0), np.full(F.NC, 2e-3),
                                        np.full(len(x) - F.NB - F.NG - F.NC, 1.0)].tolist(),
                 "seed": 0, "control": control_json(ctrl), "scores": scores,
-                "pairs": keys, "init": "zero"})
+                "pairs": keys, "init": m.init, "starts": m.starts})
     save_json(f"fit/{name}.json", doc)
     return x, ctrl
 

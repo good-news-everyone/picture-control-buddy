@@ -531,8 +531,9 @@ export async function runMobileLevels({ browser, port, report, skip }) {
       const o1 = await dlgOpen(pg, "sheet");
       const foc1 = await pg.evaluate(() => document.getElementById("sheet").contains(document.activeElement));
       const txt = await pg.evaluate(() => document.getElementById("sheet").textContent);
+      const srcLabel = await pg.evaluate(() => document.getElementById("source-link").getAttribute("aria-label"));
       report(o1 && foc1 && !txt.includes("Back to Start") && txt.includes("Gestures") && txt.includes("Known limitations")
-          && txt.includes("Photos library") && txt.includes("Source code") && txt.includes("Desktop version")
+          && txt.includes("Photos library") && /Source code/.test(srcLabel) && txt.includes("Desktop version")
           && txt.includes("Approximate calculation"),
         "9b info sheet: opens as a modal dialog, focus moves in; the caption, gestures, limitations (iOS hint), source link and version switch are there");
       await pg.tap("#sheet-close");

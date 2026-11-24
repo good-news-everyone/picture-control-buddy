@@ -162,7 +162,7 @@ async function main() {
   for (const e of man.detail || []) {
     const bytes = await pngBytes("golden/" + e.in);
     const c = deserialize(new Uint8Array(await (await fetch("golden/" + e.np3)).arrayBuffer()));
-    const got = applyDetailGL(gl, det, bytes, e.w, e.h, c, { scale: e.scale });
+    const got = applyDetailGL(gl, det, bytes, e.w, e.h, c, { scale: e.scale, base: !!e.base });
     const ref = await pngBytes("golden/" + e.out);
     let sum = 0, max = 0;
     const n = e.w * e.h * 3;

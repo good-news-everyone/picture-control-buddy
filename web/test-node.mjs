@@ -14,6 +14,7 @@ import { scaled } from "./lib/strength.js";
 import { level1i } from "./test-node-advice.mjs";
 import { level1j } from "./test-node-stage2.mjs";
 import { level1k } from "./test-node-i18n.mjs";
+import { level1l } from "./test-node-detailfit.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));   // web/
 const ROOT = path.dirname(HERE);                             // the project root
@@ -69,6 +70,7 @@ export const LEVELS = {
   "1i": level1i,
   "1j": level1j,
   "1k": level1k,
+  "1l": level1l,
   "9": level9,
   "4": level4,
   "5": level5,
@@ -346,10 +348,10 @@ async function level1e(ctx) {
         + ` k=2 6×6-shrunk mean |Δ| ${mad.toExponential(2)} (tol ${VIEW_TOL}), default k ${def.k.toFixed(3)}`
         + ` -> ${def.w}×${def.h}`);
     }
-    // the fast compare path (viewRemap + applyRemap, what app.js draws): one bilinear gather
+    // the fast compare path (viewRemap + applyRemap, what app.js draws): one bicubic gather
     // through the composed inverse map vs the seven-pass warpToView — same size, the same
     // fill, mean |Δ| ≤ 2 % of the mean level (measured ≤ 1.1 %; bilinear vs the box/bicubic
-    // kernels). A wrong turn, crop offset or shift misplaces the content and fails.
+    // kernels; bicubic since decision #18). A wrong turn, crop offset or shift misplaces the content and fails.
     {
       const frame = { data: new Float32Array(linB.buffer, linB.byteOffset, linB.byteLength / 4),
                       w: inj.inputs.linear.w, h: inj.inputs.linear.h };
@@ -442,12 +444,15 @@ async function level1f(ctx) {
       W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
       px: fake([...neutral50, ...neutral50]),
       cpx: fake([0.995, 0.9, 0.4]), ct: Float64Array.from([0.99, 0.85, 0.5]),
-      cmask: Uint8Array.from([1, 0, 0]),
+      cmask: Uint8Array.from([1, 0, 0]), sm: Float64Array.from([1, 1]),
     };
-    const q2 = { n: 1, tlab: new Float64Array(3), W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1]), px: fake([0, 0, 0]), cpx: null };
+    const q2 = { n: 1, tlab: new Float64Array(3), W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1]), sm: Float64Array.from([1]), px: fake([0, 0, 0]), cpx: null };
     const r = F.residual([q1, q2], x);
+    // the Cauchy loss of each main row (match.robust, c = ROBUST): |d| = sqrt(5) and sqrt(8)
+    const cauchy = (e2) => Math.sqrt(F.ROBUST ** 2 * Math.log1p(e2 / F.ROBUST ** 2) / e2);
+    const s1 = cauchy(5), s2 = cauchy(8);
     const expected = [
-      -1, 0.5, 0, 1, 0, -1,          // main: (pred - tlab) / sqrt(2 * 2)
+      -1 * s1, 0.5 * s1, 0, 1 * s2, 0, -1 * s2,   // main: (pred - tlab) / sqrt(2 * 2), rows rescaled
       0, 2.5, -5,                    // clip: 100 * where(cmask, min(d, 0), d) / sqrt(2 * 2)
       0, 0, 0,                       // second pair: zero residuals / sqrt(1 * 2)
     ];

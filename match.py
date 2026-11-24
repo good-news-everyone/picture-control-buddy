@@ -5,7 +5,7 @@ render.py), then the step-based profile model (profile_model.py, trained on NX e
 the blender, grading and curve.
 
     python3 match.py --analyze name [--adl Off] a.NEF a.jpg [b.NEF b.jpg ...]
-    python3 match.py [name] a.NEF a.jpg [b.DNG b.jpg ...]
+    python3 match.py [--no-detail] [name] a.NEF a.jpg [b.DNG b.jpg ...]
     python3 match.py --refine [new] prev render_a.TIF a.jpg [render_b.TIF b.jpg ...]
     python3 match.py --scene name a.NEF a.jpg [b.NEF b.jpg ...]
     python3 match.py --scene-refine [new] prev render_a.TIF a.jpg [render_b.TIF b.jpg ...]
@@ -32,6 +32,10 @@ its own frames to this file, and --refine advises which frame renders to add to 
 
 Rare colors weigh more in the fit (analyze.rarity); the error report goes by regions.
 
+After the color fit, Clarity and Mid-range sharpening are fitted to the targets' local contrast
+(detailfit.py) on 1536 px renders; --no-detail keeps the defaults. Sharpening keeps its default,
+and a --refine keeps the previous version's detail.
+
 Custom white balance and exposure from the finished shot's XMP are taken out of the fit:
 they are applied to the source, so they do not land in the profile.
 """
@@ -48,6 +52,7 @@ from PIL import Image
 
 import analyze as A
 import color as C
+import detailfit as DF
 import devmodel
 import devpairs
 import fit as F
@@ -81,6 +86,16 @@ RING = 0.02          # neighboring colors of the wheel pull towards each other: 
 # in dE76 a hue shift of blues costs almost nothing, and the sky drifted into magenta.
 KC = 0.5            # chroma weight of dE2000: below 1 is stricter on chroma; at 1 the sky paled
 FLAT_L = True       # lightness without the dE2000 SL: the curve's white knee holds as in dE76
+# Cauchy loss on each pixel's weighted dE (the sample multiplier taken out): pixels the profile cannot
+# reach (local edits of the target, alignment) pull less. c = 6: -0.05..-0.07 dE on held-out frames.
+ROBUST = 6.0
+# Starts of the fit. The first always runs; the others only when it got stuck (fewer than STUCK
+# accepted iterations: with the old zone model LM stopped after 2 on 17 pairs, and zone brightness
+# shadows -50 / midtone +30 took it out: 3.55 -> 3.20 on them, 3.54 -> 3.31 held out). The lower
+# final cost wins. With the zone grid model no run of 18 got stuck (10-30 iterations), and a second
+# start on every fit only traded held-out quality for train cost (0.5% lower cost, +0.07 dE held out).
+STARTS = {"zero": {}, "zones": {"shadows": -50.0, "midtone": 30.0}}
+STUCK = 5
 
 
 def prepared(nef: str, target: str) -> dict:
@@ -143,6 +158,25 @@ def control(x: np.ndarray, name: str) -> np3.Control:
     return c
 
 
+def robust(r: np.ndarray, sm: np.ndarray) -> np.ndarray:
+    """Cauchy rescaling of weighted residual rows r (n, 3) whose sample multipliers are sm (n,):
+    the row norm e = |r| / sm becomes sqrt(c^2 log(1 + e^2 / c^2)), the direction is kept."""
+    if not ROBUST:
+        return r
+    e = np.sqrt((r * r).sum(1)) / sm
+    c = ROBUST
+    s = np.where(e > 1e-9, np.sqrt(c * c * np.log1p(e * e / (c * c))) / np.maximum(e, 1e-9), 1.0)
+    return r * s[:, None]
+
+
+def start(name: str) -> np.ndarray:
+    """The initial vector of a STARTS entry: zero blender/grade, linear curve, default sliders."""
+    x = np.r_[np.zeros(F.NB + F.NG), np.r_[0.0, np.diff(F.XS)], EXTRA_DEFAULT]
+    for z, v in STARTS[name].items():
+        x[NX + 1 + np3.ZONES.index(z)] = v
+    return x
+
+
 def sample(a: np.ndarray, t: np.ndarray, rng, freq: np.ndarray | None = None,
            trust: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Indices for the fit (biased towards highlights), their weight multipliers and indices for scoring (uniform).
@@ -182,7 +216,8 @@ class Pair:
         pick, mult, test = sample(b, t, rng, freq, trust)
         self.b, self.t = b[pick], t[pick]
         self.tlab = C.srgb_to_lab(self.t)
-        self.W = C.de2000_weights(self.tlab, KC, FLAT_L) * np.sqrt(mult)[:, None, None]
+        self.sm = np.sqrt(mult)
+        self.W = C.de2000_weights(self.tlab, KC, FLAT_L) * self.sm[:, None, None]
         self.px = P.Pixels(model, self.b)
         self.tb, self.tt = b[test], t[test]
         self.ttlab = C.srgb_to_lab(self.tt)
@@ -211,6 +246,7 @@ class Points(Pair):
         self.b, self.t = b, t
         self.tlab = C.srgb_to_lab(t)
         self.W = C.de2000_weights(self.tlab, KC, FLAT_L)
+        self.sm = np.ones(len(b))
         self.px = P.Pixels(model, b)
         self.tb, self.tt, self.tpx, self.ttlab = b, t, self.px, self.tlab
         self.cpx = None
@@ -233,11 +269,12 @@ class Matcher:
         return float(C.de2000(C.srgb_to_lab(self.predict(q, p, True)), q.ttlab).mean())
 
     def fit(self, pairs: list[Pair], iters=30) -> np.ndarray:
-        x0 = np.r_[np.zeros(F.NB + F.NG), np.r_[0.0, np.diff(F.XS)], EXTRA_DEFAULT]
-
+        """LM from the first STARTS entry, from the others only if it got stuck (STUCK); the lowest
+        cost wins (its name lands in self.init, the costs of the starts run in self.starts)."""
         def fn(x):
             p = unpack(x)
-            r = [C.weighted(q.W, C.srgb_to_lab(q.px(p)) - q.tlab).ravel() / np.sqrt(len(q.b) * len(pairs)) for q in pairs]
+            r = [robust(C.weighted(q.W, C.srgb_to_lab(q.px(p)) - q.tlab), q.sm).ravel()
+                 / np.sqrt(len(q.b) * len(pairs)) for q in pairs]
             r += [(100 * np.where(q.cmask, np.minimum(q.cpx(p) - q.ct, 0), q.cpx(p) - q.ct)).ravel()
                   / np.sqrt(len(q.b) * len(pairs)) for q in pairs if q.cpx is not None]
             k = knots(x)
@@ -246,11 +283,22 @@ class Matcher:
                          F.RIDGE * x[:F.NB + F.NG], RING * (b - np.roll(b, 1, 0)).ravel(), F.WHITE * (k[-1] - 1),
                          extra_penalty(x)]
 
-        return F.lm(fn, x0, iters)[0]
+        runs = {}
+        for name in STARTS:
+            info = {}
+            runs[name] = F.lm(fn, start(name), iters, info)
+            if info["run"] >= STUCK:
+                break
+        self.starts = {name: float(cost) for name, (_, cost) in runs.items()}
+        self.init = min(runs, key=lambda k: runs[k][1])
+        return runs[self.init][0]
 
 
-def write(name: str, x: np.ndarray) -> tuple[np3.Control, str]:
+def write(name: str, x: np.ndarray, detail: dict | None = None) -> tuple[np3.Control, str]:
+    """detail: {tool: value} for the detail tools (detailfit.py, a previous version's), else the defaults."""
     ctrl = control(x, "NPF-" + name.upper()[-15:])   # end of the name: the frame and the correction number live there
+    for tool, v in (detail or {}).items():
+        setattr(ctrl, tool, v)
     out = os.path.join(HERE, "out", name, "NIKON", "CUSTOMPC")
     os.makedirs(out, exist_ok=True)
     data = np3.serialize(ctrl)
@@ -358,7 +406,7 @@ def refine(name: str, prev: str, files: list[str]):
               for (a, b, f), (_, _, whole) in zip(loaded, samples)]
     refine_coverage(analysis, frames, prev)
     x = r.fit([s[0] for s in samples])
-    ctrl, path = write(name, x)
+    ctrl, path = write(name, x, previous_detail(prev))
     known.update({os.path.abspath(b): os.path.abspath(a) for a, b, f in loaded if f["nef"] == a})
     if known:
         json.dump(known, open(os.path.join(HERE, "out", name, "pairs.json"), "w"), ensure_ascii=False, indent=1)
@@ -374,6 +422,24 @@ def refine(name: str, prev: str, files: list[str]):
     print("blender", ctrl.blender)
     print("grade", ctrl.grade)
     print("file:", path)
+
+
+def previous_detail(prev: str) -> dict | None:
+    """The detail tools of the previous version (a refine changes color and tone only)."""
+    path = os.path.join(HERE, "out", prev, "NIKON", "CUSTOMPC", "PICCON01.NP3")
+    if not os.path.exists(path):
+        return None
+    c = np3.deserialize(open(path, "rb").read())
+    return {t: getattr(c, t) for t in ("sharpening", "mid_sharpening", "clarity")}
+
+
+def fit_detail(x: np.ndarray, files: list[str], gains: list) -> dict:
+    """Clarity and Mid-range for the fitted color (detailfit.py, spec/tools/detail.md)."""
+    import render                       # render.py imports this module
+    ctrl = control(x, "DETAIL")
+    R = render.Renderer()
+    pairs = [DF.aligned(a, b, ctrl, g, R) for a, b, (g, _) in zip(files[::2], files[1::2], gains)]
+    return DF.fit_detail(pairs, {t: getattr(ctrl, t) for t in DF.TOOLS}, R.detail)
 
 
 def refine_coverage(analysis: dict, frames: list[dict], prev: str):
@@ -569,6 +635,7 @@ def chart_points(m: Matcher, d, mask: np.ndarray, weights: np.ndarray | None) ->
         q = Points(name, np.clip(b, 0, 1), t, m.model, 1.0)
         q.sheet, q.ev = int(d["sheet"][sel][0]), float(d["ev"][sel][0])
         q.W = q.W * np.sqrt(w)[:, None, None]
+        q.sm = np.sqrt(w)
         clip = sel & ((d["flags"] & CH.F_TCLIP) > 0) & (d["target"].min(1) >= NEAR_WHITE)
         if clip.any():
             q.cpx = P.Pixels(m.model, np.clip(d["neutral"][clip], 0, 1))
@@ -660,11 +727,13 @@ def main():
         run_scene(sys.argv[2], sys.argv[3:])
         return
     args = sys.argv[1:]
+    detail_on = "--no-detail" not in args          # the detail step needs the full renders (slower)
+    args = [a for a in args if a != "--no-detail"]
     if args and args[0].lower().endswith((".nef", ".dng")):   # the name may be omitted: it is taken from the first shot
         args.insert(0, os.path.splitext(os.path.basename(args[0]))[0].lower())
     name, *files = args or [""]
     if not files or len(files) % 2:
-        sys.exit("usage: python3 match.py [name] a.NEF|a.DNG a.jpg [b.NEF b.jpg ...]")
+        sys.exit("usage: python3 match.py [--no-detail] [name] a.NEF|a.DNG a.jpg [b.NEF b.jpg ...]")
     for f in files:
         if not os.path.exists(f):
             sys.exit(f"no file: {f}")
@@ -687,7 +756,12 @@ def main():
     for tip in A.suggest(frames, list(analysis["frames"].values()), "add to the fit"):
         print("  advice:", tip)
     x = m.fit(pairs)
-    ctrl, path = write(name, x)
+    print("starts:", ", ".join(f"{k} {v:.4f}" for k, v in m.starts.items()), "->", m.init)
+    det = fit_detail(x, files, gains) if detail_on else None
+    if det:
+        print(f"detail: clarity {det['values']['clarity']:+.2f}, mid-range {det['values']['mid_sharpening']:+.2f} "
+              f"({det['pairs']} pairs, band residual {det['cost0']:.4f} -> {det['cost']:.4f})")
+    ctrl, path = write(name, x, det["values"] if det else None)
     A.save(name, analysis)
     json.dump({os.path.abspath(b): os.path.abspath(a) for a, b in zip(files[::2], files[1::2])},
               open(os.path.join(HERE, "out", name, "pairs.json"), "w"), ensure_ascii=False, indent=1)
