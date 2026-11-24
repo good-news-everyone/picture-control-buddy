@@ -37,6 +37,7 @@ WebGL) that applies and exports NP3 profiles.
   `lib/i18n-editor-*.js`); both entries
   build on `lib/editor-core.js`
 - `data/` — committed model weights (`*_model.npz`) and small fixtures
+- `research/` — research scripts kept for reproducibility (inputs in `renders/`, outputs in `_local/`)
 - `spec/` — design docs and test rules
 
 ## Local-only data (gitignored)

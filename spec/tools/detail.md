@@ -53,3 +53,35 @@ base part.
 
 Needs the `tools` pack exports (via `sweep.py extract tools` equivalent — `collect` reads
 `renders/sweep/<name>/tif`) and the full-size `detail` pack (export TIFF at full size in NX).
+
+## Fitting the detail tools (research, 2026-11-24; not in the fit engine yet)
+
+Scripts and how to rerun: `research/detailfit/README.md`. Measured against real NX exports of SA
+frames (fitcheck NEW4 at 1512 px; full-size packs `detailcheck`, `detailcheck2`) and LR targets.
+NX and LR geometry match exactly at x4 (scale 1.000, no shift on 12 frames); at full size the local
+shift is up to ±2 px (lens correction), so full-size work aligns per 768 px crop.
+
+- **Clarity and Mid-range at x4: coherent band regression** (sigma 1.4-45 px at x4) of the target
+  Y' on LUT(NX Y') + sum v·H_tool, the LUT fitted jointly. A LUT fitted first soaks up about half of
+  Clarity (band energy ratios: +2 -> 1.5, +5 -> 3.0). On NX probes the joint form recovers Clarity
+  +2 as 2.0-2.3 and -5 as -4.5..-5.2 with Mid-range near 0.
+- **Sharpening only from full size or x2.** NX's band transfer of Sharpening hardly depends on the
+  frame (band 0-0.5 px: S0 0.63-0.69, S4 1.28-1.33, S6 1.48-1.58 of S2), so a per-band table is
+  enough. Gains use a repeat export as the instrument: target / NX = <T, X2B> / <X, X2B>.
+  NX Sharpening also lifts the 2-4 px band (S6 +7..+9 %).
+- **SA preset** (LR Clarity +2, Sharpening 40): Clarity +0.23, Mid-range +0.43 (10 frames,
+  leave-one-out 0.18-0.28 / 0.36-0.46), Sharpening +1.5..+1.8 at ISO 100: the defaults are within
+  1-5 % amplitude. Higher ISO reads as more Sharpening (ISO 800 +2.5, ISO 3200 +4..+5): LR Luminance
+  NR 0 against NX's noise reduction, not sharpening. Night frames pull Clarity negative (LR's local
+  adaptive operations).
+- **LR variants on 4 frames** (SA + one change): Clarity +50 -> Clarity 1.0 / Mid 1.5;
+  Clarity -40 -> Clarity -2.75 / Mid 0.25; Texture +50 -> Mid 2.1, Clarity ~0; Sharpening 150 ->
+  Sharpening ~+7.7 / +7.1 / +5.0 in the 0-0.5 / 0.5-1 / 1-2 px bands (ISO 100).
+- **Checked with NX renders of the fitted values** (`detailcheck2`), x4 band residual vs NEW4:
+  Clarity -40: -38..-42 % on all frames, full-size band gains 0.65-0.82 -> 0.82-1.01; Clarity +50:
+  -2..-6 %; Texture +50: -1..-6 % (LR's positive Clarity and Texture lift 1-8 px more than the NP3
+  tools can); Sharpening 7: the finest band matches (0.98-0.99), 1-4 px overshoot by 11-15 %.
+- **For the engine:** fit Clarity and Mid-range at the fit scale (x4) by the joint regression after
+  color; Sharpening together with Mid-range on x2 / full-size bands of the target; a robust joint
+  over frames; fine bands only from low-ISO frames. The web render is at most x2, so Sharpening
+  needs a calibration of our x2 render against NX x2 (re-export `detailcheck`).
