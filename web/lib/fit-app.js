@@ -32,6 +32,7 @@ import { createCompare, compareUsable } from "./compare-view.js";
 import { createReport } from "./report-view.js";
 import { computeAdvice, frameOf } from "./coverage-view.js";
 import { viewRemap, applyRemap } from "./pair-prepare.js";
+import { frameGeometry, sensorPerWorking, planRegion, rotateRegion } from "./zoom-plan.js";
 import { resizeF } from "./resample.js";
 import { addRawPair, canAttachTarget, defaultProfileName, isRawReady, isTargetReady,
          isCompletePair, dimsCompatible, draftVersion, refitPairIds,
@@ -72,9 +73,10 @@ const core = await createEditorCore({
     },
     // the quick editor (decision #16): every edit redraws the Compare render side with the
     // manual control; the curve backdrop reads the compare frame
+    // Space on Compare too (before-after.js): the neutral preview of the compare side
     onRender: () => {
-      if (state.step !== "edit" || !compareView) return false;
-      compareView.syncStrength();
+      if (!onHub() || !compareView) return false;
+      if (state.step === "edit") compareView.syncStrength();
       compareView.scheduleRender();
       return true;
     },
@@ -126,8 +128,9 @@ const COMPARE_RENDERS_MAX = 6;
 async function renderCompareSide(pair, version, strength, gen) {
   if (!compareUsable(pair)) return null;
   // the quick editor renders the live manual control: no memo (it changes on every edit)
-  if (state.step === "edit") return renderCompareSideUncached(pair, version, strength, gen);
-  const memoKey = compareRenderKey(pair, version, strength);
+  if (state.step === "edit" && !state.showNeutral) return renderCompareSideUncached(pair, version, strength, gen);
+  // Space held (before-after.js): the Nikon neutral without the profile — one per preparation
+  const memoKey = state.showNeutral ? `${objId(pair.prepared)}|neutral` : compareRenderKey(pair, version, strength);
   const memo = compareRenders.get(memoKey);
   if (memo) {
     compareRenders.delete(memoKey); compareRenders.set(memoKey, memo);   // most recent last
@@ -158,6 +161,9 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
     compareFramePair = pair;
     compareFramePrep = pair.prepared;
   }
+  // the neutral preview (Space held): the developed neutral, no LUT, strength or detail — as the
+  // profile editor's before view (renderer.neutralToScreen)
+  if (state.showNeutral) return remapCompareSide(pair, renderer.neutralRGBA());
   // the quick editor: the manual control, the editor's LUT size (17 while a slider moves,
   // 33 after the release); otherwise the version at the final 33
   const editing = state.step === "edit";
@@ -170,7 +176,11 @@ async function renderCompareSideUncached(pair, version, strength, gen) {
     core.requestLut(ctl, n);              // async: the ready path re-requests the render side
     return null;
   }
-  const rgba = renderer.render({ toScreen: false });
+  return remapCompareSide(pair, renderer.render({ toScreen: false }));
+}
+
+// RGBA readback of the decoded frame -> RGB -> the compare geometry
+function remapCompareSide(pair, rgba) {
   const img = pair.raw.image;
   const rgb = new Float32Array(img.w * img.h * 3);
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
@@ -217,8 +227,195 @@ function detailInput(pair, meta) {
   return { name: String(pair.id), lin, ty, w: map.w, h: map.h, scale };
 }
 
+// ---------- the zoom: ROI rendering (spec/ui-zoom-plan.md Z3, decisions D1-D8) ----------
+// Beyond the fitted view the Compare screen asks for the visible region of the RAW at the sensor's own
+// resolution: the raw worker holds the selected pair's mosaic (hold), develops a rectangle of it (roi:
+// half-sensor "level 2" or the full-sensor PPG demosaic "level 1"), we rotate it into the decoded
+// orientation, multiply the pair's edit gain, render it through the Renderer's separate region textures
+// (renderRegion: neutral -> the profile LUT -> detail at the region's own scale) and gather it onto the
+// working-space grid with a window of the compare geometry (viewRemap { k, window }, applyRemap).
+// Geometry (pure, tested in test-node-zoom-plan.mjs): lib/zoom-plan.js. The decoder jobs go through
+// rawQueue, after any RAW decode in flight (D4); a superseded request skips its turn. When raw.wasm has
+// no zoom exports (zoom_unsupported) or the Renderer has no renderRegion, render() resolves null and the
+// Compare screen keeps the stretched compare render.
+let zoomSupported = null;               // null: unknown, false: raw.wasm lacks hold/roi (rebuild web/raw.wasm)
+let zoomBusy = 0;                       // zoom jobs queued or running (a hold, a roi, a release)
+const zoomState = { holdPair: null, holdRaw: null, held: null, epoch: 0, latestGen: 0, everHeld: false, memo: null };
+const zoomFailed = new WeakSet();       // RAW states whose hold failed (a corrupt file: not retried)
+const zoomGeoms = new WeakMap();        // preparation -> { geom, spw, ... } (the readout factor)
+const tick = () => new Promise((r) => setTimeout(r, 0));    // let the viewer paint its loader between the heavy steps
+
+// The decoded frame's geometry and sensor px per working px (the zoom readout, D1) for a pair.
+function zoomGeometry(pair) {
+  const img = pair?.raw?.image, info = pair?.raw?.info;
+  if (!pair?.prepared || !img || !info) return null;
+  let g = zoomGeoms.get(pair.prepared);
+  if (g && g.w === img.w && g.h === img.h && g.k === info.k && g.orientation === info.orientation) return g;
+  const geom = frameGeometry({ w: img.w, h: img.h, k: info.k ?? 1, orientation: info.orientation });
+  g = { w: img.w, h: img.h, k: info.k, orientation: info.orientation, geom,
+        spw: sensorPerWorking(compareMap(pair), geom, pair.prepared.size.w) };
+  zoomGeoms.set(pair.prepared, g);
+  return g;
+}
+
+// Level 1 (full sensor) needs big textures and memory (D11): MAX_TEXTURE_SIZE >= 4096, no known low-memory
+// device (deviceMemory < 4 GB) — below that the zoom stays at half sensor.
+function zoomLevel1Ok() {
+  const gl = renderer.gl;
+  const tex = gl?.getParameter?.(gl.MAX_TEXTURE_SIZE) ?? 0;
+  const mem = navigator.deviceMemory;
+  return tex >= 4096 && !(typeof mem === "number" && mem < 4);
+}
+const zoomMaxTex = () => { const gl = renderer.gl; return gl?.getParameter?.(gl.MAX_TEXTURE_SIZE) ?? 0; };
+
+// A decoder job after everything queued on rawQueue (RAW decodes, earlier zoom jobs); it never breaks the chain.
+function zoomJob(fn) {
+  zoomBusy++;
+  const run = rawQueue.then(fn);
+  rawQueue = run.then(() => {}, () => {});
+  return run.finally(() => { zoomBusy--; });
+}
+
+// Holds the pair's mosaic in the worker (once per pair; a new hold replaces the previous one there).
+async function zoomEnsureHold(pair, epoch) {
+  if (zoomSupported === false || zoomFailed.has(pair.raw)) return false;
+  if (zoomState.holdPair === pair && zoomState.holdRaw === pair.raw) return true;
+  zoomState.holdPair = null; zoomState.holdRaw = null; zoomState.held = null;
+  if (!pair.rawFile) return false;
+  const bytes = new Uint8Array(await pair.rawFile.arrayBuffer());
+  zoomState.everHeld = true;
+  try {
+    const r = await loader.zoomCall({ type: "hold", bytes }, [bytes.buffer]);
+    if (!Array.isArray(r.info?.held)) {
+      // an older raw-worker.js (e.g. from the browser cache) answers a hold as a develop: no zoom
+      console.warn("zoom: the RAW worker does not support hold (stale raw-worker.js / raw.wasm?)", r.info);
+      zoomSupported = false;
+      return false;
+    }
+    if (epoch !== zoomState.epoch) return false;       // released meanwhile: its release job runs next
+    zoomState.holdPair = pair; zoomState.holdRaw = pair.raw; zoomState.held = r.info.held;
+    return true;
+  } catch (err) {
+    console.warn(`zoom: hold failed (${err.code}: ${err.detail ?? err.message})`);
+    if (err.code === "zoom_unsupported") zoomSupported = false;
+    else zoomFailed.add(pair.raw);
+    return false;
+  }
+}
+
+// Drops the hold, the region textures and the memo: a pair switch, a removal, leaving Compare (D11).
+function zoomRelease() {
+  zoomState.epoch++;
+  zoomState.memo = null;
+  zoomState.holdPair = null; zoomState.holdRaw = null; zoomState.held = null;
+  if (typeof renderer.disposeRegion === "function") renderer.disposeRegion();
+  if (zoomState.everHeld && zoomSupported !== false) {
+    zoomState.everHeld = false;
+    zoomJob(() => loader.zoomCall({ type: "release" })).catch(() => {});
+  }
+}
+// Zoomed back out: the region textures go (hundreds of MB at 5 MP), the hold stays (a re-hold costs a decode).
+function zoomTrim() {
+  zoomState.memo = null;
+  if (typeof renderer.disposeRegion === "function") renderer.disposeRegion();
+}
+
+// The ROI render for the visible working-space rectangle viewRect at `level` (1 | 2; 1 degrades to 2 when
+// the region is too big). Resolves { rgba (Uint8ClampedArray, w*h*4, sRGB-encoded as the compare render),
+// w, h, rect (the working-space rectangle it covers), level, wanted } or null (superseded, not supported,
+// the LUT is still building - the ready path re-requests -, or nothing of the source is visible).
+// gen: the caller's request generation; a newer call makes this one stale.
+async function renderZoomSide(pair, version, strength, viewRect, level, gen) {
+  if (!compareUsable(pair) || zoomSupported === false || typeof renderer.renderRegion !== "function") return null;
+  zoomState.latestGen = Math.max(zoomState.latestGen, gen);
+  const epoch = zoomState.epoch;
+  const stale = () => gen !== zoomState.latestGen || epoch !== zoomState.epoch || !inSession(pair);
+  const editing = state.step === "edit";
+  const neutral = state.showNeutral;       // Space held: the region's neutral (renderRegion neutralOnly)
+  const ctl = scaled(editing ? state.control : version.control, strength);
+  const rectKey = (r) => [r.x, r.y, r.w, r.h].map((v) => v.toFixed(2)).join(",");
+  // a small memo (not in the quick editor: the control changes on every edit)
+  const memoKey = neutral ? `${objId(pair.prepared)}|neutral|${level}|${rectKey(viewRect)}`
+    : editing ? null : `${compareRenderKey(pair, version, strength)}|${level}|${rectKey(viewRect)}`;
+  if (memoKey && zoomState.memo?.key === memoKey) return zoomState.memo.result;
+  return zoomJob(async () => {
+    if (stale()) return null;
+    const g = zoomGeometry(pair);
+    if (!g) return null;
+    // the profile and its LUT, as the compare render (the LUT builds in a Worker; the ready path re-requests)
+    renderer.setProfile(ctl);
+    if (!editing) renderer.lutN = 33;
+    const n = renderer.lutN;
+    if (!neutral && !renderer.hasLut(renderer.lutCacheKey(n)) && !core.lutDead) { core.requestLut(ctl, n); return null; }
+    if (!(await zoomEnsureHold(pair, epoch)) || stale()) return null;
+    await tick();
+    if (stale()) return null;
+    // the main compare frame of this pair on the renderer: Clarity's large blurs come from it (lowRes)
+    const mainOk = () => compareFramePair === pair && compareFramePrep === pair.prepared && !!renderer.frame
+      && renderer.frame.w === pair.raw.image.w && renderer.frame.h === pair.raw.image.h;
+    const lowRes = mainOk();
+    let plan = null;
+    for (const lv of level === 1 ? [1, 2] : [2]) {
+      const r = planRegion({ prepared: pair.prepared, geom: g.geom, level: lv, rect: viewRect, spw: g.spw,
+                             lowRes, hold: zoomState.held, maxTex: zoomMaxTex() });
+      if (r.empty) return null;
+      if (!r.tooLarge) { plan = r; break; }
+    }
+    if (!plan) return null;
+    await tick();
+    if (stale()) return null;
+    let roi;
+    try {
+      roi = await loader.zoomCall({ type: "roi", ...plan.roi, level: plan.level });
+    } catch (err) {
+      console.warn(`zoom: roi failed (${err.code}: ${err.detail ?? err.message})`);
+      if (err.code === "zoom_unsupported") zoomSupported = false;
+      else if (err.code === "no_hold") { zoomState.holdPair = null; zoomState.holdRaw = null; }
+      return null;
+    }
+    if (stale() || roi.w !== plan.roi.w || roi.h !== plan.roi.h) return null;
+    const gain = pair.prepared.gain;
+    const hasGain = gain && !(gain[0] === 1 && gain[1] === 1 && gain[2] === 1);
+    const rgb = rotateRegion(roi.rgb, plan.roi, plan.region, plan.turns, plan.ufw, plan.ufh, hasGain ? gain : null);
+    await tick();
+    if (stale() || (plan.lowRes && !mainOk())) return null;
+    renderer.setProfile(ctl);                // the compare render may have run in between
+    if (!editing) renderer.lutN = 33;
+    const rgba = renderer.renderRegion({ rgb, w: plan.region.w, h: plan.region.h, scale: plan.scale,
+                                         lowRes: plan.lowRes, neutralOnly: neutral });
+    if (!rgba) {                             // the LUT of this size is not uploaded yet
+      const nn = renderer.lutN;
+      if (!renderer.hasLut(renderer.lutCacheKey(nn)) && !core.lutDead) core.requestLut(ctl, nn);
+      return null;
+    }
+    const m = plan.region.w * plan.region.h;
+    const frame = new Float32Array(m * 3);
+    for (let i = 0, j = 0; i < frame.length; i += 3, j += 4) { frame[i] = rgba[j]; frame[i + 1] = rgba[j + 1]; frame[i + 2] = rgba[j + 2]; }
+    await tick();
+    if (stale()) return null;
+    const out = applyRemap({ data: frame, w: plan.region.w, h: plan.region.h }, plan.map);
+    const u8 = new Uint8ClampedArray(out.w * out.h * 4);
+    for (let i = 0, j = 0, q = 0; i < out.w * out.h; i++, j += 3, q += 4) {
+      u8[q] = Math.round(255 * out.data[j]); u8[q + 1] = Math.round(255 * out.data[j + 1]);
+      u8[q + 2] = Math.round(255 * out.data[j + 2]); u8[q + 3] = 255;
+    }
+    const result = { rgba: u8, w: out.w, h: out.h, rect: plan.rect, level: plan.level, wanted: level };
+    if (memoKey) zoomState.memo = { key: memoKey, result };
+    return result;
+  });
+}
+
+// What the Compare view needs of the zoom: the readout factor, the level-1 guard, the ROI render, the releases.
+const zoomApi = {
+  geometry: zoomGeometry, level1Ok: zoomLevel1Ok, render: renderZoomSide,
+  release: zoomRelease, trim: zoomTrim,
+  get supported() { return zoomSupported !== false && typeof renderer.renderRegion === "function"; },
+  get busy() { return zoomBusy > 0; },
+};
+
 const compareView = createCompare({ state,
   renderSide: renderCompareSide,
+  zoom: zoomApi,
   onPairSelected: () => reportView.refresh(),   // the report follows the pair (stage 5B)
   onStrength: (v) => {
     state.strength = v;                   // the session strength — kept across the steps
@@ -828,6 +1025,7 @@ function removePair(p) {
   }
   cancelPreparation(p);
   p.prepGen = (p.prepGen ?? 0) + 1;        // whatever is still in flight for it is stale
+  if (zoomState.holdPair === p) zoomRelease();    // the held mosaic and the region textures go with the pair
   state.pairs.splice(i, 1);
   reportWorkerPairs.delete(String(p.id));
   p.prepared = null;                       // release the big arrays held by the pair
@@ -1159,6 +1357,7 @@ function syncStep() {
   document.body.classList.toggle("step-edit", state.step === "edit");
   document.body.classList.toggle("step-compare", state.step === "compare");
   if (state.step === "start") confirmClose();           // a pending question never outlives the hub
+  if (!onHub()) zoomRelease();                          // leaving Compare: the held mosaic and region textures go
 }
 
 // ---------- files dropped on the page ----------
@@ -1232,4 +1431,4 @@ window.__np3app = { state, panel, renderer, loader, renderCurrent, curveEditor, 
                     enterEditor, showStart, enterCompare, addRawFile, addTargetFile, routeFile,
                     runFitPreparation, prepareOne, autoPrepare,
                     runRefit, removePair, computeAdvice, adoptVersion, confirmRefit, exitEditor,
-                    revertToFit, confirmRevert, prepSlots: PREP_SLOTS };
+                    revertToFit, confirmRevert, prepSlots: PREP_SLOTS, zoom: zoomApi, zoomState };

@@ -530,15 +530,24 @@ export async function runLevel8({ browser, port, report, skip }) {
         });
         report(pan.after.x === pan.before.x + 60 && pan.after.y === pan.before.y + 30,
           `8 pan [${tag}]: dragging pans both halves through the shared view`);
-        await ev(() => {
+        // a double click below 100% zooms to 100% at the cursor; at 100% the next one returns to the fit
+        const dbl = () => ev(() => {
           const c = document.getElementById("cc");
           const r = c.getBoundingClientRect();
           c.dispatchEvent(new MouseEvent("dblclick", { button: 0, clientX: r.left + r.width * 0.6,
             clientY: r.top + r.height * 0.5, bubbles: true, cancelable: true }));
+          return window.__np3app.compare.debug();
         });
+        const d1 = await dbl();
+        const pc1 = d1.zoom?.percent;
+        if (pc1 != null) {
+          report(Math.abs(pc1 - 100) < 0.5,
+            `8 zoom [${tag}]: a double click below 100% zooms to 100% (${pc1.toFixed(1)}%)`);
+          await dbl();
+        }
         const rst = await ev(() => window.__np3app.compare.debug().view);
         report(rst.scale === 1 && rst.x === 0 && rst.y === 0,
-          `8 reset [${tag}]: a double click returns the view to the fit`);
+          `8 reset [${tag}]: a double click at 100% returns the view to the fit`);
       }
     };
 

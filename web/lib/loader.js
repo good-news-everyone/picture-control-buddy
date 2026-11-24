@@ -26,9 +26,20 @@ export function createRawLoader({ worker: workerUrl = "lib/raw-worker.js", onUpd
   let gen = 0;
   let seq = 0;
   const pending = new Map();
+  // Zoom jobs (hold / roi / release, spec/ui-zoom-plan.md D4): their own id space and reply map, no
+  // generation — a develop() never makes them stale and they never make a develop stale.
+  let zseq = 1e9;
+  const zpending = new Map();
 
   worker.onmessage = (e) => {
     const { id, w, h, info, rgb, error } = e.data;
+    const z = zpending.get(id);
+    if (z) {
+      zpending.delete(id);
+      if (error) z.reject(Object.assign(new Error(error.code), { code: error.code, detail: error.detail }));
+      else z.resolve(e.data);
+      return;
+    }
     const p = pending.get(id);
     if (!p) return;
     pending.delete(id);
@@ -51,6 +62,8 @@ export function createRawLoader({ worker: workerUrl = "lib/raw-worker.js", onUpd
       p.resolve(null);
     }
     pending.clear();
+    for (const [, z] of zpending) z.reject(Object.assign(new Error("worker"), { code: "decode_failed", detail: e.message || "worker" }));
+    zpending.clear();
   };
 
   /**
@@ -73,10 +86,24 @@ export function createRawLoader({ worker: workerUrl = "lib/raw-worker.js", onUpd
     });
   }
 
+  /**
+   * One typed zoom message ({ type: "hold" | "roi" | "release", ... }, see raw-worker.js) -> the reply
+   * { id, ...fields }; rejects with an Error carrying `code` / `detail` (zoom_unsupported when raw.wasm
+   * has no zoom exports). The worker answers in arrival order; the caller serializes it after RAW decodes.
+   */
+  function zoomCall(msg, transfer = []) {
+    const id = ++zseq;
+    return new Promise((resolve, reject) => {
+      zpending.set(id, { resolve, reject });
+      worker.postMessage({ ...msg, id }, transfer);
+    });
+  }
+
   return {
     open,
+    zoomCall,
     /** The current generation: an open() result stays valid until the generation grows. */
     get generation() { return gen; },
-    terminate() { worker.terminate(); pending.clear(); },
+    terminate() { worker.terminate(); pending.clear(); zpending.clear(); },
   };
 }

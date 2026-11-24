@@ -128,4 +128,10 @@ export default {
   "or click to choose": "или нажми, чтобы выбрать",
   "unpacking {name}…": "распаковка {name}…",
   "{name}: JPEG targets are used by the fitting wizard (picture-control-jpg-fit.html)": "{name}: JPEG-образцы нужны мастеру подбора (picture-control-jpg-fit.html)",
+  "Fit view": "Вписать",
+  "Fit to the screen (0)": "Вписать в экран (0)",
+  "One RAW pixel per screen pixel (Z)": "Один пиксель RAW на пиксель экрана (Z)",
+  "Zoom: 100% is one RAW pixel per screen pixel": "Масштаб: 100% — один пиксель RAW на пиксель экрана",
+  "Rendering the detailed view…": "Рисуется подробный вид…",
+  "Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit": "Колесо — масштаб, перетаскивание — сдвиг, двойной клик — 100% / вписать, Z — 100%, 0 — вписать",
 };

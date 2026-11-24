@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Region detail check (GPU vs CPU twin)</title>
+<style>
+  body { background: #262626; color: #d6d6d6; font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; margin: 16px; }
+  pre { white-space: pre-wrap; } .ok { color: #9cc79a; } .bad { color: #e07a6a; }
+</style>
+</head>
+<body>
+<!-- Stage Z4 of spec/ui-zoom-plan.md. Serve web/ (cd web && python3 -m http.server 8000) and open
+     http://localhost:8000/region-check.html in Firefox/Chrome. No RAW file needed: the scene is synthetic.
+     It checks renderer.renderRegion (GPU) against the CPU twin applyDetailCPU on the same inputs, with and
+     without lowRes (the main detail cache reused, and recomputed), and that render() / blitFinal() of the
+     main frame are bit-identical after renderRegion/disposeRegion and still hit their caches.
+     The final line is "ALL OK" or "FAILED n"; window.__regionCheck = { ok, lines }. -->
+<h3>Region detail check</h3>
+<pre id="out">running...</pre>
+<script type="module">
+import { loadModel } from "./lib/neutral.js";
+import { loadModel as loadProfile } from "./lib/profile.js";
+import { fetchDetail, applyDetailCPU, lumaOf } from "./lib/detail.js";
+import { Renderer } from "./lib/renderer.js";
+import { newProfile } from "./lib/np3.js";
+
+const out = document.getElementById("out");
+const lines = [];
+let fails = 0;
+const log = (cls, s) => { lines.push(s); out.insertAdjacentHTML("beforeend", `\n<span class="${cls}">${s}</span>`); };
+const check = (ok, msg) => { if (!ok) fails++; log(ok ? "ok" : "bad", `${ok ? "ok  " : "FAIL"} ${msg}`); };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+out.textContent = "";
+
+const TOL = 0.05;     // GPU vs CPU twin, 8-bit levels (both are float; the difference is float32 summation)
+
+async function main() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64; canvas.height = 64;
+  const gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: true });
+  if (!gl) throw new Error("WebGL2 required");
+  const dev = await loadModel();
+  const profMeta = await (await fetch("model/profile.json")).json();
+  const profBin = await (await fetch("model/profile.bin")).arrayBuffer();
+  const det = await fetchDetail();
+
+  // the scene: a synthetic linear camera frame S (SW x SH, 3 channels) at region scale `scale`
+  const SW = 3024, SH = 2016;
+  const S = new Float32Array(SW * SH * 3);
+  {
+    let s = 11;
+    const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    const gw = 96, gh = 64, grid = Array.from({ length: 4 }, () => Float64Array.from({ length: gw * gh }, rnd));
+    for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      let v = 0, amp = 0.5, fq = 1 / 400;
+      for (let o = 0; o < 4; o++, amp /= 2, fq *= 3) {
+        const gx = x * fq, gy = y * fq, ix = Math.floor(gx) % (gw - 1), iy = Math.floor(gy) % (gh - 1);
+        const tx = gx - Math.floor(gx), ty = gy - Math.floor(gy), g = grid[o];
+        v += amp * ((g[iy * gw + ix] * (1 - tx) + g[iy * gw + ix + 1] * tx) * (1 - ty) + (g[(iy + 1) * gw + ix] * (1 - tx) + g[(iy + 1) * gw + ix + 1] * tx) * ty);
+      }
+      v = 0.04 + 0.5 * v + (((x >> 8) + (y >> 8)) & 1 ? 0.05 : 0);
+      for (let c = 0; c < 3; c++) S[(y * SW + x) * 3 + c] = v * (1 - 0.15 * c) + 0.01 * c;
+    }
+  }
+  const boxDown = (src, w, h, f) => {
+    const mw = w / f, mh = h / f, o = new Float32Array(mw * mh * 3);
+    for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) for (let c = 0; c < 3; c++) {
+      let a = 0;
+      for (let dy = 0; dy < f; dy++) for (let dx = 0; dx < f; dx++) a += src[((y * f + dy) * w + x * f + dx) * 3 + c];
+      o[(y * mw + x) * 3 + c] = a / (f * f);
+    }
+    return o;
+  };
+  const crop = (src, sw, x, y, w, h) => {
+    const o = new Float32Array(w * h * 3);
+    for (let r = 0; r < h; r++) o.set(src.subarray(((y + r) * sw + x) * 3, ((y + r) * sw + x + w) * 3), r * w * 3);
+    return o;
+  };
+  const rgbOf = (rgba, n) => { const o = new Float64Array(n * 3); for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) o[i * 3 + c] = rgba[i * 4 + c]; return o; };
+  const maxDiff = (rgba, cpu, n) => {      // GPU RGBA vs CPU rgb, 8-bit levels
+    let m = 0;
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) m = Math.max(m, Math.abs(rgba[i * 4 + c] - cpu[i * 3 + c]) * 255);
+    return m;
+  };
+  const same = (a, b) => {
+    if (a.length !== b.length) return false;
+    const x = new Uint32Array(a.buffer, a.byteOffset, a.length), y = new Uint32Array(b.buffer, b.byteOffset, b.length);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  };
+
+  const base = newProfile();
+  const A = { ...base, clarity: 5, mid_sharpening: 5, sharpening: 5, contrast: 8, saturation: 6 };
+  const Z = { ...A, clarity: 0, mid_sharpening: 0, sharpening: 0 };           // the same LUT, no tools
+  const B = { ...A, clarity: 0, mid_sharpening: 0, sharpening: 4 };           // the same LUT, other sigma set
+  const Cn = { ...A, saturation: 41 };                                        // another LUT, never built
+
+  let mainFrame = null;
+  const raw = { develop: () => mainFrame };
+  const renderer = new Renderer(gl, { dev, profile: loadProfile(profMeta, profBin), detail: det }, raw);
+  renderer.lutN = 17;                  // a cheaper LUT build; the region and the main frame share it
+
+  log("", `regionLowResMinSigma = ${renderer.regionLowResMinSigma} main px`);
+
+  for (const [scale, f] of [[2, 2], [1, 2], [2, 4]]) {
+    const mainScale = scale * f, mw = SW / f, mh = SH / f;
+    log("", `\n--- region scale ${scale}, main frame x${f} box-shrunk (${mw}x${mh}, mainScale ${mainScale})`);
+    mainFrame = { w: mw, h: mh, rgb: boxDown(S, SW, SH, f), info: {} };
+    await renderer.setFrame(new Uint8Array(0), { long: 0 });
+    await tick();
+
+    // the region (with its margin), crop of S
+    const rx = 1000, ry = 700, rw = 800, rh = 600;
+    const rgb = crop(S, SW, rx, ry, rw, rh), n = rw * rh;
+    const affine = [1 / f, 0, rx / f, 0, 1 / f, ry / f];
+
+    renderer.setProfile(Cn);
+    check(renderer.renderRegion({ rgb, w: rw, h: rh, scale }) === null, "renderRegion returns null while the LUT is not uploaded");
+    renderer.setProfile(Z);
+    renderer.render({ scale: 1000 });                                         // builds the LUT (cache), profile frame
+    const mainProf = renderer.render({ scale: 1000 });                        // no tools, base off at this scale: the profile frame
+    const mainLuma = lumaOf(det, rgbOf(mainProf, mw * mh), mw, mh);
+    const regProf = renderer.renderRegion({ rgb, w: rw, h: rh, scale });
+    check(regProf && regProf.length === n * 4, "renderRegion with no tools returns the profile frame (RGBA, w*h*4)");
+    const cpuIn = rgbOf(regProf, n);
+
+    renderer.setProfile(A);
+    const cpuLow = applyDetailCPU(det, Float32Array.from(cpuIn), rw, rh, A, { scale, base: true,
+      lowRes: { affine, mainLuma, mainW: mw, mainH: mh, mainScale } });
+    const cpuFull = applyDetailCPU(det, Float32Array.from(cpuIn), rw, rh, A, { scale, base: true });
+
+    // (a) no lowRes
+    let t = performance.now();
+    const gFull = renderer.renderRegion({ rgb, w: rw, h: rh, scale });
+    log("", `    renderRegion without lowRes: ${(performance.now() - t).toFixed(0)} ms (first call, incl. allocation)`);
+    let d = maxDiff(gFull, cpuFull, n);
+    check(d < TOL, `no lowRes: GPU vs CPU twin max ${d.toFixed(4)} / 255 (tolerance ${TOL})`);
+
+    // (b) lowRes, the main render's detail cache holds the blurs
+    renderer.render({ scale: mainScale });
+    t = performance.now();
+    const gLow = renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine } });     // mainScale = the last render's
+    log("", `    renderRegion with lowRes (main cache reused): ${(performance.now() - t).toFixed(0)} ms`);
+    d = maxDiff(gLow, cpuLow, n);
+    check(d < TOL, `lowRes, main detail cache reused: GPU vs CPU twin max ${d.toFixed(4)} / 255`);
+    check(renderer._regionMain === null || Object.keys(renderer._regionMain.store.tex).filter((k) => /^mb/.test(k)).length === 0,
+      "  (no region-owned main blur was needed)");
+
+    // (c) lowRes, main cache holds other sigmas -> region-owned blurs of the main luma
+    renderer.setProfile(B); renderer.render({ scale: mainScale }); renderer.setProfile(A);
+    t = performance.now();
+    const gLow2 = renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    log("", `    renderRegion with lowRes (main blurs computed): ${(performance.now() - t).toFixed(0)} ms`);
+    d = maxDiff(gLow2, cpuLow, n);
+    check(d < TOL, `lowRes, main blurs computed into region textures: GPU vs CPU twin max ${d.toFixed(4)} / 255`);
+    check(same(gLow, gLow2) || maxDiff(gLow, rgbOf(gLow2, n), n) < 1e-3, "  the two lowRes paths agree");
+
+    // a repeated call (the region-owned main blurs are cached) gives the same pixels
+    const gLow3 = renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    check(same(gLow2, gLow3), "repeated renderRegion call is bit-identical");
+
+    // (d) the main path after region calls: bit-identical output, still hits its caches
+    renderer.setProfile(A);
+    const a1 = renderer.render({ scale: mainScale });
+    const st0 = { ...renderer.stats };
+    renderer.renderRegion({ rgb, w: rw, h: rh, scale });
+    renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    renderer.setProfile(Z);
+    renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    renderer.setProfile(A);
+    const a2 = renderer.render({ scale: mainScale });
+    check(same(a1, a2), "main render() after renderRegion calls is bit-identical");
+    check(renderer.stats.neutrals === st0.neutrals && renderer.stats.develops === st0.develops && renderer.stats.luts === st0.luts,
+      "main neutral cache, develop and LUT caches untouched (stats)");
+    check(renderer.stats.detailSkips === st0.detailSkips + 1, "main detail reuse cache still hit (detailSkips +1)");
+
+    // toScreen / blitFinal
+    canvas.width = mw; canvas.height = mh; gl.viewport(0, 0, mw, mh);
+    renderer.render({ scale: mainScale, toScreen: true });
+    const px = new Uint8Array(mw * mh * 4), px2 = new Uint8Array(mw * mh * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, mw, mh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    check(renderer.hasFinal(), "hasFinal() still true after renderRegion");
+    renderer.blitFinal();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, mw, mh, gl.RGBA, gl.UNSIGNED_BYTE, px2);
+    check(px.every((v, i) => v === px2[i]), "blitFinal() after renderRegion reproduces the screen frame");
+
+    // disposeRegion and reuse
+    renderer.disposeRegion();
+    check(renderer._region === null && renderer._regionMain === null, "disposeRegion releases the region stores");
+    const gAgain = renderer.renderRegion({ rgb, w: rw, h: rh, scale, lowRes: { affine, mainScale } });
+    check(same(gAgain, gLow2), "renderRegion after disposeRegion gives the same pixels");
+    renderer.disposeRegion();
+    check(renderer.render({ scale: mainScale }) !== undefined && same(renderer.render({ scale: mainScale }), a1), "main render after disposeRegion is bit-identical");
+    check(gl.getError() === gl.NO_ERROR, "no GL error");
+    await tick();
+  }
+}
+
+try {
+  await main();
+} catch (e) {
+  fails++;
+  log("bad", "ERROR " + (e && e.stack || e));
+}
+log(fails ? "bad" : "ok", fails ? `FAILED ${fails}` : "ALL OK");
+window.__regionCheck = { ok: fails === 0, lines };
+</script>
+</body>
+</html>

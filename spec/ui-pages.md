@@ -117,6 +117,7 @@ for photographers, not engineers: plain words, few of them.
 |---|---|---|
 | `lib/editor-core.js` (new, extracted from `app.js`) | renderer + LUT worker, loader, panels, curve editor, blender, grading, history, before/after, transfer, `renderCurrent`, `setStatus(text, kind)`, the `NP3_SHELL` options | both entries |
 | `lib/editor-app.js` (new) | the editor pages: one RAW, NP3 import/export/share, neutral reset, the page drop router (RAW / NP3; JPEG → hint) | `picture-control-editor*.html` |
+| `lib/editor-zoom.js` (new) | the desktop editor's 100% zoom: overlay canvas over `#c`, the detailed ROI layer, Fit / 100% overlay, Z / 0 keys ([ui-zoom-plan.md](ui-zoom-plan.md) "Profile editor"); plugs in through the optional `hooks.onDrawn` / `hooks.onFrame` of the core | `picture-control-editor.html` only |
 | `lib/fit-app.js` (new, the rest of today's `app.js`) | the wizard: session, `start.js`, `compare-view.js`, `report-view.js`, `more-view.js`, fit/pair/report workers, versions, baseline, leave warning; step 3.1 mounts the editor core | `picture-control-jpg-fit.html` |
 | `lib/view-route.js` | router (new page names) | editor pages |
 | `css/common.css`, `css/mobile.css` | from M0/M1 of the mobile branch; the wizard and the desktop editor link `common.css` and keep their own layout inline | all but the landing |

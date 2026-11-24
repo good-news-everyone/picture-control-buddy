@@ -123,4 +123,10 @@ export default {
   "or click to choose": "oder zum Auswählen klicken",
   "unpacking {name}…": "{name} wird entpackt …",
   "{name}: JPEG targets are used by the fitting wizard (picture-control-jpg-fit.html)": "{name}: JPEG-Vorlagen werden im Anpassungsassistenten verwendet (picture-control-jpg-fit.html)",
+  "Fit view": "Einpassen",
+  "Fit to the screen (0)": "An den Bildschirm anpassen (0)",
+  "One RAW pixel per screen pixel (Z)": "Ein RAW-Pixel pro Bildschirmpixel (Z)",
+  "Zoom: 100% is one RAW pixel per screen pixel": "Zoom: 100 % entspricht einem RAW-Pixel pro Bildschirmpixel",
+  "Rendering the detailed view…": "Detailansicht wird berechnet …",
+  "Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit": "Mausrad – zoomen, Ziehen – verschieben, Doppelklick – 100 % / einpassen, Z – 100 %, 0 – einpassen",
 };

@@ -683,6 +683,68 @@ export async function runLevel8e({ browser, port, report, skip }) {
       report(race.hist === 1, `8e Ctrl+Z: a RAW change resets the history (${race.hist} snapshots)`);
     }
 
+    // --- 100% zoom of the editor (spec/ui-zoom-plan.md "Profile editor"): the stretched zoom, the keys, the
+    // double click, Space; the detailed layer needs a rebuilt raw.wasm and is not asserted here ---
+    {
+      await settle();
+      const z0 = await ev(() => {
+        const A = window.__np3app, c = document.getElementById("c");
+        return { has: !!A.zoom, d: A.zoom?.debug(), w: c.width, h: c.height, hidden: c.hidden,
+                 tip: !document.getElementById("zoomtip").hidden, zv: !document.getElementById("zv").hidden,
+                 develops: A.renderer.stats.develops };
+      });
+      report(z0.has && z0.d.percent > 0 && z0.d.percent < 100 && z0.d.view.scale === 1 && !z0.hidden && z0.tip && !z0.zv,
+        `8e zoom: fitted view at ${z0.d?.percent?.toFixed(1)}%, the readout overlay is shown, the overlay canvas is not`);
+      const z1 = await ev(async () => {
+        const A = window.__np3app, c = document.getElementById("c"), main = document.getElementById("view");
+        const out = {};
+        // Z outside the image area (not hovered, nothing focused inside it): ignored
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+        out.zIgnored = A.zoom.debug().view.scale === 1;
+        // hovered: Z = 100%
+        main.dispatchEvent(new MouseEvent("mouseenter"));
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+        const d = A.zoom.debug();
+        out.z = { scale: d.view.scale, percent: d.percent, zv: !document.getElementById("zv").hidden,
+                  val: document.getElementById("zoom-val").textContent, w: c.width, h: c.height, hidden: c.hidden };
+        // Z in a text field is ignored, Ctrl+Z and a Space hold still work
+        const inp = document.querySelector('#panel [data-group="name"] input');
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", bubbles: true }));   // back to the fit first
+        out.fitByKey = A.zoom.debug().view.scale === 1;
+        inp.focus();
+        inp.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+        out.zInInput = A.zoom.debug().view.scale === 1;
+        inp.blur();
+        main.dispatchEvent(new MouseEvent("mouseleave"));
+        return out;
+      });
+      report(z1.zIgnored && z1.z.scale > 1 && Math.abs(z1.z.percent - 100) < 1 && z1.z.zv && z1.z.val === "100%"
+             && z1.z.w === z0.w && z1.z.h === z0.h && !z1.z.hidden,
+        `8e zoom: Z (hovered) zooms to 100% (${z1.z.percent?.toFixed(1)}%, readout ${z1.z.val}), ignored when not hovered; #c keeps its size`);
+      report(z1.fitByKey && z1.zInInput, "8e zoom: 0 returns to the fit; Z typed into a text field is ignored");
+      const z2 = await ev(() => {
+        const A = window.__np3app, c = document.getElementById("c");
+        const r = c.getBoundingClientRect();
+        const dbl = () => c.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true,
+          clientX: r.left + r.width * 0.3, clientY: r.top + r.height * 0.4 }));
+        dbl();
+        const a = A.zoom.debug();
+        // Space (before) while zoomed: the overlay stays, the neutral is shown, releasing returns the result
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+        const before = { neutral: A.state.showNeutral, zv: !document.getElementById("zv").hidden };
+        document.body.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true }));
+        const afterSpace = { neutral: A.state.showNeutral, zv: !document.getElementById("zv").hidden };
+        dbl();
+        const b = A.zoom.debug();
+        return { a: { scale: a.view.scale, percent: a.percent }, before, afterSpace, b: { scale: b.view.scale }, develops: A.renderer.stats.develops };
+      });
+      report(z2.a.scale > 1 && Math.abs(z2.a.percent - 100) < 1 && z2.b.scale === 1,
+        `8e zoom: a double click below 100% zooms to 100% at the cursor (${z2.a.percent?.toFixed(1)}%), at 100% it returns to the fit`);
+      report(z2.before.neutral && z2.before.zv && !z2.afterSpace.neutral && z2.afterSpace.zv,
+        "8e zoom: Space (before / after) works while zoomed and keeps the zoomed view");
+      report(z2.develops === z0.develops, "8e zoom: the stretched zoom does not decode or develop again");
+    }
+
     // --- criteria 7 and 8: NP3 import (fields, RAW kept), byte-exact round-trip ---
     {
       const goldenBytes = new Uint8Array(await readFile(

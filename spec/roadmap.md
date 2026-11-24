@@ -1,5 +1,9 @@
 # What is next
 
+## Agreed, planned
+
+**100% zoom and display sharpening on Compare (2026-11-24).** Stages Z1-Z4, about 3.5-4.5 days: [ui-zoom-plan.md](ui-zoom-plan.md).
+
 ## Proposed, no decision yet
 
 **Interface after the fit-engine research (2026-11-24): agreed, deferred.** Primary frame weight,
