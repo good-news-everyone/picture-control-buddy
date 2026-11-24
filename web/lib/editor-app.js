@@ -7,6 +7,7 @@
 // be imported and edited before any RAW is opened; a ?np3= share link is applied at start.
 import { t, register, initLang, reTranslate } from "./i18n.js";
 import { mountLangMenu } from "./lang-select.js";
+import { mountInfoPop } from "./info-pop.js";
 import DICT_RU from "./i18n-editor-ru.js";
 import DICT_DE from "./i18n-editor-de.js";
 import DICT_FR from "./i18n-editor-fr.js";
@@ -85,6 +86,8 @@ if ($("lang-btn")) mountLangMenu($("lang-btn"), $("lang-menu"), (lang) => {
   shownLang = lang;
   if ($("status")) $("status").textContent = state.status;
 });
+// the hotkeys behind the (i) of the icon row (the desktop page; the mobile one has its Info sheet)
+if ($("info-btn")) mountInfoPop($("info-btn"), $("hotkeys"));
 transfer.importFromUrl(); // the ?np3= share parameter, if any
 
 // For the end-to-end tests and lib/mobile.js: the state and the entry points. `mobile` and

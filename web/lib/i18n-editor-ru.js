@@ -134,4 +134,6 @@ export default {
   "Zoom: 100% is one RAW pixel per screen pixel": "Масштаб: 100% — один пиксель RAW на пиксель экрана",
   "Rendering the detailed view…": "Рисуется подробный вид…",
   "Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit": "Колесо — масштаб, перетаскивание — сдвиг, двойной клик — 100% / вписать, Z — 100%, 0 — вписать",
+  "Picture Control Buddy — home page": "Picture Control Buddy — на главную",
+  "Hotkeys": "Горячие клавиши",
 };

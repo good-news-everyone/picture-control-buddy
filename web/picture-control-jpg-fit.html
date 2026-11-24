@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title data-i18n="NP3 profile fitting">NP3 profile fitting</title>
 <link rel="stylesheet" href="css/i18n.css">
+<link rel="stylesheet" href="css/brand.css">
 <style>
   /* The palette is a copy of web/bench.html: a neutral grey around the frame. */
   :root {
@@ -219,8 +220,10 @@
   body.step-start #files, body.step-start #view, body.step-start #panel { display: none; }
   .start-col { max-width: 780px; margin: 0 auto; padding: 24px 18px 56px; }
   .start-col > .hint { margin: 4px 0 0; }
-  .start-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  .start-head h1 { margin-bottom: 4px; }
+  /* the project name left, GitHub and the language right; the title below */
+  .start-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .start-head .brand { margin: 0; }
+  .start-col > h1 { margin: 14px 0 4px; }
   .start-col ul.dash { margin: 4px 0 12px; padding-left: 18px; }
   .start-col ul.dash li { margin: 3px 0; }
   .zones { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 8px 0 6px; }
@@ -300,15 +303,19 @@
 
   /* Comparison screen (stage 4 of the full flow, spec/ui.md step 2) */
   #compare { display: none; }
-  body.step-compare { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
-  body.step-compare #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; }
+  /* Compare and the quick editor share the profile editor's three columns (2026-11-24): the wizard
+     panel on the left (#cmp-sidepanel, full height: the title, the actions, the coverage, the hints,
+     GitHub and the language), the viewer in the middle, the report / the parameter panel on the right */
+  body.step-compare { grid-template-columns: 260px minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
+  body.step-compare #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 2; grid-row: 1; }
+  body.step-compare #report { grid-column: 3; grid-row: 1; }
   body.step-compare #files, body.step-compare #view, body.step-compare #panel { display: none; }
   /* the quick editor (decision #16): Compare with the parameter panel in place of the report —
      the same layout (no jump): the strip, Refit, the strength bar and the coverage column stay,
      their controls are disabled until Done / Cancel */
-  body.step-edit { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
-  body.step-edit #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 1; grid-row: 1; }
-  body.step-edit #panel { grid-column: 2; grid-row: 1; min-height: 0; }
+  body.step-edit { grid-template-columns: 260px minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
+  body.step-edit #compare { display: flex; flex-direction: column; min-height: 0; grid-column: 2; grid-row: 1; }
+  body.step-edit #panel { grid-column: 3; grid-row: 1; min-height: 0; }
   body.step-edit #files, body.step-edit #view, body.step-edit #report { display: none; }
   /* no page-level horizontal scroll in these steps: the quick editor's panel slides in
      from the right (panel-in below) and the transient 24 px overflow would otherwise make
@@ -387,8 +394,7 @@
     font-weight: 400; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #cmp-refit.running::after { color: var(--bad); }
   /* the actions at the bottom of the side panel */
-  #cmp-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-  #cmp-actions button { width: 100%; padding: 8px; }
+  #cmp-actions button { width: 100%; }
   #cmp-actions button[hidden] { display: none; }
   #cmp-bar { display: flex; align-items: center; gap: 12px; padding: 8px 14px;
     flex-wrap: wrap; }
@@ -397,7 +403,9 @@
   #cmp-strength-box input[type="range"] { width: 180px; }
   #cmp-strength-val { font-variant-numeric: tabular-nums; color: var(--dim); width: 42px; }
   #cmp-main { flex: 1; min-height: 0; display: flex; }
-  #cmp-box { flex: 1; position: relative; margin: 0 0 12px 14px; background: #000;
+  /* the warning under the canvas, as the profile editor's #caption */
+  #cmp-caption { flex: none; padding: 6px 14px 8px; text-align: center; }
+  #cmp-box { flex: 1; position: relative; margin: 0 14px; background: #000;
     border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
   #cc { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
     cursor: grab; }
@@ -419,25 +427,36 @@
     pointer-events: none; animation: fade-in .2s .35s both; }
   #cmp-spin[hidden] { display: none; }
   #cmp-spin .spin { margin: 0; width: 12px; height: 12px; vertical-align: 0; }
-  #cmp-sidepanel { width: 250px; flex: none; padding: 0 14px 12px; overflow: auto;
-    display: flex; flex-direction: column; gap: 6px; }
+  /* the wizard panel: the profile editor's left column (#files there) — the same width, colour,
+     border and order: the name, the title, the buttons, the status; the hints and the icons at the bottom */
+  #cmp-sidepanel { display: none; background: var(--panel); border-right: 1px solid var(--line);
+    overflow: auto; padding: 14px; flex-direction: column; min-height: 0; }
+  body.step-compare #cmp-sidepanel, body.step-edit #cmp-sidepanel { display: flex; grid-column: 1; grid-row: 1; }
+  #cmp-sidepanel > :last-child { margin-bottom: 2px; }
+  #cmp-sidepanel #cmp-actions { margin-top: auto; padding-top: 14px; gap: 4px; }
+  #cmp-status { margin-top: 8px; min-height: 1.2em; }
+  #cmp-sidepanel .icon-row { margin: 10px 0 0 -7px; }   /* the icons line up with the text */
+  .start-col .brand { --brand-hole: var(--bg); }
   #cmp-versions button { width: 100%; display: flex; justify-content: space-between;
     gap: 8px; margin-bottom: 4px; }
   #cmp-versions button.active { border-color: var(--accent); }
   .cmp-v-badge { color: var(--dim); font-size: 11px; }
-  #cmp-hint { margin-top: auto; }
-  #cmp-status { min-height: 1em; }
 
   @media (max-width: 980px) { body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto auto; }
     body.step-start { grid-template-rows: 1fr; }
-    body.step-compare, body.step-edit { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+    /* narrow: the wizard panel stays the left column over the full height; the report / the
+       quick editor's panel go under the viewer (a row of its own would squeeze the viewer to 0) */
+    body.step-compare, body.step-edit { grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+    body.step-compare #compare, body.step-edit #compare { grid-column: 2; grid-row: 1; }
+    body.step-compare #report { grid-column: 2; grid-row: 2; }
+    body.step-compare #cmp-sidepanel, body.step-edit #cmp-sidepanel { grid-column: 1; grid-row: 1 / 3; }
     #files { border-right: 0; border-bottom: 1px solid var(--line); }
     #panel { border-left: 0; border-top: 1px solid var(--line); }
     #report { border-left: 0; border-top: 1px solid var(--line); max-height: 45vh; }
     /* narrow: the report and the quick editor's panel take the same row of one height, so
        entering the editor does not move the viewer (decision #16) */
     body.step-compare #report, body.step-edit #panel { height: 45vh; max-height: 45vh; }
-    body.step-edit #panel { grid-column: 1; grid-row: 2; }
+    body.step-edit #panel { grid-column: 2; grid-row: 2; }
     .zones { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -449,9 +468,12 @@
 </div>
 <section id="start">
   <div class="start-col">
-    <!-- the title with GitHub and the language menu on the right (lib/lang-select.js fills the menu) -->
+    <!-- the project name with GitHub and the language menu on the right (lib/lang-select.js fills the menu) -->
     <div class="start-head">
-      <h1 data-i18n="NP3 profile fitting">NP3 profile fitting</h1>
+      <!-- the project name: the landing's logo, a link back to the landing (css/brand.css) -->
+      <a class="brand" href="index.html" title="Picture Control Buddy — home page" data-i18n-title="Picture Control Buddy — home page">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#EDEDEA"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="var(--brand-hole)" stroke-width="2.5"/><circle cx="16" cy="16" r="2.6" fill="#E2B23C"/><circle cx="24.5" cy="8.5" r="2.2" fill="#E2B23C"/></svg>
+        <span>Picture Control Buddy</span></a>
       <div class="icon-row">
         <a class="icon-btn" href="https://github.com/good-news-everyone/picture-control-buddy" target="_blank" rel="noopener"
            title="Source code on GitHub" aria-label="Source code on GitHub" data-i18n-title="Source code on GitHub" data-i18n-aria="Source code on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
@@ -462,6 +484,7 @@
         </div>
       </div>
     </div>
+    <h1 data-i18n="NP3 profile fitting">NP3 profile fitting</h1>
     <div class="hint" data-i18n="Assemble RAW + JPEG pairs, fit an NP3 profile, adjust it manually — all locally in the browser.">
       Assemble RAW + JPEG pairs, fit an NP3 profile, adjust it manually — all locally in the browser.</div>
 
@@ -517,6 +540,70 @@
   </div>
 </section>
 
+<!-- the wizard panel on Compare and in the quick editor: the profile editor's left column
+     (spec/ui-pages.md "Fitting wizard" → "Layout") -->
+<aside id="cmp-sidepanel">
+  <!-- the project name: the landing's logo, a link back to the landing (css/brand.css) -->
+  <a class="brand" href="index.html" title="Picture Control Buddy — home page" data-i18n-title="Picture Control Buddy — home page">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#EDEDEA"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="var(--brand-hole)" stroke-width="2.5"/><circle cx="16" cy="16" r="2.6" fill="#E2B23C"/><circle cx="24.5" cy="8.5" r="2.2" fill="#E2B23C"/></svg>
+    <span>Picture Control Buddy</span></a>
+  <h1 data-i18n="Fitting wizard">Fitting wizard</h1>
+  <div class="hint" data-i18n="The NP3 profile is fitted to your RAW + JPEG pairs. Compare it with the targets, add pairs and refit, adjust it by hand, then download the NP3.">
+    The NP3 profile is fitted to your RAW + JPEG pairs. Compare it with the targets, add pairs and refit, adjust it by hand, then download the NP3.</div>
+  <div id="cmp-status" class="hint" role="status" aria-live="polite"></div>
+  <div id="cmp-coverage"></div>
+  <!-- the actions at the bottom of the column, above the icons, as in the profile editor (2026-11-24) -->
+  <div id="cmp-actions" class="col">
+    <button type="button" id="cmp-manual">
+      <!-- sliders-horizontal, Lucide (ISC) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/><line x1="14" y1="2" x2="14" y2="6"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="22"/></svg>
+      <span data-i18n="Manual adjustments">Manual adjustments</span>
+    </button>
+    <button type="button" id="cmp-revert" hidden
+            title="Discards the manual adjustments and returns to the fitted profile"
+            data-i18n-title="Discards the manual adjustments and returns to the fitted profile">
+      <!-- rotate-ccw, Lucide (ISC) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+      <span data-i18n="Revert to fit">Revert to fit</span>
+    </button>
+    <button type="button" id="cmp-download" class="primary">
+      <!-- download, Lucide (ISC) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span data-i18n="Download NP3">Download NP3</span>
+    </button>
+    <button type="button" id="cmp-share"
+            title="Copies a picture-control-editor.html link that opens this profile"
+            data-i18n-title="Copies a picture-control-editor.html link that opens this profile">
+      <!-- link, Lucide (ISC) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      <span data-i18n="Copy link to the profile editor">Copy link to the profile editor</span>
+    </button>
+  </div>
+  <!-- the hotkeys (i), GitHub and the language menu, icons only, as in the profile editor (they open upwards) -->
+  <div class="icon-row">
+    <div class="infopick">
+      <button type="button" class="icon-btn" id="side-info-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="cmp-hint"
+              title="Hotkeys" aria-label="Hotkeys" data-i18n-title="Hotkeys" data-i18n-aria="Hotkeys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></button>
+      <div class="info-pop" id="cmp-hint" role="dialog" aria-labelledby="cmp-hint-h" hidden>
+        <h2 id="cmp-hint-h" data-i18n="Hotkeys">Hotkeys</h2>
+        <div data-i18n="Wheel — zoom to the cursor, drag — pan, double click — 100% at the cursor (at 100% — fit to the screen), Z — 100%, 0 — fit, hold Space — neutral without the profile; in the curtain mode drag the divider.">
+          Wheel — zoom to the cursor, drag — pan, double click — 100% at the cursor (at 100% — fit to the screen), Z — 100%, 0 — fit, hold Space — neutral without the profile; in the curtain mode drag the divider.</div>
+      </div>
+    </div>
+    <a class="icon-btn" href="https://github.com/good-news-everyone/picture-control-buddy" target="_blank" rel="noopener"
+       title="Source code on GitHub" aria-label="Source code on GitHub" data-i18n-title="Source code on GitHub" data-i18n-aria="Source code on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+    <div class="langpick">
+      <button type="button" class="icon-btn" id="side-lang-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="side-lang-menu"
+              title="Language" aria-label="Language" data-i18n-title="Language" data-i18n-aria="Language"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></svg></button>
+      <ul class="lang-menu" id="side-lang-menu" role="menu" aria-labelledby="side-lang-btn" hidden></ul>
+    </div>
+  </div>
+</aside>
+
 <section id="compare">
   <!-- the pair list (spec/ui.md decision #11): tiles, × to remove, the whole strip takes RAW drops -->
   <div id="cmp-top">
@@ -553,24 +640,9 @@
                 title="One RAW pixel per screen pixel (Z)" data-i18n-title="One RAW pixel per screen pixel (Z)">100%</button>
       </div>
     </div>
-    <div id="cmp-sidepanel">
-      <div id="cmp-coverage"></div>
-      <div id="cmp-hint" class="hint"
-           data-i18n="Wheel — zoom to the cursor, drag — pan, double click — 100% at the cursor (at 100% — fit to the screen), Z — 100%, 0 — fit, hold Space — neutral without the profile; in the curtain mode drag the divider.">
-        Wheel — zoom to the cursor, drag — pan, double click — 100% at the cursor (at 100% — fit to the screen), Z — 100%, 0 — fit, hold Space — neutral without the profile; in the curtain mode drag the divider.</div>
-      <div id="cmp-status" class="hint" role="status" aria-live="polite"></div>
-      <div id="cmp-actions">
-        <button type="button" id="cmp-manual" data-i18n="Manual adjustments">Manual adjustments</button>
-        <button type="button" id="cmp-revert" hidden data-i18n="Revert to fit"
-                title="Discards the manual adjustments and returns to the fitted profile"
-                data-i18n-title="Discards the manual adjustments and returns to the fitted profile">Revert to fit</button>
-        <button type="button" id="cmp-download" class="primary" data-i18n="Download NP3">Download NP3</button>
-        <button type="button" id="cmp-share" data-i18n="Copy link to the profile editor"
-                title="Copies a picture-control-editor.html link that opens this profile"
-                data-i18n-title="Copies a picture-control-editor.html link that opens this profile">Copy link to the profile editor</button>
-      </div>
-    </div>
   </div>
+  <div id="cmp-caption" class="hint" data-i18n="Approximate calculation in the browser — not an exact NX Studio render.">
+    Approximate calculation in the browser — not an exact NX Studio render.</div>
 </section>
 
 

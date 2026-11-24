@@ -1,0 +1,9 @@
+/* The project name at the top of the left column of the app pages (the profile editor and the
+   fitting wizard): the landing's logo (its dark-theme colors) + "Picture Control Buddy", a link
+   back to the landing (index.html). --brand-hole is the colour behind the logo (the lens ring). */
+.brand { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 14px;
+  color: var(--accent); text-decoration: none; font-weight: 700; font-size: 14px; letter-spacing: -.01em;
+  border-radius: 4px; --brand-hole: var(--panel); }
+.brand svg { width: 22px; height: 22px; flex: none; }
+.brand:hover { color: #fff; }
+.brand:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }

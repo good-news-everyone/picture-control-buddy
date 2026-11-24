@@ -468,14 +468,26 @@ export async function runLevel8({ browser, port, report, skip }) {
           && near(a.L.x, b.L.x) && near(a.L.y, b.L.y) && near(a.R.x, b.R.x) && near(a.R.y, b.R.y);
         report(sameMap(maps.side, maps.curtain),
           `8 compare modes [${tag}]: side-by-side and curtain share the same zoom/pan mapping`);
-        // Space no longer swaps anything on Compare
+        // holding Space on Compare shows the neutral without the profile on the render side
+        // (before-after.js, as in the editor); releasing it brings the profile frame back.
+        // The render is asynchronous: each snapshot waits for the compare request to settle.
+        const cmpIdle = () => page.waitForFunction(
+          "window.__np3app.compare && window.__np3app.compare.pending === false",
+          { timeout: 120000, polling: 30 });
+        await cmpIdle();
         const t0 = await ev(() => window.__t8.snapCC());
         await ev(() => document.body.dispatchEvent(
           new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+        await page.waitForFunction("window.__np3app.state.showNeutral === true", { timeout: 15000, polling: 30 });
+        await cmpIdle();
         const t1 = await ev(() => window.__t8.snapCC());
         await ev(() => document.body.dispatchEvent(
           new KeyboardEvent("keyup", { key: " ", bubbles: true })));
-        report(t1 === t0, `8 compare [${tag}]: holding Space changes nothing (no key-toggle mode)`);
+        await page.waitForFunction("window.__np3app.state.showNeutral === false", { timeout: 15000, polling: 30 });
+        await cmpIdle();
+        const t2 = await ev(() => window.__t8.snapCC());
+        report(t1 !== t0 && t2 === t0,
+          `8 compare [${tag}]: holding Space shows the neutral (the frame changes), releasing it restores the profile frame`);
       }
 
       // shared zoom/pan: wheel zoom to the cursor, drag pan, double-click reset. The zoom anchor is
@@ -707,9 +719,9 @@ export async function runLevel8({ browser, port, report, skip }) {
                && draft.pairIds.length === 1 && draft.pairIds[0] === "1" && draft.selected === "draft"
                && draft.nParams === 56 && draft.strength === 100,
           `8 fit: the draft version over the exact usable pair id (${draft.pairIds}), strength kept`);
-        report(draft.name === "NPF-DSC_5584" && draft.status.startsWith("Fit finished")
+        report(draft.name === "NPF-DSC_5584" && !/Fit finished|Fitting/.test(draft.status)
                && draft.iters > 0 && draft.cost > 0,
-          `8 fit: "${draft.name}" in ${draft.iters} iterations (cost ${draft.cost}) — "${draft.status.slice(0, 52)}…"`);
+          `8 fit: "${draft.name}" in ${draft.iters} iterations (cost ${draft.cost}), no "Fit finished" status`);
         // the exported control follows the fit at once — Download NP3 on Compare before the
         // manual step used to write the neutral NPF-MANUAL (decision #15)
         const same = await ev(() => {
@@ -1939,14 +1951,16 @@ export async function runLevel8({ browser, port, report, skip }) {
         "8 stage 13: Cancel in the quick editor drops the manual edits, the profile is unchanged");
       await hubSettle(`window.__np3app.state.step === "compare"`, 60000);
 
-      // the coverage block at the top of the side panel (where Versions used to be)
+      // the coverage block in the wizard panel on the left, above the actions (2026-11-24)
       await hubSettle(`window.__np3app.state.advice && window.__np3app.state.advice.coverage.length === 10
                        && window.__np3app.state.advice.pending === 0`, 180000);
       const c0 = await ev(() => {
         const A = window.__np3app, s = A.state;
         window.__t8.prep1 = s.pairs.find((p) => p.id === 1)?.prepared ?? null;
         const side = document.getElementById("cmp-sidepanel");
-        return { first: side.firstElementChild.id,
+        return { first: side.contains(document.getElementById("cmp-coverage"))
+                   && !!(document.getElementById("cmp-actions").compareDocumentPosition(document.getElementById("cmp-coverage"))
+                         & Node.DOCUMENT_POSITION_PRECEDING) ? "cmp-coverage" : "",
                  rows: [...document.querySelectorAll("#cmp-coverage .cov-table tr")].map((tr) => tr.dataset.group),
                  levels: [...document.querySelectorAll("#cmp-coverage .cov-table tr")].map((tr) => tr.dataset.level),
                  coverage: s.advice.coverage,
@@ -1963,7 +1977,7 @@ export async function runLevel8({ browser, port, report, skip }) {
                  })() };
       });
       report(c0.first === "cmp-coverage" && c0.rows.length === 10 && c0.levels.every((l) => ["enough", "little", "none"].includes(l)),
-        `8 stage 13: the color coverage tops the side panel (${c0.rows.length} groups: ${c0.levels.join(" ")})`);
+        `8 stage 13: the color coverage sits in the wizard panel above the actions (${c0.rows.length} groups: ${c0.levels.join(" ")})`);
       // the percents have one width (leading zeros) and match the advice; the notice is a box
       const wantPct = (() => {
         const d = Math.max(1, ...c0.coverage.map((c) => String(Math.floor(c.value * 100 + 0.05)).length));
@@ -2101,8 +2115,11 @@ export async function runLevel8({ browser, port, report, skip }) {
         `8 stage 13: the refit used exactly the shown pair ids (${rf.pairIds}); still on Compare, strength 80% kept`);
       report(rf.tile === "active" && rf.btn && /already fitted/.test(rf.note) && rf.noCaption && rf.sub === "Up to date",
         `8 stage 13: the new pair's tile is active now; Refit is off until the pairs change ("${rf.note}", "${rf.sub}")`);
-      // the layout: Refit is a square right of the strip; Manual adjustments and Download NP3
-      // at the bottom of the side panel; Download NP3 saves the current profile at the strength
+      // the layout: Refit is a square right of the strip; the wizard panel is the full-height left
+      // column (the profile editor's): the brand link, the title, the coverage; Manual adjustments and
+      // Download NP3 at the bottom above the (i) / GitHub / language icons, the hotkeys hidden behind
+      // (i); the approximate-render caption under the canvas; Download NP3 saves the current profile
+      // at the strength
       {
         const lay = await ev(() => {
           const r = (id) => document.getElementById(id).getBoundingClientRect();
@@ -2110,13 +2127,21 @@ export async function runLevel8({ browser, port, report, skip }) {
                 side = r("cmp-sidepanel"), cov = r("cmp-coverage");
           return { right: refit.left >= strip.right - 1, top: refit.top < r("cmp-bar").top,
                    square: Math.abs(refit.width - refit.height) <= 1 && refit.width >= 60 && refit.width <= 110,
-                   // the side panel may scroll at a small window: the actions are its last block
-                   bottom: man.top > cov.bottom && dl.top >= man.bottom - 1
-                     && document.getElementById("cmp-sidepanel").lastElementChild.id === "cmp-actions",
+                   bottom: side.left <= 1 && side.width >= 250 && side.width <= 270 && side.right <= r("cmp-box").left
+                     && side.top <= 1 && side.bottom >= innerHeight - 1
+                     // 380 px beside the viewer; under it in the narrow (≤ 980 px) layout
+                     && (innerWidth <= 980 || Math.abs(r("report").width - 380) <= 1)
+                     && man.top >= cov.bottom - 1 && dl.top >= man.bottom - 1
+                     && r("side-info-btn").top >= r("cmp-share").bottom - 1
+                     && document.querySelector("#cmp-sidepanel .icon-row").firstElementChild.contains(document.getElementById("side-info-btn"))
+                     && document.getElementById("cmp-hint").hidden
+                     && r("cmp-caption").top >= r("cmp-box").bottom - 1 && r("cmp-caption").height > 0
+                     && document.querySelector("#cmp-sidepanel .brand")?.getAttribute("href") === "index.html"
+                     && !!document.querySelector("#cmp-sidepanel #side-lang-btn"),
                    manText: document.getElementById("cmp-manual").textContent.trim() };
         });
         report(lay.right && lay.top && lay.square && lay.bottom && lay.manText === "Manual adjustments",
-          `8 stage 13: Refit is a square right of the strip; "${lay.manText}" and Download NP3 sit at the bottom of the side panel`);
+          `8 stage 13: Refit is a square right of the strip; the wizard panel is the left column with the brand, "${lay.manText}" and Download NP3 at its bottom, the hotkeys behind (i), the caption under the canvas`);
         await page.evaluate(() => {
           window.__exp = [];
           const orig = URL.createObjectURL.bind(URL);

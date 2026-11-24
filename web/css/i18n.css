@@ -1,4 +1,4 @@
-/* The language support shared by the app pages (lib/i18n.js, lib/i18n-boot.js,
+/* The language support and the icon row (GitHub, the language, the hotkeys) shared by the app pages (lib/i18n.js, lib/i18n-boot.js,
    lib/lang-select.js). Linked by the profile editor pages and the fitting wizard. */
 /* lib/i18n-boot.js: hidden until the chosen translation is applied (no English flash) */
 html.i18n-pending body { visibility: hidden; }
@@ -21,3 +21,12 @@ html.i18n-pending body { visibility: hidden; }
 .lang-menu button[aria-checked="true"] { font-weight: 600; }
 .lang-menu button[aria-checked="true"]::after { content: "✓"; }
 .lang-menu.down { bottom: auto; top: calc(100% + 6px); left: auto; right: 0; }
+/* The (i) button of the icon row (lib/info-pop.js): the hotkeys in a panel that opens upwards,
+   inside the 260 px left column (its overflow would clip anything wider) */
+.infopick { position: relative; }
+.info-pop { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; width: 232px; margin: 0;
+  padding: 8px 12px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45); color: var(--dim); font-size: 11px; line-height: 1.45; }
+.info-pop[hidden] { display: none; }
+.info-pop h2 { margin: 0 0 4px; }
+.info-pop > div + div { margin-top: 4px; }

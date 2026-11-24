@@ -200,12 +200,17 @@ export async function runLevel8e({ browser, port, report, skip }) {
         ` Hue/Sat number inputs ${lr.gradNums}, Blending labels ${lr.gradBlendLabels},` +
         ` names over the wheel ${lr.gradWheelNames}, extra headings ${lr.gradSubs},` +
         ` Blending/Balance in both modes ${!lr.gradSharedHidden}`);
-      // UI-2: buttons under the frame info; before/after is space only
+      // the file buttons at the bottom of the left column, right above the (i) / GitHub / language
+      // icons (2026-11-24; UI-2 had them under the frame info); the hotkeys hide behind (i)
       const importBtnOrder = await ev(() => {
-        const b = document.getElementById("import");
-        return b.parentElement.previousElementSibling?.id === "info";
+        const col = document.getElementById("import").parentElement;
+        const row = col.nextElementSibling;
+        const pop = document.getElementById("hotkeys");
+        return col.id === "file-btns" && row?.classList.contains("icon-row")
+          && row.firstElementChild.contains(document.getElementById("info-btn")) && pop.hidden
+          && col.getBoundingClientRect().top > document.getElementById("known").getBoundingClientRect().top;
       });
-      report(importBtnOrder, "8e UI-2: Import/Export buttons under the frame info");
+      report(importBtnOrder, "8e: Import/Export at the bottom of the left column above (i) / GitHub / language; the hotkeys behind (i)");
       const dis0 = await ev(() => {
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
         const show = window.__np3app.state.showNeutral;

@@ -20,6 +20,7 @@
 // web/lib/report-view.js — the report, web/lib/coverage-view.js — the color-coverage advice.
 import { t, register, initLang, reTranslate } from "./i18n.js";
 import { mountLangMenu } from "./lang-select.js";
+import { mountInfoPop } from "./info-pop.js";
 import EDITOR_RU from "./i18n-editor-ru.js";
 import EDITOR_DE from "./i18n-editor-de.js";
 import EDITOR_FR from "./i18n-editor-fr.js";
@@ -638,7 +639,7 @@ fitWorker.onmessage = (e) => {
     // the editor control follows the new profile at once: Download NP3 on Compare writes
     // state.control, which stayed the neutral NPF-MANUAL until the manual step was opened
     setBaseline(state.versions[0]);
-    setStatus(t("Fit finished: {name} in {sec} s", { name, sec: (m.ms / 1000).toFixed(1) }));
+    setStatus("");               // no "Fit finished" line (2026-11-24): the Compare screen itself shows the result
     enterCompare();              // stage 4: a successful fit goes to step 2 (spec/ui.md scenario)
   } else if (m.type === "error") {
     // A failure keeps the previous session state: no partial versions.
@@ -1398,7 +1399,7 @@ function routeFile(f) {
 syncStep();
 setStatus(t("Add RAW files to assemble pairs"));
 
-// A language switch (the globe at the Start title) is applied in place: the data-i18n*
+// A language switch (a globe at the Start title or on the Compare panel) is applied in place: the data-i18n*
 // texts re-translate (i18n.js), the screens built from state re-render, a plain status is
 // re-translated; the session, the fit and the opened frames are untouched.
 let shownLang = document.documentElement.lang;
@@ -1413,7 +1414,11 @@ function onLangChange(lang) {
   if (onHub()) { compareView.refreshPairs(); compareView.draw(); }
   reportView.refresh();
 }
+// two globes: at the Start title and at the bottom of the Compare panel (#cmp-sidepanel)
 if ($("lang-btn")) mountLangMenu($("lang-btn"), $("lang-menu"), onLangChange);
+if ($("side-lang-btn")) mountLangMenu($("side-lang-btn"), $("side-lang-menu"), onLangChange);
+// the hotkeys behind the (i) of the Compare panel
+if ($("side-info-btn")) mountInfoPop($("side-info-btn"), $("cmp-hint"));
 
 // The session lives in this tab's memory only (decisions #4/#12): closing or reloading the tab
 // with pairs loaded asks first (UX review, decision #15). Browsers show their own text and

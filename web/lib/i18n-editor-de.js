@@ -129,4 +129,6 @@ export default {
   "Zoom: 100% is one RAW pixel per screen pixel": "Zoom: 100 % entspricht einem RAW-Pixel pro Bildschirmpixel",
   "Rendering the detailed view…": "Detailansicht wird berechnet …",
   "Wheel — zoom, drag — pan, double click — 100% / fit, Z — 100%, 0 — fit": "Mausrad – zoomen, Ziehen – verschieben, Doppelklick – 100 % / einpassen, Z – 100 %, 0 – einpassen",
+  "Picture Control Buddy — home page": "Picture Control Buddy — zur Startseite",
+  "Hotkeys": "Tastenkürzel",
 };

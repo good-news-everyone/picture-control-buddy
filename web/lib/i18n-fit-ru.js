@@ -98,7 +98,6 @@ export default {
   "Fit cancelled — press Fit to run it again": "Подбор отменён — нажми «Подобрать», чтобы запустить снова",
   "Fit cancelled — the inputs changed": "Подбор отменён — входные данные изменились",
   "Fit failed: {error}": "Подбор не удался: {error}",
-  "Fit finished: {name} in {sec} s": "Подбор завершён: {name} за {sec} с",
   "Fit interrupted by a changed file — press Fit again": "Подбор прерван: файл изменился — нажми «Подобрать» ещё раз",
   "Fit unlocks when the preparation finishes": "Подбор станет доступен, когда закончится подготовка",
   "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory.": "Подбор рассчитан на компьютер: он занимает минуты процессорного времени и несколько сотен МБ памяти.",
@@ -250,4 +249,6 @@ export default {
   "Yellow Chroma": "Жёлтый: насыщенность",
   "Yellow Hue": "Жёлтый: оттенок",
   "yellows": "жёлтые",
+  "Fitting wizard": "Мастер подбора",
+  "The NP3 profile is fitted to your RAW + JPEG pairs. Compare it with the targets, add pairs and refit, adjust it by hand, then download the NP3.": "Профиль NP3 подбирается по твоим парам RAW + JPEG. Сравни его с образцами, добавь пары и подбери заново, подправь вручную и скачай NP3.",
 };

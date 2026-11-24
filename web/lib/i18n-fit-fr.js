@@ -89,7 +89,6 @@ export default {
   "Fit cancelled — press Fit to run it again": "Ajustement annulé — cliquez sur « Ajuster » pour le relancer",
   "Fit cancelled — the inputs changed": "Ajustement annulé — les entrées ont changé",
   "Fit failed: {error}": "Échec de l’ajustement : {error}",
-  "Fit finished: {name} in {sec} s": "Ajustement terminé : {name} en {sec} s",
   "Fit interrupted by a changed file — press Fit again": "Ajustement interrompu par un fichier modifié — cliquez à nouveau sur « Ajuster »",
   "Fit unlocks when the preparation finishes": "« Ajuster » sera disponible à la fin de la préparation",
   "Fitting is designed for a desktop: it takes minutes of CPU and several hundred MB of memory.": "L’ajustement est prévu pour un ordinateur : il demande plusieurs minutes de calcul et quelques centaines de Mo de mémoire.",
@@ -241,4 +240,6 @@ export default {
   "Yellow Chroma": "Jaune : saturation",
   "Yellow Hue": "Jaune : teinte",
   "yellows": "jaunes",
+  "Fitting wizard": "Assistant d’ajustement",
+  "The NP3 profile is fitted to your RAW + JPEG pairs. Compare it with the targets, add pairs and refit, adjust it by hand, then download the NP3.": "Le profil NP3 est ajusté à vos paires RAW + JPEG. Comparez-le aux cibles, ajoutez des paires et réajustez, retouchez-le à la main, puis téléchargez le NP3.",
 };

@@ -25,6 +25,7 @@ export function mountLangMenu(btn, menu, onChange = null) {
   sync();
 
   function open(on, focusItem = false) {
+    if (on) sync();   // another menu of the page may have switched the language meanwhile
     menu.hidden = !on;
     btn.setAttribute("aria-expanded", on);
     if (on && focusItem) (items.find((b) => b.getAttribute("aria-checked") === "true") ?? items[0]).focus();
