@@ -54,15 +54,15 @@ def test_profile_model_order():
     x = grid()
     px = PM.Pixels(m, x)
 
-    # grading only, recomputed from the LUTs without Pixels.graded
+    # grading only, recomputed from the LUTs without Pixels.graded (plus the zone grid chroma term)
     c = neutral_control()
     c.grade = {"shadows": (30, 25, 0), "midtone": (200, 40, 0), "highlights": (330, 15, 0)}
     p = M.params_of(c)
     graded = x
-    for zone in np3.ZONES:
+    for zi, zone in enumerate(np3.ZONES):
         hue, chroma = p.grade[zone]
         k = PM.hue_kernel(hue)
-        graded = graded + chroma * np.einsum("j,jnc->nc", k, px.grade[zone])
+        graded = graded + px.chroma_term(chroma * np.einsum("j,jnc->nc", k, px.grade[zone]), zi, hue, chroma, m.zgrid, p)
     check(np.max(np.abs(m(x, c) - np.clip(graded, 0, 1))) < 1e-9,
           "grading-only matches the manual LUT recomputation")
 

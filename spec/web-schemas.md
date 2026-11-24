@@ -156,7 +156,8 @@ Order is exactly `np.r_[x[:NB+NG+NC], extra]` with `NB=24, NG=6, NC=20`
 | `control` | object (§3.3) | `match.control` | The resulting profile at 100% strength. |
 | `scores` | `{neutral: f64, prediction: f64}[]` per pair | `Matcher.score` | Mean dE2000 on the 3000-pixel uniform test sample: neutral-vs-target and prediction-vs-target. |
 | `pairs` | string[] | pair ids | The exact pair ids included (refit input per ui.md Decisions §3). |
-| `init` | `"zero"` | ui.md Decisions §3 | Refits start from the same zero init, never from the previous version. |
+| `init` | `"zero"` \| `"zones"` | ui.md Decisions §3, `match.STARTS` | The winning start: LM runs from the first `STARTS` entry (zero) and from the next one (zero + zone brightness shadows −50 / midtone +30) only if the previous run made fewer than `STUCK = 5` accepted iterations; the lower final cost wins. Refits start from the same fixed starts, never from the previous version. |
+| `starts` | `{name: cost}` | `match.Matcher.starts` | Final cost of each start that ran. |
 
 ### 3.3 `control` object (np3.Control, `match.control`)
 
@@ -182,7 +183,9 @@ round half-to-even, not `Math.round`. Curve = `make_pack.curve_from`:
 For pair `q` with `n_q` fit pixels and `P` pairs (browser port of `Matcher.fit.fn`):
 
 1. Main: `W = de2000_weights(tlab, KC=0.5, FLAT_L=true) · sqrt(mult)` per pixel
-   (`match.py`, `color.py`); residual = `weighted(W, srgb_to_lab(pred) − tlab).ravel() / sqrt(n_q · P)`.
+   (`match.py`, `color.py`); row `r_i = weighted(W, srgb_to_lab(pred) − tlab)_i`, then the Cauchy
+   loss `match.robust` (`ROBUST=6`): with `e = |r_i| / sqrt(mult_i)`, the row is multiplied by
+   `sqrt(c² · log1p(e² / c²)) / e` (1 for `e ≤ 1e-9`); residual = rows`.ravel() / sqrt(n_q · P)`.
 2. Near-white clip penalty (only for pairs with `nearWhiteMask` samples, ≤ 3000,
    `CLIP_PIXELS`): `100 · where(cmask, min(pred−target, 0), pred−target).ravel() / sqrt(n_q · P)`,
    `cmask = target ≥ 0.98`.
@@ -309,7 +312,7 @@ No pixel maps in the download (too large); sums/means only.
 | `analysis` block | `analyze.frame`, `analyze.shares`, `analyze.verdict` |
 | masks | `match.sample` keep-rule, near-white rule, `analyze.region_sums` mask (derivable from `y`) |
 | sampled fit data (indices `pick/mult/test`, `b`, `t`, `tlab`, `W`) | `match.Matcher.pair` + `match.sample` with fixed seed 0 |
-| `fitVector`, `cost` | `match.Matcher.fit` (zero init) |
+| `fitVector`, `cost` | `match.Matcher.fit` (the winning start, `match.STARTS`) |
 | `control` | `match.control` |
 | `regionSums` | `analyze.region_sums` (extended with `tLabSum/pLabSum`) |
 | summary/aggregate | `analyze.bin_mean`, `analyze.total`; neutral side: `region_sums(dev(x·gain), t)` |

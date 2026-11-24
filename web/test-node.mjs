@@ -442,12 +442,15 @@ async function level1f(ctx) {
       W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
       px: fake([...neutral50, ...neutral50]),
       cpx: fake([0.995, 0.9, 0.4]), ct: Float64Array.from([0.99, 0.85, 0.5]),
-      cmask: Uint8Array.from([1, 0, 0]),
+      cmask: Uint8Array.from([1, 0, 0]), sm: Float64Array.from([1, 1]),
     };
-    const q2 = { n: 1, tlab: new Float64Array(3), W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1]), px: fake([0, 0, 0]), cpx: null };
+    const q2 = { n: 1, tlab: new Float64Array(3), W: Float64Array.from([1, 0, 0, 0, 1, 0, 0, 0, 1]), sm: Float64Array.from([1]), px: fake([0, 0, 0]), cpx: null };
     const r = F.residual([q1, q2], x);
+    // the Cauchy loss of each main row (match.robust, c = ROBUST): |d| = sqrt(5) and sqrt(8)
+    const cauchy = (e2) => Math.sqrt(F.ROBUST ** 2 * Math.log1p(e2 / F.ROBUST ** 2) / e2);
+    const s1 = cauchy(5), s2 = cauchy(8);
     const expected = [
-      -1, 0.5, 0, 1, 0, -1,          // main: (pred - tlab) / sqrt(2 * 2)
+      -1 * s1, 0.5 * s1, 0, 1 * s2, 0, -1 * s2,   // main: (pred - tlab) / sqrt(2 * 2), rows rescaled
       0, 2.5, -5,                    // clip: 100 * where(cmask, min(d, 0), d) / sqrt(2 * 2)
       0, 0, 0,                       // second pair: zero residuals / sqrt(1 * 2)
     ];

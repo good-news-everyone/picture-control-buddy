@@ -199,8 +199,10 @@ export function prepareFitPair(o) {
   const bs = gather(b, pick), ts = gather(t, pick);
   const tlab = srgbToLab(ts);
   const W = de2000Weights(tlab, KC, FLAT_L);
+  const sm = new Float64Array(pick.length);      // sqrt(mult): match.Pair.sm, the robust loss takes it out
   for (let i = 0; i < pick.length; i++) {
     const s = Math.sqrt(mult[i]);
+    sm[i] = s;
     for (let j = 0; j < 9; j++) W[i * 9 + j] *= s;
   }
   const tb = gather(b, test), tt = gather(t, test);
@@ -209,7 +211,7 @@ export function prepareFitPair(o) {
   return {
     name: o.name, ncc: o.ncc ?? 0,
     n: pick.length,
-    tlab, W,
+    tlab, W, sm,
     px: new Pixels(o.model, bs),
     tb, tt, ttlab: srgbToLab(tt), tpx: new Pixels(o.model, tb),
     cpx: cb !== null ? new Pixels(o.model, cb) : null,
@@ -234,7 +236,7 @@ export function score(q, p) {
  * validated only through the level-9 quality bar). The shared rarity freq is computed over
  * the non-clipped target pixels of every pair (match.target_frequency), then one mulberry32
  * stream is consumed pair by pair in the Matcher order (fit/bright/test draws, then the
- * near-white set), the LM fit runs from the zero init and the result is converted to the
+ * near-white set), the LM fit runs from every STARTS entry (the lowest cost wins) and the result is converted to the
  * control (match.control) with the per-pair scores at the rounded control (Matcher.score).
  * prepared: [{name, ncc, x, y, gain}] — the prepared pair arrays; hooks: the lm lifecycle
  * hooks (Worker progress/cancel). Returns {x, cost, iterations, control, scores, qs, names}.

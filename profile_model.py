@@ -20,10 +20,15 @@ data/sweep3.npz and set probes in data/sweep.npz. Combinations, pairs and finish
 in data/sweep2.npz are not part of training and serve as validation.
 
     python3 profile_model.py    # training -> data/profile_model.npz and validation on data/sweep2.npz
+    python3 profile_model.py zones   # zone grid -> data/zone_grid.npz (sweep6-13.npz from data/ or _local/)
+
+Off Blending 50 / Balance 0, zone grading goes through the zone grid (data/zone_grid.npz, see
+train_zone_grid) when the file exists; without it the tools masks are used as before.
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -70,6 +75,23 @@ SECTORS = {"A": (("red", 23.5, 2.5), ("yellow", 2.5, 8.5), ("cyan", 8.5, 16.5), 
 SET_OF = {c: s for s, items in SECTORS.items() for c, _, _ in items}
 ZONE_TAG = np3.ZONE_TAG   # zone letters in probe names
 GRADE_HUES = tuple(range(0, 360, 45))     # grading directions, each with its own LUT
+# Zone grid (2026-11-23, sweep.py zones / zones2 / zones3): zone brightness and zone color off Blending 50 /
+# Balance 0 come from tables on a Blending x Balance grid instead of the tools masks, which do not add up
+# at hard masks (the fit ran into Blending 0-4 + strong zone brightness, off from NX by 2-3 dE).
+ZONE_GRID = os.path.join(HERE, "data", "zone_grid.npz")
+ZONE_DATA = {"zones": "sweep6.npz", "zones2": "sweep7.npz", "zones3": "sweep8.npz", "zones4": "sweep9.npz",
+             "zones5": "sweep10.npz",
+             "zones6": "sweep11.npz", "zones7": "sweep12.npz",
+             "zones8": "sweep13.npz"}
+GRID_FRAMES = ("DSC_6296", "DSC_6455", "DSC_6975", "DSC_7203")
+GRID_BLENDINGS = (0, 10, 25, 50, 100)
+GRID_BALANCES = (-100, -95, -85, -75, -50, -35, -20, 0, 20, 35, 50, 75, 85, 95, 100)
+PAIR_BALANCES = (-75, -35, 0, 35, 75)    # the two-zone interaction grid (zones4), with GRID_BLENDINGS
+ZONE_PAIRS = (("shadows", "midtone"), ("midtone", "highlights"), ("shadows", "highlights"))
+GRID_HUES = (0, 90, 180, 270)            # zone color probes of zones3 (plus MASK_HUES of zones2)
+TC_BALANCES = (-100, -95, -85, -75, -50, -20, 0, 20, 50, 75, 85, 95, 100)   # Balance columns with multi-hue color probes
+TQ_BALANCES = (-75, -50, -20, 0, 20, 50, 75)     # Balance columns of the chroma term (zones8; clamped outside)
+GRID_CHROMA = 40
 
 
 def interp(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -389,12 +411,313 @@ def train_tools(path: str = TOOLS_DATA) -> dict:
     return out
 
 
+def data_file(name: str) -> str:
+    """A training data file: data/ first, then _local/ (large sweep exports are kept out of git)."""
+    p = os.path.join(HERE, "data", name)
+    return p if os.path.exists(p) else os.path.join(HERE, "_local", name)
+
+
+def grid_cell(t: np.ndarray, blending: float, balance: float, balances=GRID_BALANCES) -> np.ndarray:
+    """Bilinear interpolation of a zone grid table t (len(GRID_BLENDINGS), len(balances), ...) at a point."""
+    b = min(max(blending, GRID_BLENDINGS[0]), GRID_BLENDINGS[-1])
+    l = min(max(balance, balances[0]), balances[-1])
+    i = min(max(int(np.searchsorted(GRID_BLENDINGS, b, "right")) - 1, 0), len(GRID_BLENDINGS) - 2)
+    j = min(max(int(np.searchsorted(balances, l, "right")) - 1, 0), len(balances) - 2)
+    u = (b - GRID_BLENDINGS[i]) / (GRID_BLENDINGS[i + 1] - GRID_BLENDINGS[i])
+    v = (l - balances[j]) / (balances[j + 1] - balances[j])
+    return ((1 - u) * (1 - v) * t[i, j] + u * (1 - v) * t[i + 1, j]
+            + (1 - u) * v * t[i, j + 1] + u * v * t[i + 1, j + 1])
+
+
+def _fill_balance(t: np.ndarray, have: np.ndarray, balances=GRID_BALANCES):
+    """Unmeasured cells of each Blending row: linear between measured Balance cells, nearest at the ends;
+    rows with nothing measured: between the neighbour rows. t (nb, nl, ...), have (nb, nl) is updated."""
+    for i in range(t.shape[0]):
+        js = [j for j in range(t.shape[1]) if have[i, j]]
+        if not js:
+            continue
+        for j in range(t.shape[1]):
+            if have[i, j]:
+                continue
+            lo = [q for q in js if balances[q] < balances[j]]
+            hi = [q for q in js if balances[q] > balances[j]]
+            if lo and hi:
+                a, c = lo[-1], hi[0]
+                u = (balances[j] - balances[a]) / (balances[c] - balances[a])
+                t[i, j] = (1 - u) * t[i, a] + u * t[i, c]
+            else:
+                t[i, j] = t[i, lo[-1] if lo else hi[0]]
+        have[i, :] = True
+    for i in range(t.shape[0]):
+        if not have[i].any():
+            a, c = i - 1, i + 1
+            u = (GRID_BLENDINGS[i] - GRID_BLENDINGS[a]) / (GRID_BLENDINGS[c] - GRID_BLENDINGS[a])
+            t[i] = (1 - u) * t[a] + u * t[c]
+
+
+def _sg(v: int) -> str:
+    return ("P" if v > 0 else "M") + str(abs(v))
+
+
+def train_zone_grid(model: "Model", frames=GRID_FRAMES, seed: int = 0) -> dict:
+    """Zone grading off Blending 50 / Balance 0 (sweep.py zones .. zones8).
+
+    Brightness (zone z, sign s): tb[b, l, z, s] — a LUT over neutral color per unit of |value| / 100 on
+    the GRID_BLENDINGS x GRID_BALANCES grid, trained like gbl on single-zone probes; the model adds
+    tb(b, l) - tb(50, 0) to gbl. Cells without probes (Balance +-85/+-95 at Blending 50/100) are
+    interpolated along Balance. Color (zone z): tm[b, l, z] — a shift of the zone mask over neutral Y'
+    against the default model, pooled over every measured hue; tc[b, l', z, h] — a per-channel LUT
+    multiplier on top of it for each of the GRADE_HUES (linear between neighbouring hues), from the
+    four- and eight-hue cells (a hue without a probe at a cell takes the table of all hues there), on
+    the TC_BALANCES columns (the others were only interpolated). In the hard-mask corner without pure
+    color probes (Blending 10, Balance +-95) color comes from zones5 color + brightness probes against
+    the brightness-only grid. Chroma: tq[b, l'', z, h] — a per-channel LUT multiplier on the color push
+    times (c/40)^2 - c/40 (zero at 0 and 40) on GRID_BLENDINGS x TQ_BALANCES, from zones5 chroma 15/80
+    and zones8 chroma 80 probes on four hues (linear between); it applies at Blending 50 / Balance 0
+    too. NX adds the color of several zones up (zones6), so there is no color pair table.
+    Two zones at once: ti[b, l', pair, signs] — a LUT of what the pair adds beyond the two single
+    zones, per unit of (|va| / 100) * (|vb| / 100), on GRID_BLENDINGS x PAIR_BALANCES (zero at
+    Blending 50 and 100, where single zones already add up). Cross-validated by frame (3 + 1).
+    """
+    packs, picks = {}, None
+    rng = np.random.default_rng(seed)
+    for name, f in ZONE_DATA.items():       # only the training pixels are kept: the packs are large
+        z = np.load(data_file(f))
+        n = len(z["profiles"])
+        d = {fr: z[fr].reshape(n, -1, 3) for fr in frames}
+        if picks is None:
+            picks = {fr: rng.choice(d[fr].shape[1], NPX, replace=False) for fr in frames}
+        packs[name] = (list(z["profiles"]), {fr: d[fr][:, picks[fr]] for fr in frames},
+                       {t: np3.deserialize(bytes.fromhex(h)) for t, h in zip(z["profiles"], z["controls"])})
+        del d, z
+    def get(name, fr, tag):
+        pr, d, _ = packs[name]
+        return d[fr][pr.index(tag)].astype(np.float64) / 255
+    def has(name, tag):
+        return name in packs and tag in packs[name][0]
+    nb, nl, npl, nh = len(GRID_BLENDINGS), len(GRID_BALANCES), len(PAIR_BALANCES), len(GRADE_HUES)
+    reg = smoothness()
+
+    def bright_probes(zt, s, b, l):
+        if l == 0:
+            return ([("zones", f"ZB{zt}{s}100B50", 1.0)] if b == 50 else
+                    [("zones", f"ZB{zt}{s}{v}B{b}", v / 100) for v in (50, 100)])
+        if abs(l) in (35, 75):
+            return [("zones3", f"R{zt}{s}B{b}L{_sg(l)}", 1.0)]
+        if abs(l) in (85, 95):
+            out = [("zones4", f"X{zt}{s}B{b}L{_sg(l)}", 1.0)] if has("zones4", f"X{zt}{s}B{b}L{_sg(l)}") else []
+            if b == 0 and abs(l) == 85:
+                out.append(("zones4", f"X{zt}{s}50B0L{_sg(l)}", 0.5))
+            return out
+        return [("zones2", f"Q{zt}{s}B{b}L{_sg(l)}", 1.0)]
+
+    tb = np.zeros((nb, nl, 3, 2, NN, 3))
+    for zi, zone in enumerate(np3.ZONES):
+        zt = ZONE_TAG[zone]
+        for si, s in enumerate("PM"):
+            have = np.zeros((nb, nl), bool)
+            for i, b in enumerate(GRID_BLENDINGS):
+                for j, l in enumerate(GRID_BALANCES):
+                    probes = bright_probes(zt, s, b, l)
+                    if not probes:
+                        continue
+                    xs, cs, ys = [], [], []
+                    for fr in frames:
+                        for name, tag, a in probes:
+                            n = get(name, fr, "NEUTRAL")
+                            t = get(name, fr, tag)
+                            ok = ((t.max(1) < .99) & (n.max(1) < .99)).astype(float)
+                            xs.append(n)
+                            ys.append((t - n) * ok[:, None])
+                            cs.append(np.broadcast_to((ok * a)[:, None, None], (len(n), 1, 3)))
+                    tb[i, j, zi, si] = regress(np.vstack(xs), np.vstack(cs), np.vstack(ys), reg)[0]
+                    have[i, j] = True
+            _fill_balance(tb[:, :, zi, si], have)
+    pix = {fr: Pixels(model, get("zones", fr, "NEUTRAL")) for fr in frames}
+    tm = np.zeros((nb, nl, 3, MASK_BINS))
+    tc = np.zeros((nb, nl, 3, nh, NN, 3))
+    mid = (np.arange(MASK_BINS) + .5) / MASK_BINS
+    # color probes that also carry zone brightness (zones5 YB) are compared against the brightness-only grid
+    bonly = Model(model.blender, model.grade, model.shares, model.tools,
+                  {"tb": tb, "tm": np.zeros((nb, nl, 3, MASK_BINS)),
+                   "tc": np.zeros((nb, len(TC_BALANCES), 3, nh, NN, 3)), "ti": None})
+    bpx = {fr: Pixels(bonly, get("zones", fr, "NEUTRAL")) for fr in frames}
+    for zi, zone in enumerate(np3.ZONES):
+        zt = ZONE_TAG[zone]
+        have_m = np.zeros((nb, nl), bool)
+        have_c = np.zeros((nb, nl), bool)
+        for i, b in enumerate(GRID_BLENDINGS):
+            for j, l in enumerate(GRID_BALANCES):
+                if b == 50 and l == 0:
+                    have_m[i, j] = have_c[i, j] = True
+                    continue
+                lt = _sg(l) if l else "0"
+                one = [("zones2", f"QC{zt}B{b}L{lt}", MASK_HUES[zone])] if has("zones2", f"QC{zt}B{b}L{lt}") else []
+                four = [(pk, f"{pre}{zt}{h}B{b}L{lt}", h) for pk, pre in (("zones3", "RC"), ("zones4", "XC"), ("zones5", "YC"), ("zones7", "VC"))
+                        for h in GRADE_HUES if has(pk, f"{pre}{zt}{h}B{b}L{lt}")]
+                if not four:        # the hard-mask corner has color only together with brightness
+                    four = [("zones5", f"YB{zt}{h}{s}B{b}L{lt}", h) for h in GRID_HUES for s in "PM"
+                            if has("zones5", f"YB{zt}{h}{s}B{b}L{lt}")]
+                if not one + four:
+                    continue
+                items = []
+                for name, tag, hue in one + four:
+                    k = hue_kernel(hue)
+                    for fr in frames:
+                        px = pix[fr]
+                        t = get(name, fr, tag)
+                        ok = ((t.max(1) < .99) & (px.rgb.max(1) < .99))[:, None]
+                        if tag.startswith("YB"):
+                            d = (t - bpx[fr].graded(M.params_of(packs[name][2][tag]))) * ok
+                        else:
+                            d = (t - px.rgb - GRID_CHROMA * np.einsum("j,jnc->nc", k, px.grade[zone])) * ok
+                        push = GRID_CHROMA * np.einsum("j,jnc->nc", k, px.full) * ok
+                        items.append((hue if name != "zones2" else None, px, d, push))
+                num, den = np.zeros(MASK_BINS), np.zeros(MASK_BINS)
+                for _, px, d, push in items:
+                    a, c = mask_fit(d, push, px.y)
+                    num, den = num + a, den + c
+                tm[i, j, zi] = num / np.maximum(den, 1e-9)
+                have_m[i, j] = True
+                if four:
+                    def fit_tc(hues):
+                        xs, cs, ys = [], [], []
+                        for hue, px, d, push in items:
+                            if hue in hues:
+                                xs.append(px.rgb)
+                                ys.append(d - np.interp(px.y, mid, tm[i, j, zi])[:, None] * push)
+                                cs.append(push[:, None, :])
+                        return regress(np.vstack(xs), np.vstack(cs), np.vstack(ys), reg)[0]
+                    shared = fit_tc(GRADE_HUES)
+                    tc[i, j, zi] = [fit_tc((h,)) if any(it[0] == h for it in items) else shared for h in GRADE_HUES]
+                    have_c[i, j] = True
+        _fill_balance(tm[:, :, zi], have_m)
+        _fill_balance(tc[:, :, zi], have_c)
+    tc = tc[:, [GRID_BALANCES.index(l) for l in TC_BALANCES]]
+    # two zones at once: what a pair adds beyond the two single zones of the grid model above
+    single = Model(model.blender, model.grade, model.shares, model.tools,
+                   {"tb": tb, "tm": tm, "tc": tc, "ti": None})
+    spx = {fr: Pixels(single, get("zones", fr, "NEUTRAL")) for fr in frames}
+    ti = np.zeros((nb, npl, len(ZONE_PAIRS), 4, NN, 3))
+    if "zones4" in packs:
+        ctl = packs["zones4"][2]
+        for pi, (za, zc) in enumerate(ZONE_PAIRS):
+            for si, st in enumerate(("PP", "PM", "MP", "MM")):
+                for i, b in enumerate(GRID_BLENDINGS):
+                    if b >= 50:
+                        continue
+                    for j, l in enumerate(PAIR_BALANCES):
+                        tag = f"XP{ZONE_TAG[za]}{ZONE_TAG[zc]}{st}B{b}L{_sg(l) if l else 0}"
+                        if not has("zones4", tag):
+                            continue
+                        c = ctl[tag]
+                        coef = abs(c.grade[za][2]) / 100 * abs(c.grade[zc][2]) / 100
+                        xs, cs, ys = [], [], []
+                        for fr in frames:
+                            px = spx[fr]
+                            t = get("zones4", fr, tag)
+                            pred = px.graded(M.params_of(c))
+                            ok = ((t.max(1) < .99) & (px.rgb.max(1) < .99)).astype(float)
+                            xs.append(px.rgb)
+                            ys.append((t - pred) * ok[:, None])
+                            cs.append(np.broadcast_to((ok * coef)[:, None, None], (len(t), 1, 3)))
+                        ti[i, j, pi, si] = regress(np.vstack(xs), np.vstack(cs), np.vstack(ys), reg)[0]
+    # chroma: what is left at chroma 15 and 80 against the full grid model, per cell, zone and hue
+    full = Model(model.blender, model.grade, model.shares, model.tools, {"tb": tb, "tm": tm, "tc": tc, "ti": ti})
+    fpx = {fr: Pixels(full, get("zones", fr, "NEUTRAL")) for fr in frames}
+    nq = len(TQ_BALANCES)
+    tq = np.zeros((nb, nq, 3, len(GRID_HUES), NN, 3))
+    for zi, zone in enumerate(np3.ZONES):
+        have = np.zeros((nb, nq), bool)
+        for i, b in enumerate(GRID_BLENDINGS):
+            for j, l in enumerate(TQ_BALANCES):
+                lt = _sg(l) if l else "0"
+                for hi, h in enumerate(GRID_HUES):
+                    probes = [(pk, f"{pre}{ZONE_TAG[zone]}{h}B{b}L{lt}") for pk, pre in
+                              (("zones5", "YL"), ("zones5", "YU"), ("zones8", "UU"))]
+                    probes = [(pk, tag) for pk, tag in probes if has(pk, tag)]
+                    if not probes:
+                        continue
+                    xs, cs, ys = [], [], []
+                    for pk, tag in probes:
+                        c = packs[pk][2][tag]
+                        for fr in frames:
+                            px = fpx[fr]
+                            t = get(pk, fr, tag)
+                            y = px.graded(M.params_of(c))
+                            ok = ((t.max(1) < .99) & (px.rgb.max(1) < .99))[:, None]
+                            xs.append(px.rgb)
+                            ys.append((t - y) * ok)
+                            cs.append(((y - px.rgb) * _chroma_phi(c.grade[zone][1]) * ok)[:, None, :])
+                    tq[i, j, zi, hi] = regress(np.vstack(xs), np.vstack(cs), np.vstack(ys), reg)[0]
+                    have[i, j] = True
+        _fill_balance(tq[:, :, zi], have, TQ_BALANCES)
+    print("zone grid trained on", ", ".join(frames), flush=True)
+    return {"tb": tb, "tm": tm, "tc": tc, "ti": ti, "tq": tq}
+
+
+def _chroma_phi(chroma: float) -> float:
+    """The chroma term's weight: zero at chroma 0 and GRID_CHROMA, where the linear tables are exact."""
+    return (chroma / GRID_CHROMA) ** 2 - chroma / GRID_CHROMA
+
+
+def _hue_table(t: np.ndarray, hue: float) -> np.ndarray:
+    """t (n_hues, ...) over hues evenly spaced from 0: linear between the neighbouring two."""
+    n = len(t)
+    hh = (hue % 360) / (360 / n)
+    h0, u = int(hh) % n, hh - int(hh)
+    return (1 - u) * t[h0] + u * t[(h0 + 1) % n]
+
+
+ZONE_LUTS = ("tb", "tc", "ti", "tq")     # zone grid tables of (..., NN, 3) LUTs, stored as int8
+
+
+def quantize_lut(t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """A stack of (NN, 3) LUTs as int8 with a float32 scale per LUT (error under 1/254 of its largest
+    value: below 0.3/255 in sRGB for the zone grid)."""
+    s = (np.abs(t).max(axis=(-2, -1)) / 127).astype(np.float32)
+    q = np.round(t / np.where(s > 0, s, 1)[..., None, None]).astype(np.int8)
+    return q, s
+
+
+def save_zone_grid(g: dict, path: str = ZONE_GRID):
+    """tm as float16, the LUT tables as int8 + scales (quantize_lut): the web export ships the same
+    rounded values, so Python and the browser agree."""
+    luts = {}
+    for k in ZONE_LUTS:
+        if g.get(k) is not None:
+            luts[k + "_q"], luts[k + "_s"] = quantize_lut(g[k])
+    np.savez(path, tm=g["tm"].astype(np.float16), **luts,
+             blendings=np.array(GRID_BLENDINGS), balances=np.array(GRID_BALANCES),
+             pair_balances=np.array(PAIR_BALANCES), tc_balances=np.array(TC_BALANCES),
+             tq_balances=np.array(TQ_BALANCES))
+
+
+def load_zone_grid(path: str = ZONE_GRID) -> dict | None:
+    if not os.path.exists(path):
+        return None
+    z = np.load(path)
+    if (tuple(z["blendings"]) != GRID_BLENDINGS or tuple(z["balances"]) != GRID_BALANCES
+            or ("ti_q" in z.files and tuple(z["pair_balances"]) != PAIR_BALANCES)
+            or "tc_balances" not in z.files or tuple(z["tc_balances"]) != TC_BALANCES or "tb_q" not in z.files or "tc_q" not in z.files
+            or "tq_balances" not in z.files or tuple(z["tq_balances"]) != TQ_BALANCES):
+        print(f"{path}: grid axes differ from the code, retrain with `python3 profile_model.py zones`", file=sys.stderr)
+        return None
+    g = {"tm": z["tm"].astype(np.float64)}
+    for k in ZONE_LUTS:
+        g[k] = (z[k + "_q"].astype(np.float64) * z[k + "_s"].astype(np.float64)[..., None, None]
+                if k + "_q" in z.files else None)
+    return g
+
+
 class Model:
-    def __init__(self, blender: dict, grade: dict, shares: np.ndarray | None = None, tools: dict | None = None):
+    def __init__(self, blender: dict, grade: dict, shares: np.ndarray | None = None, tools: dict | None = None,
+                 zgrid: dict | None = None):
         self.blender = blender      # (set, attribute, sign) -> (NN, 3): dL, dhue (rad), dln(C+1) per unit
         self.grade = grade          # zone -> (8, NN, 3): sRGB offset per chroma unit along GRADE_HUES
         self.shares = shares        # (8, SHARE_K): blender color share over hue; None = SECTORS sectors
         self.tools = tools          # train_tools: Saturation, tonal sliders, zone masks and brightness; None = without them
+        self.zgrid = zgrid          # train_zone_grid: tb, tm, tc; None = the tools masks off Blending 50 / Balance 0
 
     def weights(self, x: np.ndarray) -> dict[str, np.ndarray]:
         return sector_weights(x, self.shares)
@@ -469,7 +792,7 @@ class Model:
         blender = {(k.split("_")[1], k.split("_")[2], int(k.split("_")[3])): z[k] for k in z.files if k.startswith("b_")}
         tools = {k[2:]: z[k] for k in z.files if k.startswith("t_")} or None
         return cls(blender, {k[2:]: z[k] for k in z.files if k.startswith("g_")},
-                   z["shares"] if "shares" in z.files else None, tools)
+                   z["shares"] if "shares" in z.files else None, tools, load_zone_grid())
 
     def mask(self, y: np.ndarray, zone: int, blending: float, balance: float) -> np.ndarray:
         """Zone mask over Y': default plus Blending and Balance shifts, interpolation by level."""
@@ -518,6 +841,7 @@ class Pixels:
     def __init__(self, model: Model, rgb: np.ndarray):
         self.model, self.rgb = model, rgb
         gi, gw = interp(rgb)
+        self.gi, self.gw = gi, gw
         self.grade = {zone: np.stack([lookup(t, gi, gw) for t in model.grade[zone]]) for zone in np3.ZONES}
         self.full = sum(self.grade.values())          # offset of all three zones: shared, without masks
         self.y = rgb @ M.LUMA
@@ -546,15 +870,18 @@ class Pixels:
 
     def graded(self, p: M.Params) -> np.ndarray:
         out = self.rgb
-        tools = self.model.tools
+        zg = self.model.zgrid
+        if zg is not None and (p.blending != 50 or p.balance != 0):
+            return self.graded_grid(p, zg)
         for zi, zone in enumerate(np3.ZONES):
             hue, chroma = p.grade[zone][0], p.grade[zone][1]
             if chroma:
                 k = hue_kernel(hue)
-                out = out + chroma * np.einsum("j,jnc->nc", k, self.grade[zone])
+                dc = chroma * np.einsum("j,jnc->nc", k, self.grade[zone])
                 d = self.mask_delta(zi, p)
                 if d is not None:
-                    out = out + chroma * d[:, None] * np.einsum("j,jnc->nc", k, self.full)
+                    dc = dc + chroma * d[:, None] * np.einsum("j,jnc->nc", k, self.full)
+                out = out + self.chroma_term(dc, zi, hue, chroma, zg, p)
             v = p.grade_bright.get(zone, 0) if self.bright is not None else 0
             if v:
                 si = 0 if v > 0 else 1
@@ -563,6 +890,47 @@ class Pixels:
                 if d is not None:
                     out = out + abs(v) / 100 * d[:, None] * self.bright[:, si].sum(0)
         return out
+
+    def graded_grid(self, p: M.Params, zg: dict) -> np.ndarray:
+        """Zone grading off Blending 50 / Balance 0 through the zone grid (train_zone_grid)."""
+        out = self.rgb
+        i50, j0 = GRID_BLENDINGS.index(50), GRID_BALANCES.index(0)
+        mid = (np.arange(MASK_BINS) + .5) / MASK_BINS
+        tm = grid_cell(zg["tm"], p.blending, p.balance)
+        tc = tb = None
+        for zi, zone in enumerate(np3.ZONES):
+            hue, chroma = p.grade[zone][0], p.grade[zone][1]
+            if chroma:
+                k = hue_kernel(hue)
+                if tc is None:
+                    tc = grid_cell(zg["tc"], p.blending, p.balance, TC_BALANCES)
+                w = np.interp(self.y, mid, tm[zi])[:, None] + lookup(_hue_table(tc[zi], hue), self.gi, self.gw)
+                dc = chroma * np.einsum("j,jnc->nc", k, self.grade[zone]) + chroma * w * np.einsum("j,jnc->nc", k, self.full)
+                out = out + self.chroma_term(dc, zi, hue, chroma, zg, p)
+            v = p.grade_bright.get(zone, 0) if self.bright is not None else 0
+            if v:
+                si = 0 if v > 0 else 1
+                if tb is None:
+                    tb = grid_cell(zg["tb"], p.blending, p.balance) - zg["tb"][i50, j0]
+                out = out + abs(v) / 100 * (self.bright[zi, si] + lookup(tb[zi, si], self.gi, self.gw))
+        if zg.get("ti") is not None:
+            ti = None
+            for pi, (za, zc) in enumerate(ZONE_PAIRS):
+                va, vc = p.grade_bright.get(za, 0), p.grade_bright.get(zc, 0)
+                if va and vc and self.bright is not None:
+                    if ti is None:
+                        ti = grid_cell(zg["ti"], p.blending, p.balance, PAIR_BALANCES)
+                    si = (0 if va > 0 else 2) + (0 if vc > 0 else 1)
+                    out = out + abs(va) / 100 * abs(vc) / 100 * lookup(ti[pi, si], self.gi, self.gw)
+        return out
+
+    def chroma_term(self, dc: np.ndarray, zi: int, hue: float, chroma: float, zg: dict | None,
+                    p: M.Params) -> np.ndarray:
+        """A zone's color push dc with the chroma correction (zone grid tq at the cell), if there is one."""
+        if zg is None or zg.get("tq") is None or chroma == GRID_CHROMA:
+            return dc
+        tq = grid_cell(zg["tq"][:, :, zi], p.blending, p.balance, TQ_BALANCES)
+        return dc * (1 + _chroma_phi(chroma) * lookup(_hue_table(tq, hue), self.gi, self.gw))
 
     @staticmethod
     def remember(cache: dict, key, make):
@@ -635,6 +1003,11 @@ def check(model: Model, path: str = CHECK):
 
 
 def main():
+    if sys.argv[1:] == ["zones"]:
+        g = train_zone_grid(Model.load(PATH))
+        save_zone_grid(g)
+        print("file:", ZONE_GRID)
+        return
     model = Model.train()
     model.save()
     print("file:", PATH)

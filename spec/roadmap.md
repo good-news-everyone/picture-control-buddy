@@ -2,6 +2,10 @@
 
 ## Proposed, no decision yet
 
+**Interface after the fit-engine research (2026-11-24): agreed, deferred.** Primary frame weight,
+effective tone curve, flat-region error in the report, an optional flat-region weight in the fit, a check
+frame instead of a "harmful frame" flag. Details and numbers: [ui.md](ui.md) "Planned, not implemented".
+
 **A synthetic NEF instead of the on-screen chart.** Write the values straight into the sensor data, as in NRLR.
 
 - 24 720 patches instead of 216, without clipping, a screen and non-grey greys.

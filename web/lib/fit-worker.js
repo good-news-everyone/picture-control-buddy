@@ -88,7 +88,8 @@ self.onmessage = async (e) => {
       control: out.control,
       scores: out.scores,
       pairs: out.names,
-      init: "zero",
+      init: out.init,                         // the winning STARTS entry (fit.js)
+      starts: out.starts,
     };
     self.postMessage({ type: "ready", id: m.id, generation: m.generation,
                        result, ms: Date.now() - t0 }, [out.x.buffer]);

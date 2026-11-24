@@ -118,7 +118,7 @@ Fixed 2026-11-19 at the start of the full-flow implementation ([ui-plan.md](ui-p
 
 1. **Strength UI.** No preset buttons (30/50/70/100%) — a slider only. The profile and file name do not change at any strength: no `-70`-style suffix, no truncation. ~~The strength-set export (several NP3s at once) stays; its files get valid unique names derived from the base name.~~ The strength-set export is removed (decision #10). This keeps the manual-MVP behavior; the older preset-button/suffix requirements above are superseded.
 2. **Reset semantics.** In the fitting flow (steps 2, 3.1, 3.2) reset of a field, a group or the whole profile returns to the selected fitted version. ~~Standalone manual editing (the current single-RAW editor) keeps the neutral-default reset.~~ The standalone editor is removed by decision #7. Changed-field marks and undo/redo use the fitted baseline.
-3. **Refit initialization.** A refit is a new deterministic fit from the same zero initialization as `match.py`, over all selected pairs. The previous version is kept unchanged. Warm-start from the previous control or from manual edits is a separate quality experiment, not UI behavior.
+3. **Refit initialization.** A refit is a new deterministic fit from the same fixed starts as `match.py` (`match.STARTS`: zero, and — only when that run gets stuck — zero with zone brightness shadows −50 / midtone +30; the lower cost wins), over all selected pairs. The previous version is kept unchanged. Warm-start from the previous control or from manual edits is a separate quality experiment, not UI behavior.
 4. **Versions and persistence.** Fit versions are immutable and live in tab memory only: `draft`, `_r1`, `_r2`, ... Versions store controls and fit metadata, not pixel buffers. Nothing is written to `out/`, there is no server storage. Session export/autosave is out of scope.
 5. **Strength.** 0-150%, applied after every fit/refit (fitting always runs at 100%); no separate color/curve strengths. Single and batch exports always scale from the base control, never from an already scaled result.
 6. **Open product items.** The disclaimer stays a `DISCLAIMER` stub until approved. Hold-out validation is not part of the first full-flow delivery. No version-retention limit until memory measurements justify one.
@@ -216,6 +216,34 @@ Every section is a collapsible group, open by default (decision #13).
 - A browser render with an arbitrary `np3.Control`, including the curve and detail. Strength is applied by a local analog of `strength.scaled`.
 - Local download of a single NP3 via Blob, without writing to the server.
 - A browser analog of `analyze.region_sums`: the table needs mean Lab of the target and the render by groups, not only sums.
+
+## Planned, not implemented (fit-engine research 2026-11-24)
+
+Agreed with the user, deferred. Numbers are from the research harness on the 34 SA pairs and NX checks
+(project doc "fit-engine research, part 2", `spec/decisions.md`).
+
+1. **Primary frame.** A pair can be marked as the primary one on Compare; it weighs ×2–3 in the fit
+   (its residual rows multiplied by sqrt(w), the 1/sqrt(n_q · P) normalization unchanged). Measured with
+   ×3 on the yellow-house frame (before the zone grid model): that frame 3.61 -> 3.21, the 28 frames
+   outside the fit no worse (3.53 -> 3.46). Needs
+   the same pair weight in `match.py` (the reference) and a `weight` per pair in the fit inputs.
+2. **Effective tone curve.** The fit splits tone between the curve and the zone brightness (shadows
+   about -100, midtones about +60 with Blending near 0), so the raw curve thumbnail looks crushed in the
+   shadows while the result is not. Show, next to (or instead of) the raw curve, the tone the profile
+   actually applies: a neutral grey ramp through the whole profile (grading with zone brightness,
+   Blending/Balance, Saturation, curve), output Y' over input Y'. The editor keeps editing the raw curve.
+3. **Flat-region error in the report.** Next to the overall dE, the dE of large flat regions (texture,
+   the 5x5 Lab std of target and neutral, below 2; connected regions of at least 0.3 % of the frame) and
+   the dE of their mean colors (area-weighted, with p90). Walls and sky are what the eye compares; on the
+   yellow-house frame the flat-region error was 2.93 against 3.21 overall, p90 of region means 3.86.
+4. **Flat-region weight in the fit (optional, the user decides).** Pixels outside large flat regions
+   weigh 0.1–0.3 (weights renormalized to mean 1, otherwise the ridge grows relatively and the profile
+   collapses). On the fit frames region-mean dE -0.26 (yellow house p90 3.64 -> 2.49), on other frames
+   the overall dE +0.08. If added, it is a switch, off by default.
+5. **Check frame instead of a "harmful frame" flag.** A frame-exclusion hint from one session's data is
+   mostly a false alarm (research step 9): do not add automatic exclusion or a warning flag. Instead,
+   open question 3 below: one pair held out of the fit as a judge, with its error shown separately, plus
+   the advice "add more varied frames".
 
 ## Open questions
 

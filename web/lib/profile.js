@@ -32,6 +32,14 @@ function npInterp(x, xp, fp) {
 
 // ---------- model loading ----------
 
+/** IEEE half -> double (the zone grid ships as float16, profile_model.save_zone_grid). */
+function halfToFloat(h) {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+  if (e === 0) return s * f * 2 ** -24;
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * (1 + f / 1024) * 2 ** (e - 15);
+}
+
 /** A table from profile.bin as Float64Array [offset, offset+count). */
 function slice64(f32, t) {
   const out = new Float64Array(t.count);
@@ -71,6 +79,30 @@ export function loadModel(meta, buf) {
   m.grade = {};
   for (const z of m.zones) m.grade[z] = slice64(f32, T[`grade_${z}`]);
   m.shares = T.shares ? slice64(f32, T.shares) : null;
+  // zone grid (profile_model.train_zone_grid): float16 after the float32 tables, see export_model.py
+  m.zgrid = null;
+  if (meta.zone_grid) {
+    const zg = meta.zone_grid;
+    const tabs = {};
+    const tm = zg.tables.tm;
+    tabs.tm = Float64Array.from(new Uint16Array(buf, zg.byte_offset + tm.byte, tm.count), halfToFloat);
+    // LUT tables: int8 with a float32 scale per LUT of NN * 3 (profile_model.quantize_lut)
+    for (const k of ["tb", "tc", "ti", "tq"]) {
+      const tq = zg.tables[`${k}_q`], ts = zg.tables[`${k}_s`];
+      if (!tq) { tabs[k] = null; continue; }
+      const q = new Int8Array(buf, zg.byte_offset + tq.byte, tq.count);
+      const sc = new Float32Array(buf, zg.byte_offset + ts.byte, ts.count);
+      const blk = tq.count / ts.count, t = new Float64Array(tq.count);
+      for (let i = 0; i < tq.count; i++) t[i] = q[i] * sc[Math.floor(i / blk)];
+      tabs[k] = t;
+    }
+    m.zgrid = {
+      blendings: Float64Array.from(zg.blendings), balances: Float64Array.from(zg.balances),
+      pair_balances: Float64Array.from(zg.pair_balances ?? []), zone_pairs: zg.zone_pairs ?? [],
+      tc_balances: Float64Array.from(zg.tc_balances), n_hues: zg.n_hues, grid_chroma: zg.grid_chroma,
+      tq_balances: Float64Array.from(zg.tq_balances ?? []), tq_hues: zg.tables.tq_q ? zg.tables.tq_q.shape[3] : 0, ...tabs,
+    };
+  }
   m.tools = T.tone ? {
     tone: slice64(f32, T.tone), sat: slice64(f32, T.sat), mask: slice64(f32, T.mask),
     blend: slice64(f32, T.blend), bal: slice64(f32, T.bal), gbl: slice64(f32, T.gbl),
@@ -235,6 +267,43 @@ export function paramsOf(c, m) {
   };
 }
 
+// ---------- zone grid ----------
+
+/**
+ * Bilinear interpolation of a zone grid table (nb, nl, size) at (blending, balance), clamped to the
+ * grid. Port of profile_model.grid_cell: the cell is the last knot <= the value, at most the second last.
+ */
+function gridCell(zg, table, size, blending, balance, BA = zg.balances) {
+  const BL = zg.blendings, nb = BL.length, nl = BA.length;
+  const b = clamp(blending, BL[0], BL[nb - 1]), l = clamp(balance, BA[0], BA[nl - 1]);
+  let i = 0; while (i < nb - 2 && BL[i + 1] <= b) i++;
+  let j = 0; while (j < nl - 2 && BA[j + 1] <= l) j++;
+  const u = (b - BL[i]) / (BL[i + 1] - BL[i]), v = (l - BA[j]) / (BA[j + 1] - BA[j]);
+  const out = new Float64Array(size);
+  const corners = [[i, j, (1 - u) * (1 - v)], [i + 1, j, u * (1 - v)], [i, j + 1, (1 - u) * v], [i + 1, j + 1, u * v]];
+  for (const [a, c, w] of corners) {
+    if (w === 0) continue;
+    const base = (a * nl + c) * size;
+    for (let q = 0; q < size; q++) out[q] += w * table[base + q];
+  }
+  return out;
+}
+
+/** Table over hues evenly spaced from 0 (n of them, size each, at off): linear between the two neighbours.
+ * Port of profile_model._hue_table. */
+function hueTable(table, off, n, size, hue) {
+  const hh = (((hue % 360) + 360) % 360) / (360 / n);
+  const h0 = Math.floor(hh) % n, h1 = (h0 + 1) % n, u = hh - Math.floor(hh);
+  const out = new Float64Array(size);
+  for (let q = 0; q < size; q++) out[q] = (1 - u) * table[off + h0 * size + q] + u * table[off + h1 * size + q];
+  return out;
+}
+
+/** The chroma term's weight (profile_model._chroma_phi): zero at chroma 0 and grid_chroma. */
+function chromaPhi(chroma, c0) {
+  return (chroma / c0) ** 2 - chroma / c0;
+}
+
 // ---------- Pixels: neutral with precomputed inputs ----------
 
 /**
@@ -340,6 +409,7 @@ export class Pixels {
 
   /** Zone grading: color through masks and brightness, the shared offset of all zones outside masks. */
   graded(p) {
+    if (this.m.zgrid && (p.blending !== 50 || p.balance !== 0)) return this.gradedGrid(p);
     const m = this.m, n = this.n;
     const out = Float64Array.from(this.rgb);
     for (let zi = 0; zi < 3; zi++) {
@@ -348,9 +418,10 @@ export class Pixels {
       if (chroma) {
         const k = hueKernel(hue, m);
         const g = this.grade[zone];
+        const dc = new Float64Array(n * 3);
         for (let j = 0; j < 8; j++) {
           const kj = chroma * k[j];
-          for (let i = 0; i < n * 3; i++) out[i] += kj * g[j * n * 3 + i];
+          for (let i = 0; i < n * 3; i++) dc[i] += kj * g[j * n * 3 + i];
         }
         const d = this.maskDelta(zi, p);
         if (d !== null)
@@ -358,11 +429,13 @@ export class Pixels {
             const kj = chroma * k[j];
             for (let i = 0; i < n; i++) {
               const kd = kj * d[i];
-              out[i * 3] += kd * this.full[j * n * 3 + i * 3];
-              out[i * 3 + 1] += kd * this.full[j * n * 3 + i * 3 + 1];
-              out[i * 3 + 2] += kd * this.full[j * n * 3 + i * 3 + 2];
+              dc[i * 3] += kd * this.full[j * n * 3 + i * 3];
+              dc[i * 3 + 1] += kd * this.full[j * n * 3 + i * 3 + 1];
+              dc[i * 3 + 2] += kd * this.full[j * n * 3 + i * 3 + 2];
             }
           }
+        this.chromaTerm(dc, zi, hue, chroma, p);
+        for (let i = 0; i < n * 3; i++) out[i] += dc[i];
       }
       const v = this.bright !== null ? p.grade_bright[zone] : 0;
       if (v) {
@@ -382,6 +455,90 @@ export class Pixels {
           }
         }
       }
+    }
+    return out;
+  }
+
+  /** The chroma term table at the (Blending, Balance) cell: (3 zones, tq_hues, NN, 3), cached per cell. */
+  tqCell(p, size) {
+    const zg = this.m.zgrid;
+    if (!this._tq || this._tq.b !== p.blending || this._tq.l !== p.balance)
+      this._tq = { b: p.blending, l: p.balance, t: gridCell(zg, zg.tq, size, p.blending, p.balance, zg.tq_balances) };
+    return this._tq.t;
+  }
+
+  /** A zone's color push dc with the chroma correction (zone grid tq at the cell), in place. Port of Pixels.chroma_term. */
+  chromaTerm(dc, zi, hue, chroma, p) {
+    const zg = this.m.zgrid;
+    if (!zg || !zg.tq || chroma === zg.grid_chroma) return;
+    const NN = this.m.NN, nq = zg.tq_hues, size = 3 * nq * NN * 3;
+    const cell = this.tqCell(p, size);
+    const Q = lookup(hueTable(cell, zi * nq * NN * 3, nq, NN * 3, hue), this.gi, this.gw, this.n);
+    const phi = chromaPhi(chroma, zg.grid_chroma);
+    for (let i = 0; i < dc.length; i++) dc[i] *= 1 + phi * Q[i];
+  }
+
+  /** Zone grading off Blending 50 / Balance 0 through the zone grid. Port of Pixels.graded_grid. */
+  gradedGrid(p) {
+    const m = this.m, n = this.n, zg = m.zgrid, NN = m.NN, B = m.MASK_BINS;
+    const out = Float64Array.from(this.rgb);
+    const tm = gridCell(zg, zg.tm, 3 * B, p.blending, p.balance);
+    let tc = null, tb = null;
+    const mid = Float64Array.from({ length: B }, (_, b) => (b + 0.5) / B);
+    for (let zi = 0; zi < 3; zi++) {
+      const zone = m.zones[zi];
+      const [hue, chroma] = p.grade[zone];
+      if (chroma) {
+        const k = hueKernel(hue, m);
+        const nh = zg.n_hues;
+        if (tc === null) tc = gridCell(zg, zg.tc, 3 * nh * NN * 3, p.blending, p.balance, zg.tc_balances);
+        const W = lookup(hueTable(tc, zi * nh * NN * 3, nh, NN * 3, hue), this.gi, this.gw, n);
+        const wm = tm.subarray(zi * B, (zi + 1) * B);
+        const g = this.grade[zone];
+        const dc = new Float64Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const wy = npInterp(this.y[i], mid, wm);
+          for (let c = 0; c < 3; c++) {
+            let kg = 0, kf = 0;
+            for (let j = 0; j < 8; j++) {
+              kg += k[j] * g[j * n * 3 + i * 3 + c];
+              kf += k[j] * this.full[j * n * 3 + i * 3 + c];
+            }
+            dc[i * 3 + c] = chroma * kg + chroma * (wy + W[i * 3 + c]) * kf;
+          }
+        }
+        this.chromaTerm(dc, zi, hue, chroma, p);
+        for (let i = 0; i < n * 3; i++) out[i] += dc[i];
+      }
+      const v = this.bright !== null ? p.grade_bright[zone] : 0;
+      if (v) {
+        const si = v > 0 ? 0 : 1, kv = Math.abs(v) / 100;
+        if (tb === null) {
+          tb = gridCell(zg, zg.tb, 3 * 2 * NN * 3, p.blending, p.balance);
+          const i50 = zg.blendings.indexOf(50), j0 = zg.balances.indexOf(0);
+          const base = (i50 * zg.balances.length + j0) * 3 * 2 * NN * 3;
+          for (let q = 0; q < tb.length; q++) tb[q] -= zg.tb[base + q];
+        }
+        const off = (zi * 2 + si) * NN * 3;
+        const d = lookup(tb.subarray(off, off + NN * 3), this.gi, this.gw, n);
+        const br = this.bright[zi][si];
+        for (let i = 0; i < n * 3; i++) out[i] += kv * (br[i] + d[i]);
+      }
+    }
+    // two zones at once: what a pair adds beyond the two single zones (profile_model ZONE_PAIRS)
+    if (zg.ti && this.bright !== null) {
+      let ti = null;
+      const size = zg.zone_pairs.length * 4 * NN * 3;
+      zg.zone_pairs.forEach(([za, zc], pi) => {
+        const va = p.grade_bright[za] || 0, vc = p.grade_bright[zc] || 0;
+        if (!va || !vc) return;
+        if (ti === null) ti = gridCell(zg, zg.ti, size, p.blending, p.balance, zg.pair_balances);
+        const si = (va > 0 ? 0 : 2) + (vc > 0 ? 0 : 1);
+        const off = (pi * 4 + si) * NN * 3;
+        const d = lookup(ti.subarray(off, off + NN * 3), this.gi, this.gw, n);
+        const k = Math.abs(va) / 100 * Math.abs(vc) / 100;
+        for (let i = 0; i < n * 3; i++) out[i] += k * d[i];
+      });
     }
     return out;
   }

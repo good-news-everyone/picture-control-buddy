@@ -81,6 +81,16 @@ RING = 0.02          # neighboring colors of the wheel pull towards each other: 
 # in dE76 a hue shift of blues costs almost nothing, and the sky drifted into magenta.
 KC = 0.5            # chroma weight of dE2000: below 1 is stricter on chroma; at 1 the sky paled
 FLAT_L = True       # lightness without the dE2000 SL: the curve's white knee holds as in dE76
+# Cauchy loss on each pixel's weighted dE (the sample multiplier taken out): pixels the profile cannot
+# reach (local edits of the target, alignment) pull less. c = 6: -0.05..-0.07 dE on held-out frames.
+ROBUST = 6.0
+# Starts of the fit. The first always runs; the others only when it got stuck (fewer than STUCK
+# accepted iterations: with the old zone model LM stopped after 2 on 17 pairs, and zone brightness
+# shadows -50 / midtone +30 took it out: 3.55 -> 3.20 on them, 3.54 -> 3.31 held out). The lower
+# final cost wins. With the zone grid model no run of 18 got stuck (10-30 iterations), and a second
+# start on every fit only traded held-out quality for train cost (0.5% lower cost, +0.07 dE held out).
+STARTS = {"zero": {}, "zones": {"shadows": -50.0, "midtone": 30.0}}
+STUCK = 5
 
 
 def prepared(nef: str, target: str) -> dict:
@@ -143,6 +153,25 @@ def control(x: np.ndarray, name: str) -> np3.Control:
     return c
 
 
+def robust(r: np.ndarray, sm: np.ndarray) -> np.ndarray:
+    """Cauchy rescaling of weighted residual rows r (n, 3) whose sample multipliers are sm (n,):
+    the row norm e = |r| / sm becomes sqrt(c^2 log(1 + e^2 / c^2)), the direction is kept."""
+    if not ROBUST:
+        return r
+    e = np.sqrt((r * r).sum(1)) / sm
+    c = ROBUST
+    s = np.where(e > 1e-9, np.sqrt(c * c * np.log1p(e * e / (c * c))) / np.maximum(e, 1e-9), 1.0)
+    return r * s[:, None]
+
+
+def start(name: str) -> np.ndarray:
+    """The initial vector of a STARTS entry: zero blender/grade, linear curve, default sliders."""
+    x = np.r_[np.zeros(F.NB + F.NG), np.r_[0.0, np.diff(F.XS)], EXTRA_DEFAULT]
+    for z, v in STARTS[name].items():
+        x[NX + 1 + np3.ZONES.index(z)] = v
+    return x
+
+
 def sample(a: np.ndarray, t: np.ndarray, rng, freq: np.ndarray | None = None,
            trust: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Indices for the fit (biased towards highlights), their weight multipliers and indices for scoring (uniform).
@@ -182,7 +211,8 @@ class Pair:
         pick, mult, test = sample(b, t, rng, freq, trust)
         self.b, self.t = b[pick], t[pick]
         self.tlab = C.srgb_to_lab(self.t)
-        self.W = C.de2000_weights(self.tlab, KC, FLAT_L) * np.sqrt(mult)[:, None, None]
+        self.sm = np.sqrt(mult)
+        self.W = C.de2000_weights(self.tlab, KC, FLAT_L) * self.sm[:, None, None]
         self.px = P.Pixels(model, self.b)
         self.tb, self.tt = b[test], t[test]
         self.ttlab = C.srgb_to_lab(self.tt)
@@ -211,6 +241,7 @@ class Points(Pair):
         self.b, self.t = b, t
         self.tlab = C.srgb_to_lab(t)
         self.W = C.de2000_weights(self.tlab, KC, FLAT_L)
+        self.sm = np.ones(len(b))
         self.px = P.Pixels(model, b)
         self.tb, self.tt, self.tpx, self.ttlab = b, t, self.px, self.tlab
         self.cpx = None
@@ -233,11 +264,12 @@ class Matcher:
         return float(C.de2000(C.srgb_to_lab(self.predict(q, p, True)), q.ttlab).mean())
 
     def fit(self, pairs: list[Pair], iters=30) -> np.ndarray:
-        x0 = np.r_[np.zeros(F.NB + F.NG), np.r_[0.0, np.diff(F.XS)], EXTRA_DEFAULT]
-
+        """LM from the first STARTS entry, from the others only if it got stuck (STUCK); the lowest
+        cost wins (its name lands in self.init, the costs of the starts run in self.starts)."""
         def fn(x):
             p = unpack(x)
-            r = [C.weighted(q.W, C.srgb_to_lab(q.px(p)) - q.tlab).ravel() / np.sqrt(len(q.b) * len(pairs)) for q in pairs]
+            r = [robust(C.weighted(q.W, C.srgb_to_lab(q.px(p)) - q.tlab), q.sm).ravel()
+                 / np.sqrt(len(q.b) * len(pairs)) for q in pairs]
             r += [(100 * np.where(q.cmask, np.minimum(q.cpx(p) - q.ct, 0), q.cpx(p) - q.ct)).ravel()
                   / np.sqrt(len(q.b) * len(pairs)) for q in pairs if q.cpx is not None]
             k = knots(x)
@@ -246,7 +278,15 @@ class Matcher:
                          F.RIDGE * x[:F.NB + F.NG], RING * (b - np.roll(b, 1, 0)).ravel(), F.WHITE * (k[-1] - 1),
                          extra_penalty(x)]
 
-        return F.lm(fn, x0, iters)[0]
+        runs = {}
+        for name in STARTS:
+            info = {}
+            runs[name] = F.lm(fn, start(name), iters, info)
+            if info["run"] >= STUCK:
+                break
+        self.starts = {name: float(cost) for name, (_, cost) in runs.items()}
+        self.init = min(runs, key=lambda k: runs[k][1])
+        return runs[self.init][0]
 
 
 def write(name: str, x: np.ndarray) -> tuple[np3.Control, str]:
@@ -569,6 +609,7 @@ def chart_points(m: Matcher, d, mask: np.ndarray, weights: np.ndarray | None) ->
         q = Points(name, np.clip(b, 0, 1), t, m.model, 1.0)
         q.sheet, q.ev = int(d["sheet"][sel][0]), float(d["ev"][sel][0])
         q.W = q.W * np.sqrt(w)[:, None, None]
+        q.sm = np.sqrt(w)
         clip = sel & ((d["flags"] & CH.F_TCLIP) > 0) & (d["target"].min(1) >= NEAR_WHITE)
         if clip.any():
             q.cpx = P.Pixels(m.model, np.clip(d["neutral"][clip], 0, 1))
@@ -687,6 +728,7 @@ def main():
     for tip in A.suggest(frames, list(analysis["frames"].values()), "add to the fit"):
         print("  advice:", tip)
     x = m.fit(pairs)
+    print("starts:", ", ".join(f"{k} {v:.4f}" for k, v in m.starts.items()), "->", m.init)
     ctrl, path = write(name, x)
     A.save(name, analysis)
     json.dump({os.path.abspath(b): os.path.abspath(a) for a, b in zip(files[::2], files[1::2])},

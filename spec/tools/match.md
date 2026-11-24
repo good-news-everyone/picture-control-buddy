@@ -38,7 +38,11 @@ omitted in the draft: it is taken from the first shot.
 5. Color with a profile is computed by the step model `profile_model.py`.
 6. The fit (Levenberg-Marquardt, `fit.py`): 24 blender values, 3 grading zones, 20 curve points,
    Saturation, three zone brightnesses, Blending and Balance; residual over the dE2000 components,
-   kC = 0.5, FLAT_L; regularization: curve smoothness, pull to zero, neighbor pull, curve end to white.
+   kC = 0.5, FLAT_L, each pixel through a Cauchy loss (`ROBUST = 6`: pixels the profile cannot
+   reach — local edits of the target, alignment — pull less); regularization: curve smoothness, pull
+   to zero, neighbor pull, curve end to white. LM runs from zero; if that run gets stuck (fewer than
+   `STUCK = 5` accepted iterations) it runs again from zone brightness shadows −50 / midtone +30
+   (`STARTS`) and the lower final cost wins (`starts:` line in the output).
 7. Light almost-grey pixels (a channel >= 0.98, darkest >= 0.8, up to 3000 per pair) enter with a
    one-sided penalty on the pinned channel, so a white-knee curve is not pulled down.
 8. The NP3 is written with sharpening 2.0, mid-range 1.0, clarity 0 (defaults, not fitted), plus

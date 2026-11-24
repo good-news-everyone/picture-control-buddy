@@ -32,6 +32,11 @@ export const NEAR_WHITE = 0.8;
 export const CLIP_PIXELS = 3000;
 export const KC = 0.5;         // chroma weight of dE2000: below 1 is stricter on chroma
 export const FLAT_L = true;    // no dE2000 SL: the curve's white knee holds as in dE76
+export const ROBUST = 6.0;     // Cauchy scale on each pixel's weighted dE (match.ROBUST)
+// the fit starts (match.STARTS): zone brightness of each; the first always runs, the others only
+// when it got stuck (fewer than STUCK accepted iterations); the lower final cost wins
+export const STARTS = [["zero", {}], ["zones", { shadows: -50, midtone: 30 }]];
+export const STUCK = 5;
 
 const GRID257 = Float64Array.from({ length: 257 }, (_, i) => i / 256);
 
@@ -40,6 +45,13 @@ export function zeroInit() {
   const x = new Float64Array(NX + 6);
   for (let i = 0; i < NC - 1; i++) x[NB + NG + 1 + i] = XS[i + 1] - XS[i];
   for (let i = 0; i < 6; i++) x[NX + i] = EXTRA_DEFAULT[i];
+  return x;
+}
+
+/** The initial vector of a STARTS entry (match.start): zeroInit plus its zone brightness. */
+export function startInit(zones) {
+  const x = zeroInit();
+  for (const [z, v] of Object.entries(zones)) x[NX + 1 + ZONES.indexOf(z)] = v;
   return x;
 }
 
@@ -194,9 +206,17 @@ export function makeResidual(pairs) {
 
 // ---------- the residual (match.Matcher.fit fn, spec/web-schemas.md §3.4) ----------
 
+/** match.robust for one row: the factor that turns its norm e into sqrt(c^2 log(1 + e^2 / c^2)). */
+export function robustScale(e) {
+  if (!ROBUST) return 1;
+  const c = ROBUST;
+  return e > 1e-9 ? Math.sqrt(c * c * Math.log1p(e * e / (c * c))) / Math.max(e, 1e-9) : 1;
+}
+
 /**
  * The full residual vector for P pairs at x: per pair the weighted Lab residuals
- * (de2000_weights at the target, KC=0.5, FLAT_L, x sqrt(mult)) and the near-white one-sided
+ * (de2000_weights at the target, KC=0.5, FLAT_L, x sqrt(mult); each pixel's row rescaled by the
+ * Cauchy loss of match.robust, its norm over q.sm = sqrt(mult)) and the near-white one-sided
  * clip penalty (cmask channels penalized only when darker), both over sqrt(n_q * P); then the
  * shared regularization tail: SMOOTH*100*diff(k,2)*BEND, RIDGE*x[:30], RING*(b - roll(b,1)),
  * WHITE*(k[-1] - 1), RIDGE*(extra - EXTRA_DEFAULT).
@@ -218,9 +238,13 @@ export function residual(pairs, x, stage = null) {
     for (let i = 0; i < q.n; i++) {
       const b3 = i * 3, b9 = i * 9;
       const d0 = pred[b3] - q.tlab[b3], d1 = pred[b3 + 1] - q.tlab[b3 + 1], d2 = pred[b3 + 2] - q.tlab[b3 + 2];
-      out[o++] = (q.W[b9] * d0 + q.W[b9 + 1] * d1 + q.W[b9 + 2] * d2) * norm;
-      out[o++] = (q.W[b9 + 3] * d0 + q.W[b9 + 4] * d1 + q.W[b9 + 5] * d2) * norm;
-      out[o++] = (q.W[b9 + 6] * d0 + q.W[b9 + 7] * d1 + q.W[b9 + 8] * d2) * norm;
+      const r0 = q.W[b9] * d0 + q.W[b9 + 1] * d1 + q.W[b9 + 2] * d2;
+      const r1 = q.W[b9 + 3] * d0 + q.W[b9 + 4] * d1 + q.W[b9 + 5] * d2;
+      const r2 = q.W[b9 + 6] * d0 + q.W[b9 + 7] * d1 + q.W[b9 + 8] * d2;
+      const s = robustScale(Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2) / q.sm[i]) * norm;
+      out[o++] = r0 * s;
+      out[o++] = r1 * s;
+      out[o++] = r2 * s;
     }
     if (q.cpx) {
       const cp = predict(q.cpx, p, x, stage);
@@ -420,14 +444,46 @@ export async function lmAsync(fn, x, iters, hooks, jacobian) {
   return s.value;
 }
 
-/** The full browser fit: match.Matcher.fit from the zero init. pairs — the prepareFitPair objects. */
+/**
+ * The hooks of one start: onIteration counts on across the starts (start s reports s * iters + run
+ * of (s + 1) * iters: a second start extends the bar), shouldCancel as is.
+ */
+function startHooks(hooks, s, iters) {
+  const on = hooks.onIteration;
+  return { ...hooks, onIteration: on ? (run, _req, cost, lam) => on(s * iters + run, (s + 1) * iters, cost, lam) : undefined };
+}
+
+/** The lowest-cost run of the STARTS (match.Matcher.fit) with init (its name) and starts (name -> cost). */
+function bestOf(runs) {
+  let best = runs[0];
+  for (const r of runs) if (r.cost < best.cost) best = r;
+  return { ...best.r, init: best.name, starts: Object.fromEntries(runs.map((r) => [r.name, r.cost])) };
+}
+
+/** The full browser fit: match.Matcher.fit — LM from the first STARTS entry, from the others only
+ *  while the runs get stuck (STUCK); the lowest cost wins. pairs — the prepareFitPair objects.
+ *  A cancelled start returns its partial result as is. */
 export function fit(pairs, iters = 30, hooks = {}) {
-  return lm(makeResidual(pairs), zeroInit(), iters, hooks);
+  const runs = [];
+  for (let s = 0; s < STARTS.length; s++) {
+    const r = lm(makeResidual(pairs), startInit(STARTS[s][1]), iters, startHooks(hooks, s, iters));
+    if (r.cancelled) return r;
+    runs.push({ name: STARTS[s][0], cost: r.cost, r });
+    if (r.iterations.run >= STUCK) break;
+  }
+  return bestOf(runs);
 }
 
 /** fit with an external parallel Jacobian (lib/fit-pool.js) — same result as fit(). */
-export function fitAsync(pairs, iters, hooks, jacobian) {
-  return lmAsync(makeResidual(pairs), zeroInit(), iters, hooks, jacobian);
+export async function fitAsync(pairs, iters, hooks, jacobian) {
+  const runs = [];
+  for (let s = 0; s < STARTS.length; s++) {
+    const r = await lmAsync(makeResidual(pairs), startInit(STARTS[s][1]), iters, startHooks(hooks, s, iters), jacobian);
+    if (r.cancelled) return r;
+    runs.push({ name: STARTS[s][0], cost: r.cost, r });
+    if (r.iterations.run >= STUCK) break;
+  }
+  return bestOf(runs);
 }
 
 // ---------- the control (match.control + fit.control + make_pack.curve_from, spec §3.3/§6.8) ----------
