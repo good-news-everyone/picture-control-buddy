@@ -504,8 +504,8 @@ section.block { padding: 88px 0; border-top: 1px solid var(--line); }
   /* fitting: source -> NEF + NP3 / target curtain */
   let frame = "DSC_8100";
   // dE2000 from the wizard report (fit "SA" over 8 pairs of renders/sa): [with the profile, camera neutral]
-  const DE = { DSC_6015: [2.70, 8.75], DSC_6423: [2.85, 9.32], DSC_6501: [3.93, 7.40], DSC_6979: [2.81, 8.07],
-               DSC_7026: [2.59, 7.17], DSC_8100: [2.14, 7.25], DSC_8152: [2.45, 7.26] };
+  const DE = { DSC_6015: [2.52, 8.75], DSC_6423: [2.53, 9.32], DSC_6501: [3.73, 7.40], DSC_6979: [2.79, 8.07],
+               DSC_7026: [2.56, 7.17], DSC_8100: [2.06, 7.25], DSC_8152: [2.29, 7.26] };
   const pairBa = document.getElementById("pair-ba"), pr = document.getElementById("pair-range");
   pr.addEventListener("input", () => pairBa.style.setProperty("--pos", pr.value + "%"));
   const num = (v) => v.toLocaleString(currentLang(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
